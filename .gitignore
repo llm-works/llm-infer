@@ -2,6 +2,7 @@ __pycache__
 .archive
 .archives
 .claude/
+.GRADING.md
 Makefile.local
 .installed_packages
 .coverage

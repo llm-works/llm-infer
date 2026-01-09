@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-infer"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A readable LLM inference server implementing paged attention and continuous batching"
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -85,6 +85,11 @@ exclude_lines = [
 
 [project.scripts]
 llm-infer = "llm_infer.cli.cli:main"
+
+[tool.setuptools_scm]
+# Version derived from git tags (e.g., v0.1.0 -> 0.1.0)
+# Fallback for builds without git (e.g., Docker)
+fallback_version = "0.0.0.dev0"
 
 [tool.setuptools.packages.find]
 where = ["."]
