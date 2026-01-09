@@ -14,7 +14,7 @@ llm-infer query "What is the capital of France?"
 
 ## Configuration
 
-Configuration uses YAML files with the primary config at `etc/inference.yaml`.
+Configuration uses YAML files with the primary config at `etc/llm-infer.yaml`.
 
 ### Configuration Priority
 
@@ -27,7 +27,7 @@ Model selection follows this priority:
 ### Main Configuration File
 
 ```yaml
-# etc/inference.yaml
+# etc/llm-infer.yaml
 
 # Model location and selection
 models:
@@ -141,7 +141,7 @@ Start the inference server.
 
 ```bash
 # With config file
-llm-infer serve --config etc/inference.yaml
+llm-infer serve --config etc/llm-infer.yaml
 
 # With model path
 llm-infer serve --model-path /path/to/model
@@ -151,9 +151,11 @@ llm-infer serve --model qwen2.5-1.5b
 ```
 
 Options:
-- `--config, -c`: Config file path (default: `etc/inference.yaml`)
+- `--config, -c`: Config file path (default: `etc/llm-infer.yaml`)
+- `--engine`: Inference backend (`native` | `vllm`)
 - `--model-path`: Direct path to model directory
 - `--model, -m`: Model name to load
+- `--handler`: Request handler type (`sequential` | `bounded`)
 - `--port, -p`: Override server port
 - `--host`: Override server host
 

@@ -855,7 +855,7 @@ explicitly want raw completion behavior.
 
 **Date:** 2025-12-09
 
-**Files:** `llm_infer/serving/dispatch/handlers/bounded.py`, `etc/inference.yaml`
+**Files:** `llm_infer/serving/dispatch/handlers/bounded.py`, `etc/llm-infer.yaml`
 
 **Problem:** Streaming requests ran sequentially, blocking other requests. When multiple agents hit
 the server concurrently, each streaming request had to complete before the next could start. With
@@ -872,7 +872,7 @@ handled in a separate single-request path.
 decode loop:
 
 ```yaml
-# etc/inference.yaml
+# etc/llm-infer.yaml
 dispatch:
   handler: bounded
   max_pending: 10

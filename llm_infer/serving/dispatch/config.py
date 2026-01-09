@@ -2,11 +2,9 @@
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from appinfra.app.fastapi import ApiConfig, UvicornConfig
-from appinfra.yaml import load as yaml_load
 
 
 @dataclass
@@ -263,46 +261,6 @@ class InferenceConfig:
             vllm=cls._parse_vllm_config(engines_data.get("vllm", {}) or {}),
         )
 
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> "InferenceConfig":
-        """Load config from YAML file using appinfra yaml loader."""
-        path = Path(path).resolve()
-        # Use etc/ directory's parent as project root for !include resolution
-        project_root = path.parent.parent
-
-        with open(path) as f:
-            data = yaml_load(f, current_file=path, project_root=project_root)
-
-        return cls.from_dict(data)
-
-    @classmethod
-    def load(cls, config_path: str | Path | None = None) -> "InferenceConfig":
-        """
-        Load configuration with fallback to defaults.
-
-        Args:
-            config_path: Path to config file. If None, tries etc/inference.yaml.
-
-        Returns:
-            Loaded configuration.
-        """
-        if config_path is None:
-            # Try default locations
-            candidates = [
-                Path("etc/inference.yaml"),
-                Path(__file__).parent.parent.parent / "etc" / "inference.yaml",
-            ]
-            for candidate in candidates:
-                if candidate.exists():
-                    config_path = candidate
-                    break
-
-        if config_path and Path(config_path).exists():
-            return cls.from_yaml(config_path)
-
-        # Return defaults
-        return cls()
-
     def apply_env_overrides(self) -> "InferenceConfig":
         """Apply environment variable overrides."""
         # Native engine overrides
@@ -334,6 +292,7 @@ class InferenceConfig:
         handler: str | None = None,
         log_file: str | None = None,
         model_path: str | None = None,
+        engine: str | None = None,
     ) -> "InferenceConfig":
         """Apply CLI argument overrides."""
         if host is not None:
@@ -346,4 +305,6 @@ class InferenceConfig:
             self.api.log_file = log_file
         if model_path is not None:
             self.model.path = model_path
+        if engine is not None:
+            self.backends.engine = engine
         return self

@@ -55,7 +55,7 @@ Entry point for all operations. Built on the `appinfra` framework.
 | `llm-infer metrics` | Display server metrics |
 | `llm-infer compat` | Generate/check compatibility specs |
 
-Configuration is loaded from YAML files (default: `etc/inference.yaml`).
+Configuration is loaded from YAML files (default: `etc/llm-infer.yaml`).
 
 ### Serving Layer (`llm_infer/serving/`)
 
