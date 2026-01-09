@@ -10,11 +10,10 @@ If you discover a security vulnerability in this project, please report it respo
 
 1. **Do not** open a public GitHub issue for security vulnerabilities.
 
-2. **Email** the maintainers directly with:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Any suggested fixes (optional)
+2. **Use GitHub's private vulnerability reporting**:
+   - Go to the [Security Advisories](https://github.com/serendip-ml/llm-infer/security/advisories/new) page
+   - Click "Report a vulnerability"
+   - Include: description, steps to reproduce, potential impact, and any suggested fixes
 
 3. **Expected response time**: We aim to acknowledge reports within 48 hours and provide a more
    detailed response within 7 days.
