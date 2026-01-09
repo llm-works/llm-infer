@@ -21,6 +21,9 @@ class RunningRequest:
     engine_request: "EngineRequest"  # Engine request with KV cache
     output_tokens: list[int] = field(default_factory=list)
     last_streamed_idx: int = 0  # Track tokens already sent to stream
+    last_streamed_len: int = (
+        0  # Track characters already streamed (for incremental decode)
+    )
 
 
 class BoundedQueueHandler(RequestHandler):
@@ -255,20 +258,35 @@ class BoundedQueueHandler(RequestHandler):
         return None
 
     def _stream_new_tokens(self) -> None:
-        """Stream new tokens for streaming requests in the batch."""
+        """Stream new tokens for streaming requests in the batch.
+
+        Uses incremental character-based decoding to handle multi-byte UTF-8
+        characters (like emojis) that may span multiple tokens. Decodes all
+        accumulated tokens and streams only the new characters.
+
+        For byte-level tokenizers (like Qwen), incomplete UTF-8 sequences
+        appear as replacement characters (U+FFFD). We filter these out and
+        don't advance our position past them, so when the complete character
+        is decoded on the next token, we'll yield it correctly.
+        """
         if self._response_q is None:
             return
         for req_id, running in self.running.items():
             if not running.request.stream:
                 continue
-            new_tokens = running.engine_request.output_tokens[
-                running.last_streamed_idx :
-            ]
-            for token_id in new_tokens:
-                token_text = self.engine.decode_tokens([token_id])
-                chunk = StreamChunk(id=req_id, token=token_text)
+            # Skip if no new tokens
+            if len(running.engine_request.output_tokens) <= running.last_streamed_idx:
+                continue
+            # Decode all tokens and extract only new characters
+            full_text = self.engine.decode_tokens(running.engine_request.output_tokens)
+            new_text = full_text[running.last_streamed_len :]
+            # Filter out replacement characters and only advance by clean text length
+            clean_text = new_text.replace("\ufffd", "")
+            if clean_text:
+                chunk = StreamChunk(id=req_id, token=clean_text)
                 self._response_q.put(chunk)
             running.last_streamed_idx = len(running.engine_request.output_tokens)
+            running.last_streamed_len += len(clean_text)
 
     def _collect_finished(self) -> list[Response]:
         """Collect responses from finished requests and clean up."""
@@ -310,18 +328,27 @@ class BoundedQueueHandler(RequestHandler):
         """Build set of stop token IDs from EOS token and stop sequences."""
         return self.engine.build_stop_token_ids(request.stop_sequences)
 
-    def _stream_first_token(self, request: Request, engine_request: Any) -> int:
-        """Stream first token for streaming requests. Returns last_streamed_idx."""
-        if not request.stream or self._response_q is None:
-            return 0
-        if not engine_request.output_tokens:
-            return 0
+    def _stream_first_token(
+        self, request: Request, engine_request: Any
+    ) -> tuple[int, int]:
+        """Stream first token for streaming requests.
 
-        first_token = engine_request.output_tokens[0]
-        token_text = self.engine.decode_tokens([first_token])
-        chunk = StreamChunk(id=request.id, token=token_text)
-        self._response_q.put(chunk)
-        return 1
+        Returns:
+            Tuple of (last_streamed_idx, last_streamed_len) for tracking.
+        """
+        if not request.stream or self._response_q is None:
+            return (0, 0)
+        if not engine_request.output_tokens:
+            return (0, 0)
+
+        # Decode all tokens (just 1 at this point) to get proper text
+        # Filter replacement chars and only count clean text length
+        token_text = self.engine.decode_tokens(engine_request.output_tokens)
+        clean_text = token_text.replace("\ufffd", "")
+        if clean_text:
+            chunk = StreamChunk(id=request.id, token=clean_text)
+            self._response_q.put(chunk)
+        return (len(engine_request.output_tokens), len(clean_text))
 
     def _create_engine_request(
         self, request: Request, tokens: list[int], ctx: Any
@@ -361,12 +388,15 @@ class BoundedQueueHandler(RequestHandler):
 
             engine_request = self._create_engine_request(request, tokens, ctx)
             self._run_prefill(engine_request)
-            last_streamed_idx = self._stream_first_token(request, engine_request)
+            streamed_idx, streamed_len = self._stream_first_token(
+                request, engine_request
+            )
 
             return RunningRequest(
                 request=request,
                 engine_request=engine_request,
-                last_streamed_idx=last_streamed_idx,
+                last_streamed_idx=streamed_idx,
+                last_streamed_len=streamed_len,
             )
         except Exception:
             return None
