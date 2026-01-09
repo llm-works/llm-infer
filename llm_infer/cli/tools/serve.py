@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
 
@@ -9,7 +10,7 @@ from appinfra.app.tools import Tool, ToolConfig
 class ServeTool(Tool):
     """Start the inference server."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(name="serve", help_text="Start the inference server")
         super().__init__(parent, config)
 
@@ -85,13 +86,13 @@ class ServeTool(Tool):
         handler = self.args.handler or dispatch_cfg.get("handler", "bounded")
         return host, port, handler
 
-    def _import_server_deps(self):
+    def _import_server_deps(self) -> tuple[Any, Any]:
         """Import server dependencies."""
         from ...serving.dispatch import InferenceConfig, run_server
 
         return InferenceConfig, run_server
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         raw_config = self._get_raw_config()
         self._configure_logging(raw_config)
 
@@ -185,7 +186,7 @@ class ServeTool(Tool):
         return None
 
     def _resolve_from_selection_file(
-        self, selection, models_dir: Path
+        self, selection: Any, models_dir: Path
     ) -> tuple[Path | None, bool]:
         """Resolve model from selection file. Returns (path, was_attempted)."""
         if not selection.path:
@@ -218,7 +219,7 @@ class ServeTool(Tool):
             return None, True
         return None, False
 
-    def _resolve_model_path(self, config) -> Path | None:
+    def _resolve_model_path(self, config: Any) -> Path | None:
         """Resolve model path from CLI, selection file, or config default."""
         models_dir = self._get_models_dir()
 

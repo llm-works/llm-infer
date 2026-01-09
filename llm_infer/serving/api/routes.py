@@ -4,6 +4,8 @@ Uses appinfra's FastAPI framework with IPC channel for subprocess communication.
 """
 
 import uuid
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -12,7 +14,9 @@ from ..dispatch.types import Request as InternalRequest
 from .schemas import GenerateRequest, GenerateResponse, HealthResponse
 
 
-def create_health_handler(ready_flag=None):
+def create_health_handler(
+    ready_flag: Any = None,
+) -> Callable[[], Coroutine[Any, Any, HealthResponse]]:
     """Create health check handler with optional ready flag.
 
     Args:
@@ -62,7 +66,7 @@ def _format_metrics_response(response: MetricsResponse) -> dict:
     }
 
 
-async def _handle_generate(body: GenerateRequest, ipc) -> GenerateResponse:
+async def _handle_generate(body: GenerateRequest, ipc: Any) -> GenerateResponse:
     """Handle generate request submission and response."""
     request_id = str(uuid.uuid4())
     internal_request = InternalRequest(

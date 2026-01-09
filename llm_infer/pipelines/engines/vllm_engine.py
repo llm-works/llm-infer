@@ -342,7 +342,7 @@ class VLLMEngine:
             return str(outputs[0].outputs[0].text)
         return ""
 
-    def _build_streaming_result(self, outputs, prompt: str) -> VLLMStreamingResult:
+    def _build_streaming_result(self, outputs: Any, prompt: str) -> VLLMStreamingResult:
         """Build VLLMStreamingResult from generation outputs."""
         result = VLLMStreamingResult()
         result.prompt_tokens = len(self._tokenizer.encode(prompt))

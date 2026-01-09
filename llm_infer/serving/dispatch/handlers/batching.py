@@ -8,7 +8,7 @@ For batched decode only, use BoundedQueueHandler with max_batch_size > 1.
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..handler import RequestHandler
 from ..types import Request, RequestStatus, Response
@@ -25,7 +25,7 @@ class RunningRequest:
     output_tokens: list[int] = field(default_factory=list)
     is_finished: bool = False
 
-    def get_output(self, tokenizer) -> str:
+    def get_output(self, tokenizer: Any) -> str:
         """Decode output tokens to string."""
         result: str = tokenizer.decode(self.output_tokens, skip_special_tokens=True)
         return result

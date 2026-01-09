@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -183,7 +184,7 @@ class MarlinAWQBackend:
         self._cache[cache_key] = cached
         return cached
 
-    def _call_marlin_gemm(self, x: Tensor, mw) -> Tensor:
+    def _call_marlin_gemm(self, x: Tensor, mw: Any) -> Tensor:
         """Call Marlin GEMM kernel with prepared weights."""
         return ops.gptq_marlin_gemm(
             x,

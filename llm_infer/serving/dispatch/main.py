@@ -167,7 +167,7 @@ def _create_native_engine(config: InferenceConfig, lg: Any = None) -> Any:
     return InferenceEngine(lg, engine_config, on_progress=on_progress)
 
 
-def _build_vllm_config(model_path: str, vllm_cfg) -> Any:
+def _build_vllm_config(model_path: str, vllm_cfg: Any) -> Any:
     """Build VLLMConfig from dispatch config."""
     from ...pipelines.engines.vllm_engine import VLLMConfig
 

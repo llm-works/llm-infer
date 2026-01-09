@@ -36,6 +36,7 @@ Example:
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn.functional as F  # noqa: N812
@@ -163,7 +164,7 @@ class TransformerModel(nn.Module):
             )
         return nn.Linear(in_features, out_features, bias=bias)
 
-    def _create_attn_projs(self, cfg) -> dict[str, nn.Module]:
+    def _create_attn_projs(self, cfg: Any) -> dict[str, nn.Module]:
         """Create attention projection layers."""
         kv_dim = cfg.num_kv_heads * cfg.head_dim
         return {

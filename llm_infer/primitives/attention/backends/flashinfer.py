@@ -1,6 +1,6 @@
 """FlashInfer attention backend."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import Tensor
@@ -184,7 +184,7 @@ class FlashInferBackend:
 
     def _plan_prefill(
         self,
-        wrapper,
+        wrapper: Any,
         q: Tensor,
         kv_indptr: Tensor,
         kv_indices: Tensor,

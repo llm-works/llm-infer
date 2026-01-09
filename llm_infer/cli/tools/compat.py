@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 from appinfra.app.tools import Tool, ToolConfig
@@ -16,7 +17,7 @@ from ...compat import check_spec_accuracy, generate_compat_spec, get_spec_header
 class CompatTool(Tool):
     """Generate and validate engine compatibility specification."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="compat",
             aliases=["c"],
@@ -32,7 +33,7 @@ class CompatTool(Tool):
         template = compat_cfg.get("template") if compat_cfg else None
         return Path(template) if template else None
 
-    def _add_generate_args(self, subparsers) -> None:
+    def _add_generate_args(self, subparsers: Any) -> None:
         """Add generate subcommand arguments."""
         gen = subparsers.add_parser(
             "generate", aliases=["gen"], help="Generate compatibility spec"
@@ -51,7 +52,7 @@ class CompatTool(Tool):
             help="Output format (default: yaml)",
         )
 
-    def _add_check_args(self, subparsers) -> None:
+    def _add_check_args(self, subparsers: Any) -> None:
         """Add check subcommand arguments."""
         check = subparsers.add_parser(
             "check", help="Verify spec file matches implementation"
@@ -68,7 +69,7 @@ class CompatTool(Tool):
         self._add_generate_args(subparsers)
         self._add_check_args(subparsers)
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         if self.args.command in ("generate", "gen"):
             return self._generate()
         elif self.args.command == "check":
