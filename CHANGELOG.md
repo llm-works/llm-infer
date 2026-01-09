@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Pin minimum versions for transitive dependencies to fix CVEs:
+  - aiohttp >= 3.13.3 (CVE-2025-69223 through CVE-2025-69230)
+  - filelock >= 3.20.1 (CVE-2025-68146)
+  - urllib3 >= 2.6.3 (CVE-2026-21441)
+  - werkzeug >= 3.1.5 (CVE-2026-21860)
+
 ### Added
 - Initial release
 - Native inference engine with paged attention and continuous batching
