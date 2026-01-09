@@ -1,0 +1,15 @@
+# Uvicorn Server Configuration
+
+workers: 1                    # Number of worker processes
+timeout_keep_alive: 5         # Keep-alive timeout in seconds
+limit_concurrency: null       # Max concurrent connections (null = unlimited)
+limit_max_requests: null      # Max requests before worker restart (null = unlimited)
+backlog: 2048                 # Socket backlog size
+
+# Logging
+log_level: warning            # Log level: critical, error, warning, info, debug, trace
+access_log: false             # Enable access logging
+
+# SSL/TLS (optional)
+ssl_keyfile: null             # Path to SSL key file
+ssl_certfile: null            # Path to SSL certificate file

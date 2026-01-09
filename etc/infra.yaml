@@ -1,0 +1,58 @@
+logging:
+  level: debug
+  location: 1
+  location_color: gray-5
+
+  handlers:
+    console_text:
+      type: console              # Handler type (console, file, database, rotating_file, timed_rotating_file)
+      enabled: true              # Enable this handler
+      level: trace               # More detailed than global - should be restricted to INFO
+      format: text               # Format: text, json
+      stream: stdout             # Output stream: stdout, stderr
+      colors: true               # Enable colored output
+      micros: false              # Show microseconds (overwrites global setting)
+
+    file:
+      type: file                 # Handler type
+      enabled: true              # Enable file logging
+      level: trace               # More detailed than global - should be restricted to INFO
+      format: text               # Format: text, json (set to json for JSON output)
+      file: !path "../.logs/app.log"       # Output file path (same for both text and JSON)
+      rotation: size             # Rotation: none, size, timed
+      max_size: "50MB"           # Max file size before rotation
+      backup_count: 5            # Number of backup files to keep
+
+pgserver:
+  version: 16                  # PostgreSQL major version (used for compatibility checks)
+  name: infra-pg               # Server identifier/name for logging and identification
+  port: 7432                   # PostgreSQL port (default: 5432, can be overridden with INFRA_PGSERVER_PORT)
+  user: postgres               # Database username (can be overridden with INFRA_PGSERVER_USER)
+  pass: ''                     # Database password (RECOMMENDED: use environment variable)
+
+dbs:
+  main:
+    url: "postgresql://${pgserver.user}:${pgserver.pass}@$127.0.0.1:${pgserver.port}/main"
+    create_db: true             # Create database if it doesn't exist
+    readonly: false             # Read-write mode (default)
+    # Using default pool settings from infra/db/pg/pg.py
+
+  # Test database - used for unit tests and development
+  unittest:
+    url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/infer-unittest"
+    readonly: false             # Read-write for tests
+    create_db: true             # Auto-create test database
+    # Custom pool settings for test environment
+    pool_size: 5                # Connection pool size (matches default)
+    max_overflow: 10            # Maximum overflow connections (matches default)
+    # Other pool defaults: pool_timeout=30, pool_recycle=3600, pool_pre_ping=true, echo=false
+
+  # Read-only test database - used for read-only tests and development
+  unittest_ro:
+    url: "postgresql://${pgserver.user}:${pgserver.pass}@127.0.0.1:${pgserver.port}/infer-unittest"
+    readonly: true              # Read-only mode - no writes allowed
+    create_db: false            # Don't create database (use existing test DB)
+    # Custom pool settings optimized for read-only workload
+    pool_size: 3                # Smaller pool for read-only operations
+    max_overflow: 5             # Smaller overflow for read-only operations
+    # Other pool defaults: pool_timeout=30, pool_recycle=3600, pool_pre_ping=true, echo=false

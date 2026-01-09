@@ -1,0 +1,153 @@
+# Inference Server Configuration
+
+# Model configuration
+models:
+  location: !path ../.models
+
+  # Model selection
+  # Priority: CLI --model-path > CLI --model > selection file > selection default
+  selection:
+    path: !path ~/ops/models/selected.yaml  # Optional: ops-controlled selection file
+    default: qwen2.5-1.5b  # Fallback model name
+
+# Backend configuration
+# Multi-level backend selection for flexibility in inference optimization:
+# - engine: Full inference engine (native | vllm)
+# - model: Model implementation (native | gptqmodel) - only if engine=native
+# - linear: Kernel implementation (pytorch | marlin) - only if model=native
+#
+# Higher levels override lower levels:
+# - engine=vllm → uses engines.vllm config, ignores model/linear settings
+# - engine=native, model=gptqmodel → ignores linear setting
+backends:
+  engine: vllm        # native | vllm
+  model: native       # native | gptqmodel
+  linear: marlin      # pytorch | marlin
+
+# Engine configurations
+# Contains settings for each available engine backend.
+# The active engine is selected via backends.engine above.
+engines:
+  # Native engine - custom implementation for learning/reference
+  native:
+    # KV cache settings
+    num_blocks: 1024        # Number of KV cache blocks
+    block_size: 16          # Tokens per block
+
+    # Batching
+    max_batch_size: 4       # Maximum sequences to batch together
+
+    # Device settings
+    device: cuda            # Device: cuda, cpu
+    dtype: float16          # Data type: float16, bfloat16, float32
+
+    # Attention backend: auto, flashinfer, naive
+    # - auto: Use FlashInfer if available, else naive PyTorch (default)
+    # - flashinfer: Use FlashInfer (fails if not installed)
+    # - naive: Use naive PyTorch implementation (slow, for debugging)
+    attention_backend: flashinfer
+
+    # torch.compile: Compile model for reduced CPU overhead
+    # - First inference is slow (~30-60s) due to compilation
+    # - Subsequent inferences are faster with lower CPU usage
+    # - NOTE: Incompatible with FlashInfer backend (pin_memory not supported by inductor)
+    torch_compile: false
+
+    # Warmup: Run initial query on startup to trigger torch.compile
+    # Useful when torch_compile is enabled to avoid slow first request
+    warmup: true
+
+  # vLLM engine - production-grade with continuous batching, PagedAttention
+  vllm:
+    # Memory management
+    gpu_memory_utilization: 0.9  # Fraction of GPU memory to use (0-1)
+    cpu_offload_gb: 0            # Offload to CPU memory (GB)
+    swap_space: 4                # CPU swap space for KV cache (GB)
+    max_model_len: 16384         # Max context length (null = use model default, may OOM)
+
+    # Parallelism
+    tensor_parallel_size: 1      # Number of GPUs for tensor parallelism
+    pipeline_parallel_size: 1    # Number of GPUs for pipeline parallelism
+
+    # Scheduling
+    max_num_seqs: 256            # Maximum concurrent sequences
+    max_num_batched_tokens: null # Max tokens per batch (auto if null)
+    scheduling_policy: fcfs      # fcfs | priority
+
+    # Caching
+    enable_prefix_caching: true  # Reuse KV cache for common prefixes
+    kv_cache_dtype: auto         # KV cache data type
+
+    # Performance tuning
+    enforce_eager: false         # Disable CUDA graph (for debugging)
+    disable_custom_all_reduce: false
+
+    # Quantization (auto-detected from model, override if needed)
+    quantization: null           # awq | gptq | fp8 | null (auto)
+
+    # Speculative decoding (advanced)
+    speculative_model: null      # Draft model path for speculative decoding
+    num_speculative_tokens: null # Tokens to speculate
+
+    # Dtype and trust settings
+    dtype: auto                  # auto | float16 | bfloat16 | float32
+    trust_remote_code: true      # Trust custom model code from HuggingFace
+
+    # Warmup: Run initial query on startup to eliminate cold-start latency
+    # First vLLM inference is slow due to CUDA kernel warmup and internal caching
+    warmup: true
+
+# Dispatch configuration
+dispatch:
+  # Handler type: sequential, bounded, batching
+  handler: bounded
+
+  # Maximum pending requests before rejection (bounded/batching handlers)
+  max_pending: 10
+
+  # Engine loop settings
+  poll_timeout: 0.01      # Queue poll timeout in seconds
+
+  # Batched streaming: Allow streaming requests to batch with other requests
+  # - true: Streaming requests join the batch (better throughput, slight latency increase)
+  # - false: Streaming requests run sequentially (default, lowest latency for single stream)
+  batch_streaming: true
+
+# API configuration
+api:
+  host: 0.0.0.0
+  port: 8000
+
+  # Response timeout for client requests (seconds)
+  response_timeout: 60.0
+
+  # Uvicorn log isolation
+  log_file: null          # Set to path to isolate uvicorn logs (e.g., .logs/uvicorn.log)
+
+  # Uvicorn server settings
+  uvicorn: !include "./uvicorn.yaml"
+
+# Third-party library logging levels
+# Values: debug, info, warning, error
+#
+# Note: Some third-party output cannot be suppressed cleanly:
+# - PyTorch C++ logs ("I1204... compile_threads") - uses internal glog, not Python logging
+# - HuggingFace tokenizers ("loading file...") - Rust library, prints to stdout
+# - HuggingFace transformers ("Special tokens...") - uses warnings.warn before we can filter
+#
+# These settings control Python-level logging where possible.
+third_party_logging:
+  # PyTorch Python-side loggers (torch._inductor, torch._dynamo, torch.distributed)
+  torch: warning
+
+  # HuggingFace transformers Python logger
+  transformers: error
+
+# Compatibility specification
+compat:
+  # Template file for generating compat spec
+  # Used by: infer compat generate
+  template: !path ./compat_template.yaml
+
+# Appinfra logging configuration
+logging: !include "./infra.yaml#logging"
