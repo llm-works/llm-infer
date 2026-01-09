@@ -229,7 +229,7 @@ def _register_model_routes(router: APIRouter, model_name: str) -> None:
 def _register_completion_routes(router: APIRouter, model_name: str) -> None:
     """Register completion endpoints."""
 
-    @router.post("/chat/completions")
+    @router.post("/chat/completions", response_model=None)
     async def chat_completions(
         body: ChatCompletionRequest, request: Request
     ) -> ChatCompletionResponse | StreamingResponse:
@@ -243,7 +243,7 @@ def _register_completion_routes(router: APIRouter, model_name: str) -> None:
             )
         return await _handle_chat_non_streaming(request_id, body, model_name, ipc)
 
-    @router.post("/completions")
+    @router.post("/completions", response_model=None)
     async def completions(
         body: CompletionRequest, request: Request
     ) -> CompletionResponse | StreamingResponse:
