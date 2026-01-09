@@ -1,15 +1,10 @@
 """Main entry point for the inference server."""
 
-import logging
 import multiprocessing as mp
 import signal
-import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    import argparse
+from typing import Any
 
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
@@ -509,71 +504,12 @@ class BootSequence:
 # ---------------------------------------------------------------------------
 
 
-def run_server(
-    lg: Any,
-    config: InferenceConfig | None = None,
-    host: str | None = None,
-    port: int | None = None,
-) -> None:
-    """Run the inference server (main entry point).
+def run_server(lg: Any, config: InferenceConfig) -> None:
+    """Run the inference server.
 
     Args:
         lg: Logger instance.
-        config: Inference configuration.
-        host: Override host from config.
-        port: Override port from config.
+        config: Inference configuration (required).
     """
-    if config is None:
-        config = InferenceConfig.load()
-    if host is not None:
-        config.api.host = host
-    if port is not None:
-        config.api.port = port
-
     boot = BootSequence(config, lg)
     boot.run()
-
-
-def _setup_argparser() -> "argparse.ArgumentParser":
-    """Setup CLI argument parser."""
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Inference server with process isolation"
-    )
-    parser.add_argument("--config", type=Path, help="Path to config file")
-    parser.add_argument("--host", help="Host to bind to")
-    parser.add_argument("--port", type=int, help="Port to bind to")
-    parser.add_argument(
-        "--handler", choices=["sequential", "bounded"], help="Request handler type"
-    )
-    parser.add_argument("--model-path", help="Path to model weights")
-    parser.add_argument("--log-file", help="Log file for uvicorn output")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
-    return parser
-
-
-def main() -> int:
-    """CLI entry point."""
-    args = _setup_argparser().parse_args()
-
-    level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
-
-    config = InferenceConfig.load(args.config)
-    config.apply_env_overrides()
-    config.apply_cli_overrides(
-        host=args.host,
-        port=args.port,
-        handler=args.handler,
-        log_file=args.log_file,
-        model_path=args.model_path,
-    )
-    run_server(config)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
