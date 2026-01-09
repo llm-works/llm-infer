@@ -73,7 +73,7 @@ pip install -e .
 llm-infer serve --model-path /path/to/model
 
 # Using a config file
-llm-infer serve --config etc/inference.yaml
+llm-infer serve --config etc/llm-infer.yaml
 ```
 
 ### Query the Server
@@ -97,7 +97,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## Configuration
 
-Create `etc/inference.yaml`:
+Create `etc/llm-infer.yaml`:
 
 ```yaml
 serve:

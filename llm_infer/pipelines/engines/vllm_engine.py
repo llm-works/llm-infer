@@ -87,7 +87,7 @@ class VLLMConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], model_path: str) -> VLLMConfig:
-        """Create config from dictionary (vllm section of inference.yaml)."""
+        """Create config from dictionary (vllm section of llm-infer.yaml)."""
         return cls(
             model_path=model_path,
             gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),

@@ -4,7 +4,6 @@ import argparse
 from pathlib import Path
 
 from appinfra.app.tools import Tool, ToolConfig
-from appinfra.yaml import load as yaml_load
 
 
 class ServeTool(Tool):
@@ -15,11 +14,6 @@ class ServeTool(Tool):
         super().__init__(parent, config)
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--config",
-            type=Path,
-            help="Path to config file (default: etc/inference.yaml)",
-        )
         parser.add_argument("--host", help="Host to bind to")
         parser.add_argument("--port", type=int, help="Port to bind to")
         parser.add_argument(
@@ -37,33 +31,19 @@ class ServeTool(Tool):
         parser.add_argument(
             "--handler", choices=["sequential", "bounded"], help="Request handler type"
         )
+        parser.add_argument(
+            "--engine", choices=["native", "vllm"], help="Inference engine backend"
+        )
 
-    def _load_yaml_config(self) -> dict:
-        """Load raw config dict from YAML file."""
-        config_path = getattr(self.args, "config", None)
-        if config_path is None:
-            candidates = [
-                Path("etc/inference.yaml"),
-                Path(__file__).parent.parent.parent.parent / "etc" / "inference.yaml",
-            ]
-            for candidate in candidates:
-                if candidate.exists():
-                    config_path = candidate
-                    break
-
-        if config_path and Path(config_path).exists():
-            with open(config_path) as f:
-                result: dict = yaml_load(
-                    f, current_file=config_path, project_root=config_path.parent.parent
-                )
-                return result
-        return {}
+    def _get_raw_config(self) -> dict:
+        """Get raw config dict from app (loaded by appinfra, respects --etc-dir)."""
+        return dict(self.app.config) if self.app.config else {}
 
     def _get_models_dir(self) -> Path:
         """Get models directory from args or config."""
         if self.args.models_dir:
             return Path(self.args.models_dir)
-        raw_config = self._load_yaml_config()
+        raw_config = self._get_raw_config()
         location: str = raw_config.get("models", {}).get("location", ".models")
         return Path(location)
 
@@ -112,7 +92,7 @@ class ServeTool(Tool):
         return InferenceConfig, run_server
 
     def run(self, **kwargs) -> int:
-        raw_config = self._load_yaml_config()
+        raw_config = self._get_raw_config()
         self._configure_logging(raw_config)
 
         model_name = self._get_model_name_early(raw_config)
@@ -123,7 +103,7 @@ class ServeTool(Tool):
         )
 
         InferenceConfig, run_server = self._import_server_deps()  # noqa: N806
-        config = InferenceConfig.load(self.args.config)
+        config = InferenceConfig.from_dict(raw_config)
         config.apply_env_overrides()
         model_path = self._resolve_model_path(config)
         if model_path is None:
@@ -134,6 +114,7 @@ class ServeTool(Tool):
             port=self.args.port,
             handler=self.args.handler,
             model_path=str(model_path),
+            engine=self.args.engine,
         )
         run_server(self.lg, config)
         return 0
