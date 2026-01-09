@@ -323,7 +323,9 @@ class BoundedQueueHandler(RequestHandler):
         self._response_q.put(chunk)
         return 1
 
-    def _create_engine_request(self, request: Request, tokens: list[int], ctx: Any) -> Any:
+    def _create_engine_request(
+        self, request: Request, tokens: list[int], ctx: Any
+    ) -> Any:
         """Create engine request with sampling params and stop tokens."""
         from ....pipelines.scheduler import Request as EngineRequest
 

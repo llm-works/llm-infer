@@ -15,7 +15,9 @@ if TYPE_CHECKING:
 
 
 def _process_incoming_request(
-    handler: RequestHandler, request: Any, response_q: mp.Queue  # type: ignore[type-arg]
+    handler: RequestHandler,
+    request: Any,
+    response_q: mp.Queue,  # type: ignore[type-arg]
 ) -> None:
     """Process a single incoming request from the queue."""
     if isinstance(request, MetricsRequest):
