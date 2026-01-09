@@ -515,7 +515,7 @@ class StreamingResult:
         self._started = False
         self._finished = False
         self._completion_tokens = 0
-        self._prev_decoded_len = 0  # For incremental decoding
+        self._last_yielded_len = 0  # Characters already yielded
 
     @property
     def prompt_tokens(self) -> int:
@@ -545,14 +545,24 @@ class StreamingResult:
 
         This preserves spaces correctly for SentencePiece tokenizers that
         encode spaces as part of tokens (e.g., '▁world').
+
+        For byte-level tokenizers (like Qwen), incomplete UTF-8 sequences
+        appear as replacement characters (U+FFFD). We filter these out and
+        don't advance our position past them, so when the complete character
+        is decoded on the next token, we'll yield it correctly.
         """
         self._completion_tokens += 1
         full_text = self._tokenizer.decode(
             self._request.output_tokens, skip_special_tokens=True
         )
-        new_text = full_text[self._prev_decoded_len :]
-        self._prev_decoded_len = len(full_text)
-        return new_text
+        new_text = full_text[self._last_yielded_len :]
+
+        # Filter out replacement characters (incomplete UTF-8 from byte-level tokenizers)
+        # Only advance position by clean text length so we don't skip the complete char
+        clean_text = new_text.replace("\ufffd", "")
+        self._last_yielded_len += len(clean_text)
+
+        return clean_text
 
     def _run_prefill_phase(self) -> str | None:
         """Run prefill and return first token if available."""
