@@ -152,8 +152,10 @@ llm-infer serve --model qwen2.5-1.5b
 
 Options:
 - `--config, -c`: Config file path (default: `etc/llm-infer.yaml`)
+- `--engine`: Inference backend (`native` | `vllm`)
 - `--model-path`: Direct path to model directory
 - `--model, -m`: Model name to load
+- `--handler`: Request handler type (`sequential` | `bounded`)
 - `--port, -p`: Override server port
 - `--host`: Override server host
 
