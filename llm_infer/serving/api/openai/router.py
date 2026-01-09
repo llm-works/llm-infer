@@ -3,7 +3,7 @@
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from ...dispatch.types import Request as InternalRequest
 
 
-def _raise_for_error_status(response) -> None:
+def _raise_for_error_status(response: Any) -> None:
     """Raise HTTPException if response indicates an error."""
     from ...dispatch.types import RequestStatus
 
@@ -50,7 +50,7 @@ def _raise_for_error_status(response) -> None:
         raise HTTPException(status_code=500, detail=response.error or "Internal error")
 
 
-def _build_completion_usage(response) -> ChatCompletionUsage:
+def _build_completion_usage(response: Any) -> ChatCompletionUsage:
     """Build usage stats from response."""
     return ChatCompletionUsage(
         prompt_tokens=response.prompt_tokens or 0,
@@ -63,7 +63,7 @@ async def _handle_chat_non_streaming(
     request_id: str,
     body: ChatCompletionRequest,
     model_name: str,
-    ipc,
+    ipc: Any,
 ) -> ChatCompletionResponse:
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id)
@@ -107,7 +107,7 @@ async def _stream_chat_completion(
     request_id: str,
     internal_request: "InternalRequest",
     model: str,
-    ipc,
+    ipc: Any,
 ) -> AsyncIterator[str]:
     """Generate SSE stream for chat completion."""
     created = int(time.time())
@@ -142,7 +142,7 @@ async def _handle_completion_non_streaming(
     request_id: str,
     body: CompletionRequest,
     model_name: str,
-    ipc,
+    ipc: Any,
 ) -> CompletionResponse:
     """Handle non-streaming legacy completion request."""
     internal_request = completion_request_to_internal(body, request_id)
@@ -177,7 +177,7 @@ async def _stream_completion(
     request_id: str,
     internal_request: "InternalRequest",
     model: str,
-    ipc,
+    ipc: Any,
 ) -> AsyncIterator[str]:
     """Generate SSE stream for legacy completion."""
     created = int(time.time())
@@ -230,7 +230,9 @@ def _register_completion_routes(router: APIRouter, model_name: str) -> None:
     """Register completion endpoints."""
 
     @router.post("/chat/completions")
-    async def chat_completions(body: ChatCompletionRequest, request: Request):
+    async def chat_completions(
+        body: ChatCompletionRequest, request: Request
+    ) -> ChatCompletionResponse | StreamingResponse:
         ipc = request.app.state.ipc_channel
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
@@ -242,7 +244,9 @@ def _register_completion_routes(router: APIRouter, model_name: str) -> None:
         return await _handle_chat_non_streaming(request_id, body, model_name, ipc)
 
     @router.post("/completions")
-    async def completions(body: CompletionRequest, request: Request):
+    async def completions(
+        body: CompletionRequest, request: Request
+    ) -> CompletionResponse | StreamingResponse:
         ipc = request.app.state.ipc_channel
         request_id = f"cmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:

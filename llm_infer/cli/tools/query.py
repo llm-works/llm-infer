@@ -8,6 +8,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
 
@@ -341,7 +342,7 @@ class Utf8StreamBuffer:
 class QueryTool(Tool):
     """Send a query to the running inference server."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="query", aliases=["q"], help_text="Query the running inference server"
         )
@@ -577,7 +578,7 @@ class QueryTool(Tool):
         if remaining:
             sys.stdout.write(remaining)
 
-    def _process_sse_stream(self, resp) -> None:
+    def _process_sse_stream(self, resp: Any) -> None:
         """Process SSE stream and print tokens to stdout."""
         print()  # Start on new line
 
@@ -627,7 +628,7 @@ class QueryTool(Tool):
             self.lg.error(f"streaming request failed: {e}")
         return 1
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         if self.args.health:
             return self._check_health()
 

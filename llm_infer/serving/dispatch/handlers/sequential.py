@@ -1,7 +1,7 @@
 """Sequential request handler - one request at a time."""
 
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ....context import Event, RequestContext
 from ..handler import RequestHandler
@@ -111,14 +111,14 @@ class SequentialHandler(RequestHandler):
         except Exception as e:
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
 
-    def _stream_tokens_to_queue(self, request: Request, stream) -> None:
+    def _stream_tokens_to_queue(self, request: Request, stream: Any) -> None:
         """Stream tokens from generator to response queue."""
         assert self._response_q is not None
         for token in stream:
             chunk = StreamChunk(id=request.id, token=token)
             self._response_q.put(chunk)
 
-    def _send_stream_final_chunk(self, request: Request, stream) -> None:
+    def _send_stream_final_chunk(self, request: Request, stream: Any) -> None:
         """Send final chunk with metadata after streaming completes."""
         assert self._response_q is not None
         final_chunk = StreamChunk(
@@ -146,7 +146,7 @@ class SequentialHandler(RequestHandler):
             "messages": request.messages,
         }
 
-    def _finalize_stream(self, request: Request, stream) -> Response:
+    def _finalize_stream(self, request: Request, stream: Any) -> Response:
         """Finalize streaming: send final chunk, mark context, return response."""
         ctx = request.context
         if ctx:

@@ -3,6 +3,7 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from appinfra.log import Logger
 from appinfra.time import delta_str, start
@@ -49,7 +50,7 @@ class RequestContext:
     # Timing accumulator for CSV export (raw seconds)
     timings: dict[str, float] = field(default_factory=dict)
 
-    def mark(self, event: Event, **data) -> None:
+    def mark(self, event: Event, **data: Any) -> None:
         """Record an event marker with automatic timing."""
         now = start()
         is_debug = event in _DEBUG_EVENTS

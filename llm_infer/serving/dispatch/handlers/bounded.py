@@ -2,7 +2,7 @@
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ....context import Event, RequestContext
 from ..handler import RequestHandler
@@ -141,14 +141,14 @@ class BoundedQueueHandler(RequestHandler):
         except Exception as e:
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
 
-    def _stream_tokens_to_queue(self, request: Request, stream) -> None:
+    def _stream_tokens_to_queue(self, request: Request, stream: Any) -> None:
         """Stream tokens from generator to response queue."""
         assert self._response_q is not None
         for token in stream:
             chunk = StreamChunk(id=request.id, token=token)
             self._response_q.put(chunk)
 
-    def _send_stream_final_chunk(self, request: Request, stream) -> None:
+    def _send_stream_final_chunk(self, request: Request, stream: Any) -> None:
         """Send final chunk with metadata after streaming completes."""
         assert self._response_q is not None
         final_chunk = StreamChunk(
@@ -176,7 +176,7 @@ class BoundedQueueHandler(RequestHandler):
             "messages": request.messages,
         }
 
-    def _finalize_stream(self, request: Request, stream) -> Response:
+    def _finalize_stream(self, request: Request, stream: Any) -> Response:
         """Finalize streaming: send final chunk, mark context, return response."""
         ctx = request.context
         if ctx:
@@ -310,7 +310,7 @@ class BoundedQueueHandler(RequestHandler):
         """Build set of stop token IDs from EOS token and stop sequences."""
         return self.engine.build_stop_token_ids(request.stop_sequences)
 
-    def _stream_first_token(self, request: Request, engine_request) -> int:
+    def _stream_first_token(self, request: Request, engine_request: Any) -> int:
         """Stream first token for streaming requests. Returns last_streamed_idx."""
         if not request.stream or self._response_q is None:
             return 0
@@ -323,7 +323,9 @@ class BoundedQueueHandler(RequestHandler):
         self._response_q.put(chunk)
         return 1
 
-    def _create_engine_request(self, request: Request, tokens: list[int], ctx):
+    def _create_engine_request(
+        self, request: Request, tokens: list[int], ctx: Any
+    ) -> Any:
         """Create engine request with sampling params and stop tokens."""
         from ....pipelines.scheduler import Request as EngineRequest
 
@@ -339,7 +341,7 @@ class BoundedQueueHandler(RequestHandler):
             stop_token_ids=stop_token_ids,
         )
 
-    def _run_prefill(self, engine_request) -> None:
+    def _run_prefill(self, engine_request: Any) -> None:
         """Run prefill via engine abstraction."""
         self.engine.prefill_request(engine_request)
 
@@ -394,7 +396,7 @@ class BoundedQueueHandler(RequestHandler):
             completion_tokens=completion_tokens,
         )
 
-    def _get_stream_finish_reason(self, engine_req) -> str:
+    def _get_stream_finish_reason(self, engine_req: Any) -> str:
         """Determine finish reason for streaming request."""
         finish_reason = engine_req.finish_reason or "length"
         if (
