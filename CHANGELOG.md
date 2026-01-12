@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Circular import between `llm_infer.client` and `llm_infer.api` modules
+- Circular import in `llm_infer.serving.api` preventing use of streaming utilities
 
 ### Changed
 - Move OpenAI schemas to `llm_infer.schemas.openai` (leaf module with no dependencies)
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - New public import path `llm_infer.schemas.openai` for schemas without client dependencies
+- Regression tests for circular import issues (`TestCircularImportRegression`)
 - Initial release
 - Native inference engine with paged attention and continuous batching
 - vLLM engine backend for production deployments
