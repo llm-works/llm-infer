@@ -25,3 +25,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI tools: `serve`, `query`, `metrics`, `compat`
 - Streaming token generation with SSE
 - Health and metrics endpoints
+- Public API module (`llm_infer.api`) exporting OpenAI-compatible schemas for downstream use

@@ -127,3 +127,21 @@ class TestAttentionImports:
         assert callable(rotate_half)
         assert isinstance(FLASHINFER_AVAILABLE, bool)
         assert NaiveAttentionBackend is not None
+
+
+class TestPublicAPIImports:
+    """Test public API exports from llm_infer.api."""
+
+    def test_all_exports_importable(self) -> None:
+        """Test all __all__ exports are importable and correct types."""
+        from enum import EnumMeta
+
+        from pydantic import BaseModel
+
+        import llm_infer.api as api
+
+        for name in api.__all__:
+            obj = getattr(api, name)
+            assert isinstance(obj, (type, EnumMeta)), f"{name} is not a class/enum"
+            if isinstance(obj, type) and not isinstance(obj, EnumMeta):
+                assert issubclass(obj, BaseModel), f"{name} is not a Pydantic model"
