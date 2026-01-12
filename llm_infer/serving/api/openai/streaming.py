@@ -4,7 +4,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import TYPE_CHECKING
 
-from .schemas import (
+from llm_infer.schemas.openai import (
     ChatCompletionChunk,
     ChatCompletionChunkChoice,
     ChatCompletionChunkDelta,

@@ -1,13 +1,14 @@
 """Map OpenAI request parameters to internal request format."""
 
-from ...dispatch.types import Request as InternalRequest
-from .schemas import (
+from llm_infer.schemas.openai import (
     ChatCompletionRequest,
     ChatMessage,
     CompletionRequest,
     FinishReason,
     Role,
 )
+
+from ...dispatch.types import Request as InternalRequest
 
 
 def format_messages_as_prompt(messages: list[ChatMessage]) -> str:

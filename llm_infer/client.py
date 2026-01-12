@@ -24,26 +24,16 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
-if TYPE_CHECKING:
-    # Import for type checking only (avoids circular import at runtime)
-    from llm_infer.serving.api.openai.schemas import (
-        ChatCompletionUsage,
-        ChatMessage,
-        FinishReason,
-        Role,
-    )
-else:
-    # Runtime import from clean API path
-    from llm_infer.api import (
-        ChatCompletionUsage,
-        ChatMessage,
-        FinishReason,
-        Role,
-    )
+from llm_infer.schemas.openai import (
+    ChatCompletionUsage,
+    ChatMessage,
+    FinishReason,
+    Role,
+)
 
 
 @dataclass

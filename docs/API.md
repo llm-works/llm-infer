@@ -13,10 +13,9 @@ internal module structure.
 from llm_infer.api import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
 ```
 
-**Internal path (avoid depending on this):**
+**Alternative (schemas only, no client):**
 ```python
-# Don't do this - internal paths may change
-from llm_infer.serving.api.openai.schemas import ChatCompletionRequest
+from llm_infer.schemas.openai import ChatCompletionRequest, ChatMessage, Role
 ```
 
 ## Available Schemas

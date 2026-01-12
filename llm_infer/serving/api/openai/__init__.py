@@ -1,13 +1,6 @@
 """OpenAI-compatible API layer."""
 
-from .errors import ErrorResponse, OpenAIHTTPException, create_error_response
-from .mappers import (
-    chat_request_to_internal,
-    completion_request_to_internal,
-    determine_finish_reason,
-)
-from .router import create_openai_router
-from .schemas import (
+from llm_infer.schemas.openai import (
     ChatCompletionChunk,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -19,6 +12,14 @@ from .schemas import (
     ModelList,
     Role,
 )
+
+from .errors import ErrorResponse, OpenAIHTTPException, create_error_response
+from .mappers import (
+    chat_request_to_internal,
+    completion_request_to_internal,
+    determine_finish_reason,
+)
+from .router import create_openai_router
 
 __all__ = [
     # Chat types
