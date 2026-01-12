@@ -212,7 +212,10 @@ class OpenAIClient:
             data = resp.json()
 
         # Extract response components
-        choice = data["choices"][0]
+        choices = data.get("choices", [])
+        if not choices:
+            raise ValueError("API returned empty choices array")
+        choice = choices[0]
         content = choice["message"]["content"]
         finish_reason = _parse_finish_reason(choice.get("finish_reason"))
         usage = _parse_usage(data.get("usage"))

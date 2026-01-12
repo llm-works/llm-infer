@@ -383,6 +383,25 @@ class TestOpenAIClientChat:
                 "content": "Be helpful.",
             }
 
+    @pytest.mark.asyncio
+    async def test_chat_empty_choices_raises(self) -> None:
+        """Test that empty choices array raises ValueError."""
+        client = OpenAIClient()
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"choices": []}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("llm_infer.client.httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client_class.return_value = mock_client
+
+            with pytest.raises(ValueError, match="empty choices"):
+                await client.chat(messages=[{"role": "user", "content": "Hi"}])
+
 
 class TestOpenAIClientChatStream:
     """Test OpenAIClient.chat_stream method."""
