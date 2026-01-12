@@ -14,7 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - urllib3 >= 2.6.3 (CVE-2026-21441)
   - werkzeug >= 3.1.5 (CVE-2026-21860)
 
+### Fixed
+- Circular import between `llm_infer.client` and `llm_infer.api` modules
+
+### Changed
+- Move OpenAI schemas to `llm_infer.schemas.openai` (leaf module with no dependencies)
+- Remove `importlib.util` hack from `llm_infer.api` module
+
 ### Added
+- New public import path `llm_infer.schemas.openai` for schemas without client dependencies
 - Initial release
 - Native inference engine with paged attention and continuous batching
 - vLLM engine backend for production deployments

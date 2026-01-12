@@ -8,12 +8,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .mappers import (
-    chat_request_to_internal,
-    completion_request_to_internal,
-    determine_finish_reason,
-)
-from .schemas import (
+from llm_infer.schemas.openai import (
     ChatCompletionChoice,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -26,6 +21,12 @@ from .schemas import (
     ModelInfo,
     ModelList,
     Role,
+)
+
+from .mappers import (
+    chat_request_to_internal,
+    completion_request_to_internal,
+    determine_finish_reason,
 )
 from .streaming import (
     create_chat_chunk,
