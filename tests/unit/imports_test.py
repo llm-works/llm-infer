@@ -129,12 +129,26 @@ class TestAttentionImports:
         assert NaiveAttentionBackend is not None
 
 
+def _run_import_test(code: str) -> None:
+    """Run import test code in a fresh subprocess to avoid module caching."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"Import test failed:\n{result.stderr or result.stdout}")
+
+
 class TestCircularImportRegression:
     """Regression tests for circular import issues.
 
-    These tests verify that import paths work correctly without triggering
-    circular import errors. Each test documents the import chain that was
-    previously broken.
+    These tests run imports in fresh subprocesses to avoid module caching
+    that could mask circular import problems. Each test documents the import
+    chain that was previously broken.
     """
 
     def test_client_api_no_circular_import(self) -> None:
@@ -145,29 +159,31 @@ class TestCircularImportRegression:
 
         Fixed by moving schemas to llm_infer.schemas.openai (leaf module).
         """
-        # These imports must work in any order
-        from llm_infer.api import ChatCompletionRequest
-        from llm_infer.api import OpenAIClient as APIClient
-        from llm_infer.client import ChatClient, ChatResponse, OpenAIClient
+        _run_import_test("""
+from llm_infer.client import ChatClient, ChatResponse, OpenAIClient
+from llm_infer.api import ChatCompletionRequest, OpenAIClient as APIClient
 
-        assert OpenAIClient is APIClient  # Same class re-exported
-        assert ChatClient is not None
-        assert ChatResponse is not None
-        assert ChatCompletionRequest is not None
+assert OpenAIClient is APIClient  # Same class re-exported
+assert ChatClient is not None
+assert ChatResponse is not None
+assert ChatCompletionRequest is not None
+""")
 
     def test_schemas_importable_standalone(self) -> None:
         """Test schemas can be imported without pulling in client or serving."""
-        from llm_infer.schemas.openai import (
-            ChatCompletionRequest,
-            ChatMessage,
-            FinishReason,
-            Role,
-        )
+        _run_import_test("""
+from llm_infer.schemas.openai import (
+    ChatCompletionRequest,
+    ChatMessage,
+    FinishReason,
+    Role,
+)
 
-        assert Role.USER.value == "user"
-        assert FinishReason.STOP.value == "stop"
-        assert ChatMessage is not None
-        assert ChatCompletionRequest is not None
+assert Role.USER.value == "user"
+assert FinishReason.STOP.value == "stop"
+assert ChatMessage is not None
+assert ChatCompletionRequest is not None
+""")
 
     def test_serving_api_openai_streaming_no_circular_import(self) -> None:
         """Test serving.api.openai.streaming imports without circular import.
@@ -181,29 +197,44 @@ class TestCircularImportRegression:
 
         Fixed by lazy-loading run_server in dispatch/__init__.py.
         """
-        from llm_infer.serving.api.openai.streaming import (
-            create_chat_chunk,
-            format_sse_done,
-            format_sse_event,
-            stream_chat_completion_sync,
-        )
+        _run_import_test("""
+from llm_infer.serving.api.openai.streaming import (
+    create_chat_chunk,
+    format_sse_done,
+    format_sse_event,
+    stream_chat_completion_sync,
+)
 
-        assert callable(stream_chat_completion_sync)
-        assert callable(create_chat_chunk)
-        assert callable(format_sse_event)
-        assert callable(format_sse_done)
+assert callable(stream_chat_completion_sync)
+assert callable(create_chat_chunk)
+assert callable(format_sse_event)
+assert callable(format_sse_done)
+""")
 
     def test_serving_api_openai_router_importable(self) -> None:
         """Test OpenAI router can be imported for downstream use."""
-        from llm_infer.serving.api.openai import create_openai_router
+        _run_import_test("""
+from llm_infer.serving.api.openai import create_openai_router
 
-        assert callable(create_openai_router)
+assert callable(create_openai_router)
+""")
 
     def test_dispatch_run_server_lazy_import(self) -> None:
-        """Test run_server is accessible via lazy import."""
-        from llm_infer.serving.dispatch import run_server
+        """Test run_server is lazily imported (not loaded until accessed)."""
+        _run_import_test("""
+import sys
+import llm_infer.serving.dispatch as dispatch
 
-        assert callable(run_server)
+# Before accessing run_server, main module should NOT be loaded
+assert "llm_infer.serving.dispatch.main" not in sys.modules
+
+# Access run_server (triggers lazy import)
+rs = dispatch.run_server
+assert callable(rs)
+
+# Now main module should be loaded
+assert "llm_infer.serving.dispatch.main" in sys.modules
+""")
 
     def test_full_import_chain_client_to_streaming(self) -> None:
         """Test importing both client and streaming utilities together.
@@ -211,11 +242,13 @@ class TestCircularImportRegression:
         This is the real-world use case: a proxy that needs both the client
         to call upstream and the streaming utilities to format responses.
         """
-        from llm_infer.client import OpenAIClient
-        from llm_infer.serving.api.openai.streaming import stream_chat_completion_sync
+        _run_import_test("""
+from llm_infer.client import OpenAIClient
+from llm_infer.serving.api.openai.streaming import stream_chat_completion_sync
 
-        assert OpenAIClient is not None
-        assert callable(stream_chat_completion_sync)
+assert OpenAIClient is not None
+assert callable(stream_chat_completion_sync)
+""")
 
 
 class TestPublicAPIImports:
