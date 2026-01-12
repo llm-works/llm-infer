@@ -26,3 +26,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Streaming token generation with SSE
 - Health and metrics endpoints
 - Public API module (`llm_infer.api`) exporting OpenAI-compatible schemas for downstream use
+- OpenAI-compatible async client (`llm_infer.client`) for consuming SSE streams from OpenAI-compatible
+  APIs, enabling downstream packages to proxy streaming responses without reimplementing SSE parsing

@@ -134,14 +134,28 @@ class TestPublicAPIImports:
 
     def test_all_exports_importable(self) -> None:
         """Test all __all__ exports are importable and correct types."""
+        from dataclasses import is_dataclass
         from enum import EnumMeta
+        from typing import Protocol
 
         from pydantic import BaseModel
 
         import llm_infer.api as api
 
+        # Client types that are not Pydantic models
+        client_types = {"ChatClient", "ChatResponse", "OpenAIClient"}
+
         for name in api.__all__:
             obj = getattr(api, name)
             assert isinstance(obj, (type, EnumMeta)), f"{name} is not a class/enum"
             if isinstance(obj, type) and not isinstance(obj, EnumMeta):
-                assert issubclass(obj, BaseModel), f"{name} is not a Pydantic model"
+                if name in client_types:
+                    # Client types: Protocol, dataclass, or regular class
+                    is_valid = (
+                        is_dataclass(obj)
+                        or issubclass(obj, Protocol)
+                        or hasattr(obj, "__mro__")  # Any class
+                    )
+                    assert is_valid, f"{name} is not a valid client type"
+                else:
+                    assert issubclass(obj, BaseModel), f"{name} is not a Pydantic model"

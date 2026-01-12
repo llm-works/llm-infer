@@ -1,11 +1,17 @@
-"""Public API schemas for llm-infer.
+"""Public API schemas and client for llm-infer.
 
-This module provides clean public exports of OpenAI-compatible schemas,
-enabling downstream projects (proxies, clients) to import without reaching
-into internal module paths.
+This module provides clean public exports of OpenAI-compatible schemas and
+a streaming client, enabling downstream projects (proxies, frontends) to
+import without reaching into internal module paths.
 
 Usage:
     from llm_infer.api import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
+
+    # Client usage
+    from llm_infer.api import OpenAIClient, ChatClient, ChatResponse
+
+    client = OpenAIClient(base_url="http://localhost:8000/v1")
+    response = await client.chat([{"role": "user", "content": "Hello"}])
 """
 
 import importlib.util
@@ -42,6 +48,9 @@ CompletionResponse = _schemas.CompletionResponse
 ModelInfo = _schemas.ModelInfo
 ModelList = _schemas.ModelList
 
+# Client exports (after schema loading to avoid circular imports)
+from llm_infer.client import ChatClient, ChatResponse, OpenAIClient  # noqa: E402
+
 __all__ = [
     # Enums
     "Role",
@@ -66,4 +75,8 @@ __all__ = [
     # Models
     "ModelInfo",
     "ModelList",
+    # Client
+    "ChatClient",
+    "ChatResponse",
+    "OpenAIClient",
 ]
