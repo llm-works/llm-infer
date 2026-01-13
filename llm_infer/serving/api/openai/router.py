@@ -284,7 +284,6 @@ async def _handle_embedding_request(
 ) -> EmbeddingResponse:
     """Process embedding request and return response."""
     from ...dispatch.types import EmbeddingRequest as InternalEmbeddingRequest
-    from ...dispatch.types import RequestStatus
 
     request_id = f"emb-{uuid.uuid4().hex[:24]}"
     inputs = [body.input] if isinstance(body.input, str) else list(body.input)
@@ -292,10 +291,7 @@ async def _handle_embedding_request(
         id=request_id, inputs=inputs, dimensions=body.dimensions
     )
     response = await ipc.submit(request_id, internal_request)
-    if response.status == RequestStatus.FAILED:
-        raise HTTPException(
-            status_code=500, detail=response.error or "Embedding generation failed"
-        )
+    _raise_for_error_status(response)
     return _build_embedding_response(response, model_name)
 
 

@@ -251,8 +251,8 @@ class EmbeddingRequest(BaseModel):
         ..., description="Model to use (accepted but ignored internally)"
     )
     input: str | list[str] = Field(..., description="Text(s) to embed")
-    encoding_format: Literal["float", "base64"] = Field(
-        "float", description="Encoding format for embeddings"
+    encoding_format: Literal["float"] = Field(
+        "float", description="Encoding format for embeddings (only float supported)"
     )
     dimensions: int | None = Field(
         None, description="Number of dimensions (for Matryoshka embeddings)"
