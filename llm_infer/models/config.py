@@ -21,7 +21,7 @@ class ThinkConfig:
     @classmethod
     def from_dict(cls, data: dict) -> "ThinkConfig":
         """Create ThinkConfig from dict (YAML section)."""
-        tags = data.get("tags", {})
+        tags = data.get("tags") or {}
         return cls(
             default=data.get("default", False),
             enable_suffix=data.get("enable_suffix"),
@@ -130,10 +130,10 @@ class ModelsConfig:
               system_prompt: null
               ...
         """
-        # Parse per-model configs (guard against None value)
+        # Parse per-model configs (guard against None values)
         models = {}
         for name, model_data in (data.get("models") or {}).items():
-            models[name] = ModelConfig.from_dict(name, model_data)
+            models[name] = ModelConfig.from_dict(name, model_data or {})
 
         # Parse defaults (guard against None value)
         defaults_data = data.get("defaults") or {}
