@@ -497,7 +497,9 @@ class VLLMEngine:
             embeddings.append(list(embedding))
 
             # Count prompt tokens (prompt_token_ids can be None)
-            total_tokens += len(output.prompt_token_ids) if output.prompt_token_ids else 0
+            total_tokens += (
+                len(output.prompt_token_ids) if output.prompt_token_ids else 0
+            )
 
         return embeddings, total_tokens
 
