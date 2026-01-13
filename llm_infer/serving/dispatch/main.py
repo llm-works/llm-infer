@@ -13,6 +13,7 @@ from appinfra.time import ETA, Ticker, delta_str, since, start
 from ..api.openai.router import create_openai_router
 from ..api.routes import create_health_handler, create_routes
 from .config import InferenceConfig
+from .factories import get_engine_factory, get_handler_factory
 from .handler import RequestHandler
 from .loop import run_engine_loop
 
@@ -106,15 +107,15 @@ class ProgressTracker:
 
 
 # ---------------------------------------------------------------------------
-# Engine creation (deferred imports to avoid loading torch at module level)
+# Engine and handler creation via factories
 # ---------------------------------------------------------------------------
 
 
-def create_engine(config: InferenceConfig, lg: Any = None) -> Any:
+def create_engine(lg: Any, config: InferenceConfig) -> Any:
     """Create engine from configuration.
 
-    Dispatches to native or vLLM engine based on backends.engine setting.
-    Returns an engine implementing InferenceEngineProtocol.
+    Uses factory pattern to dispatch to native or vLLM engine based on
+    backends.engine setting. Returns an engine implementing InferenceEngineProtocol.
     """
     if not config.models.path:
         raise ValueError(
@@ -123,115 +124,27 @@ def create_engine(config: InferenceConfig, lg: Any = None) -> Any:
 
     engine_type = config.backends.engine
     model_name = Path(config.models.path).name
-    if lg:
-        lg.info(
-            "initializing engine & loading model...",
-            extra={"engine": engine_type, "model": model_name},
-        )
+    lg.info(
+        "initializing engine & loading model...",
+        extra={"engine": engine_type, "model": model_name},
+    )
     t0 = start()
 
-    if engine_type == "vllm":
-        engine = _create_vllm_engine(config, lg)
-    else:
-        engine = _create_native_engine(config, lg)
+    factory = get_engine_factory(engine_type)
+    on_progress = ProgressTracker(lg) if engine_type == "native" else None
+    engine = factory.create(lg, config, on_progress=on_progress)
 
-    if lg:
-        lg.info(
-            "engine initialized & model loaded",
-            extra={"after": since(t0), "engine": engine_type, "model": model_name},
-        )
-
+    lg.info(
+        "engine initialized & model loaded",
+        extra={"after": since(t0), "engine": engine_type, "model": model_name},
+    )
     return engine
 
 
-def _create_native_engine(config: InferenceConfig, lg: Any = None) -> Any:
-    """Create native inference engine."""
-    from ...pipelines import EngineConfig, InferenceEngine, ModelConfig
-
-    assert config.models.path is not None  # Validated in create_engine
-    native_cfg = config.engines.native
-    model_config = ModelConfig.from_hf_config(config.models.path)
-    engine_config = EngineConfig(
-        model=model_config,
-        model_path=config.models.path,
-        num_blocks=native_cfg.num_blocks,
-        block_size=native_cfg.block_size,
-        max_batch_size=native_cfg.max_batch_size,
-        attention_backend=native_cfg.attention_backend,
-        linear_backend=config.backends.linear,
-        torch_compile=native_cfg.torch_compile,
-        warmup=native_cfg.warmup,
-    )
-
-    on_progress = ProgressTracker(lg) if lg else None
-    return InferenceEngine(lg, engine_config, on_progress=on_progress)
-
-
-def _build_vllm_config(model_path: str, vllm_cfg: Any) -> Any:
-    """Build VLLMConfig from dispatch config."""
-    from ...pipelines.engines.vllm_engine import VLLMConfig
-
-    return VLLMConfig(
-        model_path=model_path,
-        task=vllm_cfg.task,
-        gpu_memory_utilization=vllm_cfg.gpu_memory_utilization,
-        cpu_offload_gb=vllm_cfg.cpu_offload_gb,
-        swap_space=vllm_cfg.swap_space,
-        max_model_len=vllm_cfg.max_model_len,
-        tensor_parallel_size=vllm_cfg.tensor_parallel_size,
-        pipeline_parallel_size=vllm_cfg.pipeline_parallel_size,
-        max_num_seqs=vllm_cfg.max_num_seqs,
-        max_num_batched_tokens=vllm_cfg.max_num_batched_tokens,
-        scheduling_policy=vllm_cfg.scheduling_policy,
-        enable_prefix_caching=vllm_cfg.enable_prefix_caching,
-        kv_cache_dtype=vllm_cfg.kv_cache_dtype,
-        enforce_eager=vllm_cfg.enforce_eager,
-        disable_custom_all_reduce=vllm_cfg.disable_custom_all_reduce,
-        quantization=vllm_cfg.quantization,
-        speculative_model=vllm_cfg.speculative_model,
-        num_speculative_tokens=vllm_cfg.num_speculative_tokens,
-        dtype=vllm_cfg.dtype,
-        trust_remote_code=vllm_cfg.trust_remote_code,
-    )
-
-
-def _create_vllm_engine(config: InferenceConfig, lg: Any = None) -> Any:
-    """Create vLLM-backed inference engine."""
-    try:
-        from ...pipelines.engines.vllm_engine import VLLMEngine
-    except ImportError as e:
-        raise ImportError(
-            "vLLM engine requested (backends.engine=vllm) but vLLM is not installed. "
-            "Install with: pip install vllm\nOr use native engine: backends.engine=native"
-        ) from e
-
-    assert config.models.path is not None  # Validated in create_engine
-    return VLLMEngine(_build_vllm_config(config.models.path, config.engines.vllm), lg)
-
-
-def create_handler(engine: Any, config: InferenceConfig) -> RequestHandler:
-    """Create a request handler for the engine."""
-    from .handlers import BoundedQueueHandler, SequentialHandler
-
-    handler_type = config.dispatch.handler
-
-    if handler_type == "sequential":
-        return SequentialHandler(engine)
-    elif handler_type == "bounded":
-        # vLLM handles batching internally, use max_batch_size=1
-        max_batch_size = (
-            1
-            if config.backends.engine == "vllm"
-            else config.engines.native.max_batch_size
-        )
-        return BoundedQueueHandler(
-            engine,
-            max_pending=config.dispatch.max_pending,
-            max_batch_size=max_batch_size,
-            batch_streaming=getattr(config.dispatch, "batch_streaming", False),
-        )
-    else:
-        raise ValueError(f"Unknown handler type: {handler_type}")
+def create_handler(lg: Any, engine: Any, config: InferenceConfig) -> Any:
+    """Create a request handler for the engine using factory pattern."""
+    factory = get_handler_factory(config.dispatch.handler)
+    return factory.create(lg, engine, config)
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +216,7 @@ class BootSequence:
 
         This is the heavy phase - triggers torch import and loads weights.
         """
-        self._engine = create_engine(self._config, lg=self._lg)
+        self._engine = create_engine(self._lg, self._config)
 
         self._log_gpu_stats()
         if self._config.backends.engine == "native":
@@ -314,18 +227,13 @@ class BootSequence:
 
     def create_handler(self) -> None:
         """Phase 3: Create request handler."""
-        self._handler = create_handler(self._engine, self._config)
-        self._handler.set_logger(self._lg)
+        self._handler = create_handler(self._lg, self._engine, self._config)
         self._lg.info("handler created", extra={"type": self._config.dispatch.handler})
 
     def warmup(self) -> None:
         """Phase 4: Run warmup query if configured."""
-        cfg = self._config
-        should_warmup = (
-            cfg.backends.engine == "native" and cfg.engines.native.warmup
-        ) or (cfg.backends.engine == "vllm" and cfg.engines.vllm.warmup)
-
-        if not should_warmup:
+        factory = get_engine_factory(self._config.backends.engine)
+        if not factory.warmup_enabled(self._config):
             return
 
         self._lg.debug("running warmup query...")
