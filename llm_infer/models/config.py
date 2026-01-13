@@ -69,8 +69,9 @@ class SelectionConfig:
     @classmethod
     def from_dict(cls, data: dict) -> "SelectionConfig":
         """Create SelectionConfig from dict."""
+        raw_path = data.get("path")
         return cls(
-            path=str(data.get("path")) if data.get("path") else None,
+            path=str(raw_path) if raw_path else None,
             default=data.get("default"),
         )
 
@@ -142,15 +143,17 @@ class ModelsConfig:
         locations_raw = data.get("locations", [])
         locations = [Path(loc) for loc in locations_raw] if locations_raw else []
 
-        # Parse selection config (by task type)
+        # Parse selection config (by task type, guard against None values)
         selection = data.get("selection", {}) or {}
 
         return cls(
             models=models,
             defaults=defaults,
             locations=locations,
-            selection_generate=SelectionConfig.from_dict(selection.get("generate", {})),
-            selection_embed=SelectionConfig.from_dict(selection.get("embed", {})),
+            selection_generate=SelectionConfig.from_dict(
+                selection.get("generate") or {}
+            ),
+            selection_embed=SelectionConfig.from_dict(selection.get("embed") or {}),
         )
 
     @classmethod
