@@ -6,22 +6,7 @@ from typing import Any
 
 from appinfra.app.fastapi import ApiConfig, UvicornConfig
 
-
-@dataclass
-class SelectionConfig:
-    """Model selection configuration."""
-
-    path: str | None = None  # Path to selection file (written by ops tools)
-    default: str | None = None  # Fallback model name if file missing/empty
-
-
-@dataclass
-class ModelConfig:
-    """Model configuration."""
-
-    selection: SelectionConfig = field(default_factory=SelectionConfig)
-    models_dir: str = ".models"
-    path: str | None = None  # Resolved model path (set by serve tool after resolution)
+from ...cli.config.models import ModelsConfig
 
 
 @dataclass
@@ -146,21 +131,12 @@ class ThirdPartyLoggingConfig:
 class InferenceConfig:
     """Complete inference server configuration."""
 
-    model: ModelConfig = field(default_factory=ModelConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
     backends: BackendsConfig = field(default_factory=BackendsConfig)
     engines: EnginesConfig = field(default_factory=EnginesConfig)
     dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
     logging: ThirdPartyLoggingConfig = field(default_factory=ThirdPartyLoggingConfig)
-
-    @classmethod
-    def _parse_model_config(cls, data: dict[str, Any]) -> ModelConfig:
-        """Parse model configuration from models section."""
-        sel = data.get("selection", {}) or {}
-        return ModelConfig(
-            selection=SelectionConfig(path=sel.get("path"), default=sel.get("default")),
-            models_dir=str(data.get("location", ".models")),
-        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "InferenceConfig":
@@ -170,7 +146,7 @@ class InferenceConfig:
         logging = data.get("logging", {}) or {}
 
         return cls(
-            model=cls._parse_model_config(data.get("models", {}) or {}),
+            models=ModelsConfig.from_dict(data.get("models", {}) or {}),
             backends=BackendsConfig(
                 engine=backends.get("engine", "native"),
                 model=backends.get("model", "native"),
@@ -308,7 +284,7 @@ class InferenceConfig:
         if log_file is not None:
             self.api.log_file = log_file
         if model_path is not None:
-            self.model.path = model_path
+            self.models.path = model_path
         if engine is not None:
             self.backends.engine = engine
         return self

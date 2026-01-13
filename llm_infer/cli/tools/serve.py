@@ -35,6 +35,11 @@ class ServeTool(Tool):
         parser.add_argument(
             "--engine", choices=["native", "vllm"], help="Inference engine backend"
         )
+        parser.add_argument(
+            "--embed",
+            action="store_true",
+            help="Use default embedding model (from selection.embed)",
+        )
 
     def _get_raw_config(self) -> dict:
         """Get raw config dict from app (loaded by appinfra, respects --etc-dir)."""
@@ -92,6 +97,18 @@ class ServeTool(Tool):
 
         return InferenceConfig, run_server
 
+    def _apply_model_overrides(self, config: Any, model_name: str) -> None:
+        """Apply model-specific settings (task, max_model_len) from unified config."""
+        model_cfg = config.models.get(model_name)
+        if model_cfg.task:
+            config.engines.vllm.task = model_cfg.task
+            self.lg.debug("model override", extra={"task": model_cfg.task})
+        if model_cfg._max_model_len_set:
+            config.engines.vllm.max_model_len = model_cfg.max_model_len
+            self.lg.debug(
+                "model override", extra={"max_model_len": model_cfg.max_model_len}
+            )
+
     def run(self, **kwargs: Any) -> int:
         raw_config = self._get_raw_config()
         self._configure_logging(raw_config)
@@ -110,9 +127,7 @@ class ServeTool(Tool):
         if model_path is None:
             return 1
 
-        # Apply model-specific config from models.yaml
-        self._apply_model_config(config, model_path.name)
-
+        self._apply_model_overrides(config, model_path.name)
         config.apply_cli_overrides(
             host=self.args.host,
             port=self.args.port,
@@ -122,24 +137,6 @@ class ServeTool(Tool):
         )
         run_server(self.lg, config)
         return 0
-
-    def _apply_model_config(self, config: Any, model_name: str) -> None:
-        """Apply model-specific settings from models.yaml."""
-        from ..config.models import load_models_config
-
-        models_yaml = Path(self.app._etc_dir) / "models.yaml"
-        models_config = load_models_config(models_yaml)
-        model_cfg = models_config.get(model_name)
-
-        if model_cfg.task:
-            config.engines.vllm.task = model_cfg.task
-            self.lg.debug("model override", extra={"task": model_cfg.task})
-
-        if model_cfg._max_model_len_set:
-            config.engines.vllm.max_model_len = model_cfg.max_model_len
-            self.lg.debug(
-                "model override", extra={"max_model_len": model_cfg.max_model_len}
-            )
 
     def _load_selection_file(self, path: str | Path) -> tuple[str | None, Path | None]:
         """Load model selection from external file.
@@ -207,17 +204,17 @@ class ServeTool(Tool):
         return None
 
     def _resolve_from_selection_file(
-        self, selection: Any, models_dir: Path
+        self, selection_path: str | None, models_dir: Path
     ) -> tuple[Path | None, bool]:
         """Resolve model from selection file. Returns (path, was_attempted)."""
-        if not selection.path:
+        if not selection_path:
             return None, False
 
-        sel_name, sel_path = self._load_selection_file(selection.path)
+        sel_name, sel_path = self._load_selection_file(selection_path)
         if sel_path:
             self.lg.debug(
                 "using selection file path",
-                extra={"path": str(sel_path), "file": selection.path},
+                extra={"path": str(sel_path), "file": selection_path},
             )
             if not sel_path.exists():
                 self.lg.error(
@@ -228,7 +225,7 @@ class ServeTool(Tool):
         if sel_name:
             self.lg.debug(
                 "using selection file name",
-                extra={"name": sel_name, "file": selection.path},
+                extra={"name": sel_name, "file": selection_path},
             )
             path = self._find_model(sel_name, models_dir)
             if path:
@@ -244,13 +241,16 @@ class ServeTool(Tool):
         """Resolve model path from CLI, selection file, or config default."""
         models_dir = self._get_models_dir()
 
-        # 1-2. CLI arguments
+        # 1-2. CLI arguments (--model-path or --model)
         if self.args.model_path or self.args.model:
             return self._resolve_from_cli(models_dir)
 
+        # Get selection config based on task type (--embed flag)
+        task = "embed" if self.args.embed else "generate"
+        selection = config.models.get_selection(task)
+
         # 3. Selection file
-        selection = config.model.selection
-        path, attempted = self._resolve_from_selection_file(selection, models_dir)
+        path, attempted = self._resolve_from_selection_file(selection.path, models_dir)
         if attempted:
             return path
 

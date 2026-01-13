@@ -116,13 +116,13 @@ def create_engine(config: InferenceConfig, lg: Any = None) -> Any:
     Dispatches to native or vLLM engine based on backends.engine setting.
     Returns an engine implementing InferenceEngineProtocol.
     """
-    if not config.model.path:
+    if not config.models.path:
         raise ValueError(
             "model.path is required (set via config, --model-path, or MODEL_PATH)"
         )
 
     engine_type = config.backends.engine
-    model_name = Path(config.model.path).name
+    model_name = Path(config.models.path).name
     if lg:
         lg.info(
             "initializing engine & loading model...",
@@ -148,12 +148,12 @@ def _create_native_engine(config: InferenceConfig, lg: Any = None) -> Any:
     """Create native inference engine."""
     from ...pipelines import EngineConfig, InferenceEngine, ModelConfig
 
-    assert config.model.path is not None  # Validated in create_engine
+    assert config.models.path is not None  # Validated in create_engine
     native_cfg = config.engines.native
-    model_config = ModelConfig.from_hf_config(config.model.path)
+    model_config = ModelConfig.from_hf_config(config.models.path)
     engine_config = EngineConfig(
         model=model_config,
-        model_path=config.model.path,
+        model_path=config.models.path,
         num_blocks=native_cfg.num_blocks,
         block_size=native_cfg.block_size,
         max_batch_size=native_cfg.max_batch_size,
@@ -205,8 +205,8 @@ def _create_vllm_engine(config: InferenceConfig, lg: Any = None) -> Any:
             "Install with: pip install vllm\nOr use native engine: backends.engine=native"
         ) from e
 
-    assert config.model.path is not None  # Validated in create_engine
-    return VLLMEngine(_build_vllm_config(config.model.path, config.engines.vllm), lg)
+    assert config.models.path is not None  # Validated in create_engine
+    return VLLMEngine(_build_vllm_config(config.models.path, config.engines.vllm), lg)
 
 
 def create_handler(engine: Any, config: InferenceConfig) -> RequestHandler:
@@ -281,7 +281,9 @@ class BootSequence:
         Health endpoint returns 'initializing' until mark_ready() is called.
         """
         model_name = (
-            Path(self._config.model.path).name if self._config.model.path else "unknown"
+            Path(self._config.models.path).name
+            if self._config.models.path
+            else "unknown"
         )
 
         self._server = self._build_server(model_name)

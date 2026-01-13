@@ -7,21 +7,15 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
 
-from ..config.models import ModelConfig, get_selected_model_name, load_models_config
+from ..config.models import ModelConfig, ModelsConfig, get_selected_model_name
 
 # ANSI escape codes for think block formatting
 _THINK_START = "\x1b[3;38;5;245m"  # Italic + grey (256-color: 245)
 _THINK_END = "\x1b[0m"  # Reset all formatting
-
-# Default config path relative to this file
-_DEFAULT_CONFIG_PATH = (
-    Path(__file__).parent.parent.parent.parent / "etc" / "models.yaml"
-)
 
 
 class ThinkFormatter:
@@ -347,17 +341,30 @@ class QueryTool(Tool):
             name="query", aliases=["q"], help_text="Query the running inference server"
         )
         super().__init__(parent, config)
-        self._models_config = load_models_config(_DEFAULT_CONFIG_PATH)
+        self._models_config: ModelsConfig | None = None
         self._model_config: ModelConfig | None = None
+
+    def _get_models_config(self) -> ModelsConfig:
+        """Get models config from app (lazy loaded after app setup)."""
+        if self._models_config is None:
+            models_data = (
+                dict(self.app.config).get("models", {}) if self.app.config else {}
+            )
+            self._models_config = ModelsConfig.from_dict(models_data)
+        return self._models_config
 
     def _get_model_config(self) -> ModelConfig:
         """Get config for the current model (lazy loaded)."""
         if self._model_config is None:
-            model_name = get_selected_model_name()
+            models_config = self._get_models_config()
+            selection = models_config.get_selection("generate")
+            model_name = get_selected_model_name(selection.path)
             if model_name:
-                self._model_config = self._models_config.get(model_name)
+                self._model_config = models_config.get(model_name)
+            elif selection.default:
+                self._model_config = models_config.get(selection.default)
             else:
-                self._model_config = self._models_config.defaults
+                self._model_config = models_config.defaults
         return self._model_config
 
     def _add_connection_args(self, parser: argparse.ArgumentParser) -> None:
