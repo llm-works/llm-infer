@@ -119,7 +119,7 @@ def create_engine(lg: Any, config: InferenceConfig) -> Any:
     """
     if not config.models.path:
         raise ValueError(
-            "model.path is required (set via config, --model-path, or MODEL_PATH)"
+            "models.path is required (set via config, --model-path, or MODEL_PATH)"
         )
 
     engine_type = config.backends.engine

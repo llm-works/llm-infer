@@ -19,11 +19,15 @@ if TYPE_CHECKING:
 
 
 def _map_finish_reason(reason: str | None) -> FinishReason:
-    """Map internal finish reason to OpenAI finish reason."""
+    """Map internal finish reason to OpenAI finish reason.
+
+    Note: Internal "error" maps to STOP since OpenAI's FinishReason enum
+    doesn't include an ERROR value. Error details are surfaced separately
+    via HTTP status codes and error responses for non-streaming requests.
+    """
     if reason == "length":
         return FinishReason.LENGTH
-    if reason == "error":
-        return FinishReason.CONTENT_FILTER
+    # "error" and all other cases map to STOP
     return FinishReason.STOP
 
 

@@ -129,9 +129,9 @@ class ModelsConfig:
               system_prompt: null
               ...
         """
-        # Parse per-model configs
+        # Parse per-model configs (guard against None value)
         models = {}
-        for name, model_data in data.get("models", {}).items():
+        for name, model_data in (data.get("models") or {}).items():
             models[name] = ModelConfig.from_dict(name, model_data)
 
         # Parse defaults

@@ -43,7 +43,11 @@ class NativeEngineFactory(EngineFactory):
     def create(self, lg: Any, config: InferenceConfig, on_progress: Any = None) -> Any:
         from ...pipelines import EngineConfig, InferenceEngine, ModelConfig
 
-        assert config.models.path is not None
+        if config.models.path is None:
+            raise ValueError(
+                "models.path is required for native engine "
+                "(set via config, --model-path, or MODEL_PATH)"
+            )
         native_cfg = config.engines.native
         model_path = str(config.models.path)
         model_config = ModelConfig.from_hf_config(model_path)
@@ -75,7 +79,11 @@ class VLLMEngineFactory(EngineFactory):
         """Build VLLMConfig from inference config."""
         from ...pipelines.engines.vllm_engine import VLLMConfig
 
-        assert config.models.path is not None
+        if config.models.path is None:
+            raise ValueError(
+                "models.path is required for vLLM engine "
+                "(set via config, --model-path, or MODEL_PATH)"
+            )
         vllm_cfg = config.engines.vllm
         return VLLMConfig(
             model_path=str(config.models.path),
