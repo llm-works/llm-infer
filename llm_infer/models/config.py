@@ -48,7 +48,7 @@ class ModelConfig:
     @classmethod
     def from_dict(cls, name: str, data: dict) -> "ModelConfig":
         """Create ModelConfig from dict (YAML section)."""
-        think_data = data.get("think", {})
+        think_data = data.get("think") or {}
         return cls(
             name=name,
             task=data.get("task"),
@@ -135,8 +135,8 @@ class ModelsConfig:
         for name, model_data in (data.get("models") or {}).items():
             models[name] = ModelConfig.from_dict(name, model_data)
 
-        # Parse defaults
-        defaults_data = data.get("defaults", {})
+        # Parse defaults (guard against None value)
+        defaults_data = data.get("defaults") or {}
         defaults = ModelConfig.from_dict("defaults", defaults_data)
 
         # Parse locations - convert to Path objects
@@ -166,7 +166,7 @@ class ModelsConfig:
         Returns:
             ModelsConfig parsed from the models section.
         """
-        models_data = raw_config.get("models", {})
+        models_data = raw_config.get("models") or {}
         return cls.from_dict(models_data)
 
 
@@ -186,7 +186,7 @@ def load_models_config(path: str | Path) -> ModelsConfig:
     if not path.exists():
         return ModelsConfig()
 
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
     return ModelsConfig.from_dict(data)
