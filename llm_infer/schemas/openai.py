@@ -237,3 +237,48 @@ class ModelList(BaseModel):
 
     object: Literal["list"] = "list"
     data: list[ModelInfo]
+
+
+# =============================================================================
+# Embeddings
+# =============================================================================
+
+
+class EmbeddingRequest(BaseModel):
+    """POST /v1/embeddings request body."""
+
+    model: str = Field(
+        ..., description="Model to use (accepted but ignored internally)"
+    )
+    input: str | list[str] = Field(..., description="Text(s) to embed")
+    encoding_format: Literal["float"] = Field(
+        "float", description="Encoding format for embeddings (only float supported)"
+    )
+    dimensions: int | None = Field(
+        None, description="Number of dimensions (for Matryoshka embeddings)"
+    )
+    user: str | None = None  # Accepted but ignored
+
+
+class EmbeddingObject(BaseModel):
+    """A single embedding result."""
+
+    object: Literal["embedding"] = "embedding"
+    embedding: list[float]
+    index: int
+
+
+class EmbeddingUsage(BaseModel):
+    """Token usage for embedding request."""
+
+    prompt_tokens: int
+    total_tokens: int
+
+
+class EmbeddingResponse(BaseModel):
+    """POST /v1/embeddings response."""
+
+    object: Literal["list"] = "list"
+    data: list[EmbeddingObject]
+    model: str
+    usage: EmbeddingUsage

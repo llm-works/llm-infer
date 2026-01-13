@@ -29,6 +29,10 @@ from llm_infer.schemas.openai import (
     CompletionChunkChoice,
     CompletionRequest,
     CompletionResponse,
+    EmbeddingObject,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    EmbeddingUsage,
     FinishReason,
     ModelInfo,
     ModelList,
@@ -56,6 +60,11 @@ __all__ = [
     "CompletionChoice",
     "CompletionChunk",
     "CompletionChunkChoice",
+    # Embeddings
+    "EmbeddingRequest",
+    "EmbeddingResponse",
+    "EmbeddingObject",
+    "EmbeddingUsage",
     # Models
     "ModelInfo",
     "ModelList",

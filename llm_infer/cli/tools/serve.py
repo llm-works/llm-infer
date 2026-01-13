@@ -110,6 +110,9 @@ class ServeTool(Tool):
         if model_path is None:
             return 1
 
+        # Apply model-specific config from models.yaml
+        self._apply_model_config(config, model_path.name)
+
         config.apply_cli_overrides(
             host=self.args.host,
             port=self.args.port,
@@ -119,6 +122,24 @@ class ServeTool(Tool):
         )
         run_server(self.lg, config)
         return 0
+
+    def _apply_model_config(self, config: Any, model_name: str) -> None:
+        """Apply model-specific settings from models.yaml."""
+        from ..config.models import load_models_config
+
+        models_yaml = Path(self.app._etc_dir) / "models.yaml"
+        models_config = load_models_config(models_yaml)
+        model_cfg = models_config.get(model_name)
+
+        if model_cfg.task:
+            config.engines.vllm.task = model_cfg.task
+            self.lg.debug("model override", extra={"task": model_cfg.task})
+
+        if model_cfg._max_model_len_set:
+            config.engines.vllm.max_model_len = model_cfg.max_model_len
+            self.lg.debug(
+                "model override", extra={"max_model_len": model_cfg.max_model_len}
+            )
 
     def _load_selection_file(self, path: str | Path) -> tuple[str | None, Path | None]:
         """Load model selection from external file.

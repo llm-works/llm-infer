@@ -8,7 +8,14 @@ from queue import Empty
 from typing import TYPE_CHECKING, Any
 
 from .handler import RequestHandler
-from .types import MetricsRequest, MetricsResponse, RequestStatus, Response
+from .types import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+    MetricsRequest,
+    MetricsResponse,
+    RequestStatus,
+    Response,
+)
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
@@ -22,6 +29,9 @@ def _process_incoming_request(
     """Process a single incoming request from the queue."""
     if isinstance(request, MetricsRequest):
         _handle_metrics_request(request, handler, response_q)
+        return
+    if isinstance(request, EmbeddingRequest):
+        _handle_embedding_request(request, handler, response_q)
         return
     if not handler.submit(request):
         response_q.put(
@@ -83,6 +93,38 @@ def _handle_metrics_request(
             pending_requests=handler.pending_count,
         )
     )
+
+
+def _make_embedding_error(request_id: str, error: str) -> EmbeddingResponse:
+    """Create a failed embedding response."""
+    return EmbeddingResponse(id=request_id, status=RequestStatus.FAILED, error=error)
+
+
+def _handle_embedding_request(
+    request: EmbeddingRequest,
+    handler: RequestHandler,
+    response_q: mp.Queue,  # type: ignore[type-arg]
+) -> None:
+    """Handle an embedding request by generating embeddings and sending response."""
+    engine = handler.engine
+    if not getattr(engine, "supports_embeddings", lambda: False)():
+        response_q.put(
+            _make_embedding_error(request.id, "Engine does not support embeddings")
+        )
+        return
+
+    try:
+        embeddings, total_tokens = engine.embed(request.inputs, request.dimensions)
+        response_q.put(
+            EmbeddingResponse(
+                id=request.id,
+                status=RequestStatus.COMPLETED,
+                embeddings=embeddings,
+                total_tokens=total_tokens,
+            )
+        )
+    except Exception as e:
+        response_q.put(_make_embedding_error(request.id, str(e)))
 
 
 def run_engine_loop_async(

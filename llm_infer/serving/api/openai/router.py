@@ -17,6 +17,10 @@ from llm_infer.schemas.openai import (
     CompletionChoice,
     CompletionRequest,
     CompletionResponse,
+    EmbeddingObject,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    EmbeddingUsage,
     FinishReason,
     ModelInfo,
     ModelList,
@@ -259,9 +263,52 @@ def _register_completion_routes(router: APIRouter, model_name: str) -> None:
         return await _handle_completion_non_streaming(request_id, body, model_name, ipc)
 
 
+def _build_embedding_response(response: Any, model_name: str) -> EmbeddingResponse:
+    """Build OpenAI-compatible embedding response from internal response."""
+    embedding_objects = [
+        EmbeddingObject(embedding=emb, index=i)
+        for i, emb in enumerate(response.embeddings or [])
+    ]
+    return EmbeddingResponse(
+        data=embedding_objects,
+        model=model_name,
+        usage=EmbeddingUsage(
+            prompt_tokens=response.total_tokens,
+            total_tokens=response.total_tokens,
+        ),
+    )
+
+
+async def _handle_embedding_request(
+    body: EmbeddingRequest, ipc: Any, model_name: str
+) -> EmbeddingResponse:
+    """Process embedding request and return response."""
+    from ...dispatch.types import EmbeddingRequest as InternalEmbeddingRequest
+
+    request_id = f"emb-{uuid.uuid4().hex[:24]}"
+    inputs = [body.input] if isinstance(body.input, str) else list(body.input)
+    internal_request = InternalEmbeddingRequest(
+        id=request_id, inputs=inputs, dimensions=body.dimensions
+    )
+    response = await ipc.submit(request_id, internal_request)
+    _raise_for_error_status(response)
+    return _build_embedding_response(response, model_name)
+
+
+def _register_embedding_routes(router: APIRouter, model_name: str) -> None:
+    """Register embedding endpoints."""
+
+    @router.post("/embeddings", response_model=EmbeddingResponse)
+    async def embeddings(body: EmbeddingRequest, request: Request) -> EmbeddingResponse:
+        """Generate embeddings for input text(s)."""
+        ipc = request.app.state.ipc_channel
+        return await _handle_embedding_request(body, ipc, model_name)
+
+
 def create_openai_router(model_name: str) -> APIRouter:
     """Create OpenAI-compatible API router."""
     router = APIRouter(tags=["OpenAI"])
     _register_model_routes(router, model_name)
     _register_completion_routes(router, model_name)
+    _register_embedding_routes(router, model_name)
     return router

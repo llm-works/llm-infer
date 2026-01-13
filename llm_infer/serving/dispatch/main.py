@@ -173,6 +173,7 @@ def _build_vllm_config(model_path: str, vllm_cfg: Any) -> Any:
 
     return VLLMConfig(
         model_path=model_path,
+        task=vllm_cfg.task,
         gpu_memory_utilization=vllm_cfg.gpu_memory_utilization,
         cpu_offload_gb=vllm_cfg.cpu_offload_gb,
         swap_space=vllm_cfg.swap_space,
@@ -322,9 +323,19 @@ class BootSequence:
             cfg.backends.engine == "native" and cfg.engines.native.warmup
         ) or (cfg.backends.engine == "vllm" and cfg.engines.vllm.warmup)
 
-        if should_warmup:
-            self._lg.debug("running warmup query...")
-            t0 = start()
+        if not should_warmup:
+            return
+
+        self._lg.debug("running warmup query...")
+        t0 = start()
+
+        # Use embed() for embedding models, generate() for generative
+        if getattr(self._engine, "supports_embeddings", lambda: False)():
+            self._engine.embed(["warmup"])
+            self._lg.info(
+                "warmup complete", extra={"after": since(t0), "type": "embed"}
+            )
+        else:
             output = self._engine.generate("Say hello", max_tokens=8)
             self._lg.info(
                 "warmup complete",

@@ -10,6 +10,7 @@ will raise ImportError with a helpful message.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,9 @@ class VLLMConfig:
 
     # Model (required, set from inference config)
     model_path: str = ""
+
+    # Task mode: "generate" for LLM, "embed" for embedding models
+    task: str = "generate"
 
     # Memory management
     gpu_memory_utilization: float = 0.9
@@ -90,6 +94,7 @@ class VLLMConfig:
         """Create config from dictionary (vllm section of llm-infer.yaml)."""
         return cls(
             model_path=model_path,
+            task=data.get("task", "generate"),
             gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),
             cpu_offload_gb=data.get("cpu_offload_gb", 0.0),
             swap_space=data.get("swap_space", 4),
@@ -124,6 +129,10 @@ class VLLMConfig:
             "disable_custom_all_reduce": self.disable_custom_all_reduce,
             "trust_remote_code": self.trust_remote_code,
         }
+
+        # Task mode for embedding models
+        if self.task == "embed":
+            kwargs["task"] = "embed"
 
         # Max model length (context window)
         if self.max_model_len is not None:
@@ -442,6 +451,61 @@ class VLLMEngine:
             kwargs["stop"] = stop_sequences
 
         return SamplingParams(**kwargs)
+
+    # -------------------------------------------------------------------------
+    # Embedding methods (for task="embed" mode)
+    # -------------------------------------------------------------------------
+
+    def supports_embeddings(self) -> bool:
+        """Check if engine is configured for embeddings."""
+        return self._config.task == "embed"
+
+    def embed(
+        self,
+        inputs: list[str],
+        dimensions: int | None = None,
+    ) -> tuple[list[list[float]], int]:
+        """Generate embeddings for input texts.
+
+        Args:
+            inputs: List of texts to embed
+            dimensions: Optional output dimensions (for Matryoshka embeddings)
+
+        Returns:
+            Tuple of (embeddings list, total tokens)
+
+        Raises:
+            RuntimeError: If engine not in embed mode
+        """
+        if self._config.task != "embed":
+            raise RuntimeError(
+                "Engine not configured for embeddings. Set engines.vllm.task='embed'"
+            )
+
+        # Generate embeddings using vLLM's embed API
+        outputs = self._engine.embed(inputs)
+
+        # Extract embeddings and count tokens
+        embeddings: list[list[float]] = []
+        total_tokens = 0
+
+        for output in outputs:
+            # Get embedding from output
+            embedding = output.outputs.embedding
+            if dimensions is not None:
+                # Truncate for Matryoshka embeddings and renormalize
+                embedding = embedding[:dimensions]
+                norm = math.sqrt(sum(x * x for x in embedding))
+                if norm > 0:
+                    embedding = [x / norm for x in embedding]
+            embeddings.append(list(embedding))
+
+            # Count prompt tokens (prompt_token_ids can be None)
+            total_tokens += (
+                len(output.prompt_token_ids) if output.prompt_token_ids else 0
+            )
+
+        return embeddings, total_tokens
 
     # -------------------------------------------------------------------------
     # InferenceEngineProtocol: Batched processing methods

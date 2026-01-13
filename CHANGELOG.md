@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove `importlib.util` hack from `llm_infer.api` module
 
 ### Added
+- OpenAI-compatible `/v1/embeddings` endpoint for vLLM backend with embedding models
+- Model-specific config in `models.yaml`: `task` and `max_model_len` override vLLM settings per model
+- `supports_embeddings()` method on engines for capability detection
+- Embedding schemas: `EmbeddingRequest`, `EmbeddingResponse`, `EmbeddingObject`, `EmbeddingUsage`
 - New public import path `llm_infer.schemas.openai` for schemas without client dependencies
 - Regression tests for circular import issues (`TestCircularImportRegression`)
 - Initial release

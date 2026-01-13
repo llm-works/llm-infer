@@ -39,6 +39,18 @@ class InferenceEngine:
         model_name = self.model_name.lower()
         return "instruct" in model_name or "chat" in model_name
 
+    def supports_embeddings(self) -> bool:
+        """Check if engine supports embeddings. Native engine does not."""
+        return False
+
+    def embed(
+        self,
+        inputs: list[str],
+        dimensions: int | None = None,
+    ) -> tuple[list[list[float]], int]:
+        """Generate embeddings - not supported by native engine."""
+        raise NotImplementedError("Native engine does not support embeddings")
+
     def _init_block_pool(
         self, config: EngineConfig, on_progress: Callable | None
     ) -> BlockPool:
