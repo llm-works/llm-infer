@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove `importlib.util` hack from `llm_infer.api` module
 
 ### Added
+- `llm_infer.text` package with streaming text formatters (usable without CLI):
+  - `ThinkFormatter` for styling `<think>`/`<thinking>` blocks
+  - `LatexFormatter` for converting LaTeX math to Unicode
+  - `Utf8StreamBuffer` for handling incomplete UTF-8 sequences
 - `llm_infer.models` package for model configuration and path resolution (usable without CLI)
 - `ModelResolver` class for unified model path resolution with priority chain
 - OpenAI-compatible `/v1/embeddings` endpoint for vLLM backend with embedding models
