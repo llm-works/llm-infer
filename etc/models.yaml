@@ -2,6 +2,11 @@
 # Matched by model name (from selected.yaml or --model)
 
 models:
+  # Embedding models
+  bge-small-en-v1.5:
+    task: embed
+    max_model_len: null  # Use model default (512)
+
   # Qwen3 instruct models - support /think /no_think tokens
   qwen3-4b-instruct-2507-awq:
     system_prompt: null

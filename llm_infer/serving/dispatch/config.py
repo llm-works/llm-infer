@@ -72,6 +72,9 @@ class VLLMConfig:
     Only used when backends.engine = "vllm".
     """
 
+    # Task mode: "generate" for LLM, "embed" for embedding models
+    task: str = "generate"
+
     # Memory management
     gpu_memory_utilization: float = 0.9
     cpu_offload_gb: float = 0.0
@@ -232,6 +235,7 @@ class InferenceConfig:
     def _parse_vllm_config(cls, data: dict[str, Any]) -> VLLMConfig:
         """Parse vLLM engine configuration."""
         return VLLMConfig(
+            task=data.get("task", "generate"),
             gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),
             cpu_offload_gb=data.get("cpu_offload_gb", 0.0),
             swap_space=data.get("swap_space", 4),

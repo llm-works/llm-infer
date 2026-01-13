@@ -94,3 +94,23 @@ class MetricsResponse:
     total_sequence_tokens: int
     # Request queue
     pending_requests: int
+
+
+@dataclass
+class EmbeddingRequest:
+    """Internal embedding request (queue message)."""
+
+    id: str
+    inputs: list[str]  # Texts to embed
+    dimensions: int | None = None  # Output dimensions (for Matryoshka embeddings)
+
+
+@dataclass
+class EmbeddingResponse:
+    """Internal embedding response (queue message)."""
+
+    id: str
+    status: RequestStatus
+    embeddings: list[list[float]] | None = None
+    total_tokens: int = 0
+    error: str | None = None

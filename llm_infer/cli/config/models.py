@@ -36,8 +36,13 @@ class ModelConfig:
     """Configuration for a specific model."""
 
     name: str
+    task: str | None = None  # "generate" or "embed" - overrides engines.vllm.task
+    max_model_len: int | None = None  # Override engines.vllm.max_model_len
     system_prompt: str | None = None
     think: ThinkConfig = field(default_factory=ThinkConfig)
+
+    # Sentinel to distinguish "not set" from "explicitly set to None"
+    _max_model_len_set: bool = field(default=False, repr=False)
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> "ModelConfig":
@@ -45,6 +50,9 @@ class ModelConfig:
         think_data = data.get("think", {})
         return cls(
             name=name,
+            task=data.get("task"),
+            max_model_len=data.get("max_model_len"),
+            _max_model_len_set="max_model_len" in data,
             system_prompt=data.get("system_prompt"),
             think=ThinkConfig.from_dict(think_data),
         )

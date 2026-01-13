@@ -384,6 +384,26 @@ class InferenceEngineProtocol(Protocol):
         """Check if chat template should be used based on model name."""
         ...
 
+    def supports_embeddings(self) -> bool:
+        """Check if engine supports embeddings."""
+        ...
+
+    def embed(
+        self,
+        inputs: list[str],
+        dimensions: int | None = None,
+    ) -> tuple[list[list[float]], int]:
+        """Generate embeddings for input texts.
+
+        Args:
+            inputs: List of texts to embed.
+            dimensions: Optional output dimensions (for Matryoshka embeddings).
+
+        Returns:
+            Tuple of (embeddings list, total tokens).
+        """
+        ...
+
     def count_tokens(self, text: str, use_chat_template: bool | None = None) -> int:
         """Count tokens in text.
 
