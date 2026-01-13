@@ -10,6 +10,7 @@ will raise ImportError with a helpful message.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -492,8 +493,11 @@ class VLLMEngine:
             # Get embedding from output
             embedding = output.outputs.embedding
             if dimensions is not None:
-                # Truncate for Matryoshka embeddings
+                # Truncate for Matryoshka embeddings and renormalize
                 embedding = embedding[:dimensions]
+                norm = math.sqrt(sum(x * x for x in embedding))
+                if norm > 0:
+                    embedding = [x / norm for x in embedding]
             embeddings.append(list(embedding))
 
             # Count prompt tokens (prompt_token_ids can be None)
