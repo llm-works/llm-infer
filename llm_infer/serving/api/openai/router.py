@@ -2,7 +2,6 @@
 
 import time
 import uuid
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -21,38 +20,21 @@ from llm_infer.schemas.openai import (
     EmbeddingRequest,
     EmbeddingResponse,
     EmbeddingUsage,
-    FinishReason,
     ModelInfo,
     ModelList,
     Role,
 )
 
+from ..errors import raise_for_error_status
 from .mappers import (
     chat_request_to_internal,
     completion_request_to_internal,
     determine_finish_reason,
 )
-from .streaming import (
-    create_chat_chunk,
-    create_completion_chunk,
-    format_sse_done,
-    format_sse_event,
-)
+from .streaming_generators import ChatStreamingGenerator, CompletionStreamingGenerator
 
 if TYPE_CHECKING:
-    from ...dispatch.types import Request as InternalRequest
-
-
-def _raise_for_error_status(response: Any) -> None:
-    """Raise HTTPException if response indicates an error."""
-    from ...dispatch.types import RequestStatus
-
-    if response.status == RequestStatus.REJECTED:
-        raise HTTPException(
-            status_code=503, detail=response.error or "Server at capacity"
-        )
-    if response.status == RequestStatus.FAILED:
-        raise HTTPException(status_code=500, detail=response.error or "Internal error")
+    pass
 
 
 def _build_completion_usage(response: Any) -> ChatCompletionUsage:
@@ -73,7 +55,7 @@ async def _handle_chat_non_streaming(
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id)
     response = await ipc.submit(request_id, internal_request)
-    _raise_for_error_status(response)
+    raise_for_error_status(response)
 
     max_tokens_reached = (
         response.completion_tokens is not None
@@ -99,50 +81,6 @@ async def _handle_chat_non_streaming(
     )
 
 
-def _map_finish_reason(reason: str | None) -> FinishReason:
-    """Map internal finish reason to OpenAI finish reason."""
-    if reason == "length":
-        return FinishReason.LENGTH
-    if reason == "error":
-        return FinishReason.CONTENT_FILTER
-    return FinishReason.STOP
-
-
-async def _stream_chat_completion(
-    request_id: str,
-    internal_request: "InternalRequest",
-    model: str,
-    ipc: Any,
-) -> AsyncIterator[str]:
-    """Generate SSE stream for chat completion."""
-    created = int(time.time())
-
-    # First chunk: role announcement
-    first_chunk = create_chat_chunk(
-        request_id=request_id, model=model, created=created, role=Role.ASSISTANT
-    )
-    yield format_sse_event(first_chunk.model_dump_json())
-
-    # Stream tokens
-    finish_reason = FinishReason.STOP
-    async for chunk in ipc.submit_streaming(request_id, internal_request):
-        if chunk.is_final:
-            finish_reason = _map_finish_reason(chunk.finish_reason)
-            break
-        if chunk.token:
-            content_chunk = create_chat_chunk(
-                request_id=request_id, model=model, created=created, content=chunk.token
-            )
-            yield format_sse_event(content_chunk.model_dump_json())
-
-    # Final chunk with finish_reason
-    final_chunk = create_chat_chunk(
-        request_id=request_id, model=model, created=created, finish_reason=finish_reason
-    )
-    yield format_sse_event(final_chunk.model_dump_json())
-    yield format_sse_done()
-
-
 async def _handle_completion_non_streaming(
     request_id: str,
     body: CompletionRequest,
@@ -152,7 +90,7 @@ async def _handle_completion_non_streaming(
     """Handle non-streaming legacy completion request."""
     internal_request = completion_request_to_internal(body, request_id)
     response = await ipc.submit(request_id, internal_request)
-    _raise_for_error_status(response)
+    raise_for_error_status(response)
 
     max_tokens_reached = (
         response.completion_tokens is not None
@@ -176,37 +114,6 @@ async def _handle_completion_non_streaming(
         ],
         usage=_build_completion_usage(response),
     )
-
-
-async def _stream_completion(
-    request_id: str,
-    internal_request: "InternalRequest",
-    model: str,
-    ipc: Any,
-) -> AsyncIterator[str]:
-    """Generate SSE stream for legacy completion."""
-    created = int(time.time())
-
-    finish_reason = FinishReason.STOP
-    async for chunk in ipc.submit_streaming(request_id, internal_request):
-        if chunk.is_final:
-            finish_reason = _map_finish_reason(chunk.finish_reason)
-            break
-        if chunk.token:
-            content_chunk = create_completion_chunk(
-                request_id=request_id, model=model, created=created, text=chunk.token
-            )
-            yield format_sse_event(content_chunk.model_dump_json())
-
-    final_chunk = create_completion_chunk(
-        request_id=request_id,
-        model=model,
-        created=created,
-        text="",
-        finish_reason=finish_reason,
-    )
-    yield format_sse_event(final_chunk.model_dump_json())
-    yield format_sse_done()
 
 
 def _create_model_info(model_name: str) -> ModelInfo:
@@ -242,8 +149,9 @@ def _register_completion_routes(router: APIRouter, model_name: str) -> None:
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
             internal_request = chat_request_to_internal(body, request_id)
+            generator = ChatStreamingGenerator(request_id, model_name, ipc)
             return StreamingResponse(
-                _stream_chat_completion(request_id, internal_request, model_name, ipc),
+                generator.stream(internal_request),
                 media_type="text/event-stream",
             )
         return await _handle_chat_non_streaming(request_id, body, model_name, ipc)
@@ -256,8 +164,9 @@ def _register_completion_routes(router: APIRouter, model_name: str) -> None:
         request_id = f"cmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
             internal_request = completion_request_to_internal(body, request_id)
+            generator = CompletionStreamingGenerator(request_id, model_name, ipc)
             return StreamingResponse(
-                _stream_completion(request_id, internal_request, model_name, ipc),
+                generator.stream(internal_request),
                 media_type="text/event-stream",
             )
         return await _handle_completion_non_streaming(request_id, body, model_name, ipc)
@@ -291,7 +200,7 @@ async def _handle_embedding_request(
         id=request_id, inputs=inputs, dimensions=body.dimensions
     )
     response = await ipc.submit(request_id, internal_request)
-    _raise_for_error_status(response)
+    raise_for_error_status(response)
     return _build_embedding_response(response, model_name)
 
 

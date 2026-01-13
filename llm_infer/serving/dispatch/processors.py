@@ -1,0 +1,166 @@
+"""Request processors using Chain of Responsibility pattern."""
+
+from __future__ import annotations
+
+import multiprocessing as mp
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
+
+from .metrics import build_metrics_response
+from .types import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+    MetricsRequest,
+    Request,
+    RequestStatus,
+    Response,
+)
+
+if TYPE_CHECKING:
+    from .handler import RequestHandler
+
+
+class RequestProcessor(ABC):
+    """Abstract base for request processors in the chain."""
+
+    def __init__(self) -> None:
+        self._next: RequestProcessor | None = None
+
+    def set_next(self, processor: RequestProcessor) -> RequestProcessor:
+        """Set the next processor in the chain. Returns the next processor for chaining."""
+        self._next = processor
+        return processor
+
+    def process_next(
+        self,
+        request: Any,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        """Pass to next processor if exists."""
+        if self._next:
+            self._next.process(request, handler, response_q)
+
+    @abstractmethod
+    def can_process(self, request: Any) -> bool:
+        """Check if this processor can handle the request."""
+        pass
+
+    @abstractmethod
+    def handle(
+        self,
+        request: Any,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        """Handle the request."""
+        pass
+
+    def process(
+        self,
+        request: Any,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        """Process if can handle, otherwise pass to next."""
+        if self.can_process(request):
+            self.handle(request, handler, response_q)
+        else:
+            self.process_next(request, handler, response_q)
+
+
+class MetricsProcessor(RequestProcessor):
+    """Handles MetricsRequest by collecting and returning system metrics."""
+
+    def can_process(self, request: Any) -> bool:
+        return isinstance(request, MetricsRequest)
+
+    def handle(
+        self,
+        request: MetricsRequest,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        response = build_metrics_response(request.id, handler, request.reset_peak)
+        response_q.put(response)
+
+
+def _make_embedding_error(request_id: str, error: str) -> EmbeddingResponse:
+    """Create a failed embedding response."""
+    return EmbeddingResponse(id=request_id, status=RequestStatus.FAILED, error=error)
+
+
+def _make_embedding_success(
+    request_id: str, embeddings: list[list[float]], total_tokens: int
+) -> EmbeddingResponse:
+    """Create a successful embedding response."""
+    return EmbeddingResponse(
+        id=request_id,
+        status=RequestStatus.COMPLETED,
+        embeddings=embeddings,
+        total_tokens=total_tokens,
+    )
+
+
+class EmbeddingProcessor(RequestProcessor):
+    """Handles EmbeddingRequest by generating embeddings."""
+
+    def can_process(self, request: Any) -> bool:
+        return isinstance(request, EmbeddingRequest)
+
+    def handle(
+        self,
+        request: EmbeddingRequest,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        engine = handler.engine
+        if not getattr(engine, "supports_embeddings", lambda: False)():
+            response_q.put(
+                _make_embedding_error(request.id, "Engine does not support embeddings")
+            )
+            return
+
+        try:
+            embeddings, total_tokens = engine.embed(request.inputs, request.dimensions)
+            response_q.put(
+                _make_embedding_success(request.id, embeddings, total_tokens)
+            )
+        except Exception as e:
+            response_q.put(_make_embedding_error(request.id, str(e)))
+
+
+class InferenceProcessor(RequestProcessor):
+    """Handles inference requests by submitting to the handler queue."""
+
+    def can_process(self, request: Any) -> bool:
+        # Always handles - this is the default at end of chain
+        return isinstance(request, Request)
+
+    def handle(
+        self,
+        request: Request,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        if not handler.submit(request):
+            response_q.put(
+                Response(
+                    id=request.id,
+                    status=RequestStatus.REJECTED,
+                    error="Server at capacity",
+                )
+            )
+
+
+def create_request_processor_chain() -> RequestProcessor:
+    """Create the default request processor chain.
+
+    Chain order:
+    1. MetricsProcessor - handles metrics requests
+    2. EmbeddingProcessor - handles embedding requests
+    3. InferenceProcessor - handles inference requests (default)
+    """
+    chain = MetricsProcessor()
+    chain.set_next(EmbeddingProcessor()).set_next(InferenceProcessor())
+    return chain

@@ -6,6 +6,8 @@ from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
 
+from ...models import ModelResolver
+
 
 class ServeTool(Tool):
     """Start the inference server."""
@@ -45,13 +47,21 @@ class ServeTool(Tool):
         """Get raw config dict from app (loaded by appinfra, respects --etc-dir)."""
         return dict(self.app.config) if self.app.config else {}
 
-    def _get_models_dir(self) -> Path:
-        """Get models directory from args or config."""
+    def _get_model_locations(self) -> list[Path]:
+        """Get model search locations from args or config.
+
+        Returns list of directories to search for models, in priority order.
+        """
         if self.args.models_dir:
-            return Path(self.args.models_dir)
+            return [Path(self.args.models_dir)]
         raw_config = self._get_raw_config()
-        location: str = raw_config.get("models", {}).get("location", ".models")
-        return Path(location)
+        models_cfg = raw_config.get("models", {})
+        # Support both 'locations' (list) and legacy 'location' (single)
+        locations = models_cfg.get("locations", [])
+        if not locations:
+            location = models_cfg.get("location", ".models")
+            locations = [location]
+        return [Path(loc) for loc in locations]
 
     def _configure_logging(self, raw_config: dict) -> None:
         """Configure third-party logging before slow imports."""
@@ -64,23 +74,32 @@ class ServeTool(Tool):
         )
 
     def _get_model_name_early(self, raw_config: dict) -> str | None:
-        """Get model name from CLI args, selection file, or config default."""
+        """Get model name from CLI args, selection file, or config default.
+
+        Uses lightweight resolver for selection file parsing.
+        """
         if self.args.model:
             return str(self.args.model)
         if self.args.model_path:
             return str(self.args.model_path.name)
 
-        # Check selection file
-        selection: dict = raw_config.get("models", {}).get("selection", {})
+        # Get task-specific selection config
+        task = "embed" if self.args.embed else "generate"
+        selection_all: dict = raw_config.get("models", {}).get("selection", {})
+        selection: dict = selection_all.get(task, {})
+
+        # Use resolver for selection file parsing (lightweight, no heavy imports)
         if selection.get("path"):
-            sel_name, sel_path = self._load_selection_file(selection["path"])
+            resolver = ModelResolver(
+                locations=[]
+            )  # Locations not needed for selection file
+            sel_name, sel_path = resolver.load_selection_file(selection["path"])
             if sel_path:
                 return sel_path.name
             if sel_name:
                 return sel_name
 
-        default: str | None = selection.get("default")
-        return default
+        return selection.get("default")
 
     def _get_server_config(self, raw_config: dict) -> tuple[str, int, str]:
         """Get host, port, handler from config with CLI overrides."""
@@ -138,132 +157,20 @@ class ServeTool(Tool):
         run_server(self.lg, config)
         return 0
 
-    def _load_selection_file(self, path: str | Path) -> tuple[str | None, Path | None]:
-        """Load model selection from external file.
-
-        Args:
-            path: Path to selection YAML file.
-
-        Returns:
-            (model_name, model_path) - at most one will be set.
-        """
-        import yaml
-
-        try:
-            with open(path) as f:
-                data = yaml.safe_load(f)
-            if data is None:
-                return None, None
-            model_name = data.get("name")
-            model_path = data.get("path")
-            return model_name, Path(model_path) if model_path else None
-        except FileNotFoundError:
-            self.lg.debug("selection file not found", extra={"path": str(path)})
-            return None, None
-        except Exception as e:
-            self.lg.warning(
-                "failed to load selection file",
-                extra={"path": str(path), "error": str(e)},
-            )
-            return None, None
-
-    def _find_model(self, name: str, models_dir: Path) -> Path | None:
-        """Find model by name in models directory.
-
-        Args:
-            name: Model name (subdirectory name).
-            models_dir: Directory containing model subdirectories.
-
-        Returns:
-            Path to model directory if found, None otherwise.
-        """
-        model_path = models_dir / name
-        if model_path.is_dir() and (model_path / "config.json").exists():
-            return model_path
-        return None
-
-    def _resolve_from_cli(self, models_dir: Path) -> Path | None:
-        """Resolve model from CLI arguments (--model-path or --model)."""
-        if self.args.model_path:
-            model_path_arg: Path = self.args.model_path
-            if not model_path_arg.exists():
-                self.lg.error(
-                    "model path does not exist", extra={"path": str(model_path_arg)}
-                )
-                return None
-            return model_path_arg
-
-        if self.args.model:
-            path = self._find_model(self.args.model, models_dir)
-            if path:
-                return path
-            self.lg.error(
-                "model not found",
-                extra={"model": self.args.model, "dir": str(models_dir)},
-            )
-        return None
-
-    def _resolve_from_selection_file(
-        self, selection_path: str | None, models_dir: Path
-    ) -> tuple[Path | None, bool]:
-        """Resolve model from selection file. Returns (path, was_attempted)."""
-        if not selection_path:
-            return None, False
-
-        sel_name, sel_path = self._load_selection_file(selection_path)
-        if sel_path:
-            self.lg.debug(
-                "using selection file path",
-                extra={"path": str(sel_path), "file": selection_path},
-            )
-            if not sel_path.exists():
-                self.lg.error(
-                    "selection model_path does not exist", extra={"path": str(sel_path)}
-                )
-                return None, True
-            return sel_path, True
-        if sel_name:
-            self.lg.debug(
-                "using selection file name",
-                extra={"name": sel_name, "file": selection_path},
-            )
-            path = self._find_model(sel_name, models_dir)
-            if path:
-                return path, True
-            self.lg.error(
-                "selection model not found",
-                extra={"model": sel_name, "dir": str(models_dir)},
-            )
-            return None, True
-        return None, False
-
     def _resolve_model_path(self, config: Any) -> Path | None:
-        """Resolve model path from CLI, selection file, or config default."""
-        models_dir = self._get_models_dir()
+        """Resolve model path from CLI, selection file, or config default.
 
-        # 1-2. CLI arguments (--model-path or --model)
-        if self.args.model_path or self.args.model:
-            return self._resolve_from_cli(models_dir)
+        Uses ModelResolver for unified resolution logic.
+        """
+        locations = self._get_model_locations()
+        resolver = ModelResolver(locations, lg=self.lg)
 
         # Get selection config based on task type (--embed flag)
         task = "embed" if self.args.embed else "generate"
         selection = config.models.get_selection(task)
 
-        # 3. Selection file
-        path, attempted = self._resolve_from_selection_file(selection.path, models_dir)
-        if attempted:
-            return path
-
-        # 4. Selection default
-        if selection.default:
-            path = self._find_model(selection.default, models_dir)
-            if path:
-                return path
-            self.lg.error(
-                "default model not found",
-                extra={"model": selection.default, "dir": str(models_dir)},
-            )
-            return None
-
-        self.lg.error("no model specified, use --model or configure selection")
-        return None
+        return resolver.resolve(
+            model_path=self.args.model_path,
+            model_name=self.args.model,
+            selection=selection,
+        )

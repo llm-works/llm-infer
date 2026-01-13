@@ -2,7 +2,7 @@
 # Matched by model name (from selected.yaml or --model)
 
 locations:
-  - !path ../.models
+  - !path ../.models/huggingface
   # add HF cache location
 
 # Model selection

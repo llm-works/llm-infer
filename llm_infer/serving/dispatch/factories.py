@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .config import InferenceConfig
-    from .handlers import RequestHandler
+    from .handler import RequestHandler
 
 
 # ---------------------------------------------------------------------------
@@ -45,10 +45,11 @@ class NativeEngineFactory(EngineFactory):
 
         assert config.models.path is not None
         native_cfg = config.engines.native
-        model_config = ModelConfig.from_hf_config(config.models.path)
+        model_path = str(config.models.path)
+        model_config = ModelConfig.from_hf_config(model_path)
         engine_config = EngineConfig(
             model=model_config,
-            model_path=config.models.path,
+            model_path=model_path,
             num_blocks=native_cfg.num_blocks,
             block_size=native_cfg.block_size,
             max_batch_size=native_cfg.max_batch_size,
@@ -70,19 +71,14 @@ class NativeEngineFactory(EngineFactory):
 class VLLMEngineFactory(EngineFactory):
     """Factory for vLLM-backed inference engine."""
 
-    def create(self, lg: Any, config: InferenceConfig, on_progress: Any = None) -> Any:
-        try:
-            from ...pipelines.engines.vllm_engine import VLLMConfig, VLLMEngine
-        except ImportError as e:
-            raise ImportError(
-                "vLLM engine requested (backends.engine=vllm) but vLLM is not installed. "
-                "Install with: pip install vllm\nOr use native engine: backends.engine=native"
-            ) from e
+    def _build_engine_config(self, config: InferenceConfig) -> Any:
+        """Build VLLMConfig from inference config."""
+        from ...pipelines.engines.vllm_engine import VLLMConfig
 
         assert config.models.path is not None
         vllm_cfg = config.engines.vllm
-        engine_config = VLLMConfig(
-            model_path=config.models.path,
+        return VLLMConfig(
+            model_path=str(config.models.path),
             task=vllm_cfg.task,
             gpu_memory_utilization=vllm_cfg.gpu_memory_utilization,
             cpu_offload_gb=vllm_cfg.cpu_offload_gb,
@@ -103,6 +99,17 @@ class VLLMEngineFactory(EngineFactory):
             dtype=vllm_cfg.dtype,
             trust_remote_code=vllm_cfg.trust_remote_code,
         )
+
+    def create(self, lg: Any, config: InferenceConfig, on_progress: Any = None) -> Any:
+        try:
+            from ...pipelines.engines.vllm_engine import VLLMEngine
+        except ImportError as e:
+            raise ImportError(
+                "vLLM engine requested (backends.engine=vllm) but vLLM is not installed. "
+                "Install with: pip install vllm\nOr use native engine: backends.engine=native"
+            ) from e
+
+        engine_config = self._build_engine_config(config)
         return VLLMEngine(engine_config, lg)
 
     def warmup_enabled(self, config: InferenceConfig) -> bool:

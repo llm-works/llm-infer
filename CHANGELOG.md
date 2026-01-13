@@ -19,10 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Circular import in `llm_infer.serving.api` preventing use of streaming utilities
 
 ### Changed
+- Model configuration moved from `llm_infer.cli.config.models` to `llm_infer.models`
+- Request handlers refactored to use Template Method pattern (common logic in base class)
+- Streaming response generation refactored to use Template Method pattern
+- Config overrides refactored to use Strategy pattern (env vars, CLI args)
+- Request dispatch refactored to use Chain of Responsibility pattern
+- Metrics response construction refactored to use Builder pattern
 - Move OpenAI schemas to `llm_infer.schemas.openai` (leaf module with no dependencies)
 - Remove `importlib.util` hack from `llm_infer.api` module
 
 ### Added
+- `llm_infer.models` package for model configuration and path resolution (usable without CLI)
+- `ModelResolver` class for unified model path resolution with priority chain
 - OpenAI-compatible `/v1/embeddings` endpoint for vLLM backend with embedding models
 - Model-specific config in `models.yaml`: `task` and `max_model_len` override vLLM settings per model
 - `supports_embeddings()` method on engines for capability detection

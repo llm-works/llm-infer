@@ -1,12 +1,12 @@
 """Configuration loading for inference server."""
 
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from appinfra.app.fastapi import ApiConfig, UvicornConfig
 
-from ...cli.config.models import ModelsConfig
+from ...models import ModelsConfig
+from .config_overrides import CliOverrides, apply_standard_overrides
 
 
 @dataclass
@@ -242,28 +242,11 @@ class InferenceConfig:
         )
 
     def apply_env_overrides(self) -> "InferenceConfig":
-        """Apply environment variable overrides."""
-        # Native engine overrides
-        if env_val := os.environ.get("NUM_BLOCKS"):
-            self.engines.native.num_blocks = int(env_val)
-        if env_val := os.environ.get("BLOCK_SIZE"):
-            self.engines.native.block_size = int(env_val)
-        if env_val := os.environ.get("MAX_BATCH_SIZE"):
-            self.engines.native.max_batch_size = int(env_val)
+        """Apply environment variable overrides.
 
-        # Dispatch overrides
-        if env_val := os.environ.get("MAX_PENDING"):
-            self.dispatch.max_pending = int(env_val)
-        if env_val := os.environ.get("HANDLER"):
-            self.dispatch.handler = env_val
-
-        # API overrides
-        if env_val := os.environ.get("HOST"):
-            self.api.host = env_val
-        if env_val := os.environ.get("PORT"):
-            self.api.port = int(env_val)
-
-        return self
+        Uses EnvConfigOverride strategy for env -> config mapping.
+        """
+        return apply_standard_overrides(self, cli_overrides=None)
 
     def apply_cli_overrides(
         self,
@@ -274,17 +257,16 @@ class InferenceConfig:
         model_path: str | None = None,
         engine: str | None = None,
     ) -> "InferenceConfig":
-        """Apply CLI argument overrides."""
-        if host is not None:
-            self.api.host = host
-        if port is not None:
-            self.api.port = port
-        if handler is not None:
-            self.dispatch.handler = handler
-        if log_file is not None:
-            self.api.log_file = log_file
-        if model_path is not None:
-            self.models.path = model_path
-        if engine is not None:
-            self.backends.engine = engine
-        return self
+        """Apply CLI argument overrides.
+
+        Uses CliConfigOverride strategy. CLI takes precedence over env.
+        """
+        cli = CliOverrides(
+            host=host,
+            port=port,
+            handler=handler,
+            log_file=log_file,
+            model_path=model_path,
+            engine=engine,
+        )
+        return apply_standard_overrides(self, cli_overrides=cli)

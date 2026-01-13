@@ -87,8 +87,10 @@ class ContinuousBatchingHandler(RequestHandler):
         self.waiting.append(request)
         return True
 
-    def _process_request(self, req_id: str, running: RunningRequest) -> Response:
-        """Process a single request and return response."""
+    def _process_running_request(
+        self, req_id: str, running: RunningRequest
+    ) -> Response:
+        """Process a running request and return response."""
         try:
             result = self.engine.generate(
                 prompt=running.request.prompt,
@@ -127,7 +129,7 @@ class ContinuousBatchingHandler(RequestHandler):
         responses = []
         finished_ids = []
         for req_id, running in list(self.running.items()):
-            responses.append(self._process_request(req_id, running))
+            responses.append(self._process_running_request(req_id, running))
             finished_ids.append(req_id)
 
         for req_id in finished_ids:
