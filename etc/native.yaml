@@ -13,7 +13,7 @@ dtype: float16          # Data type: float16, bfloat16, float32
 # - auto: Use FlashInfer if available, else naive PyTorch (default)
 # - flashinfer: Use FlashInfer (fails if not installed)
 # - naive: Use naive PyTorch implementation (slow, for debugging)
-attention_backend: flashinfer
+attention_backend: auto
 
 # torch.compile: Compile model for reduced CPU overhead
 # - First inference is slow (~30-60s) due to compilation
