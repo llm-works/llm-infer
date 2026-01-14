@@ -39,3 +39,9 @@ class EngineConfig:
             raise ValueError("max_batch_size must be positive")
         if not Path(self.model_path).exists():
             raise ValueError(f"Model path does not exist: {self.model_path}")
+        if self.torch_compile and self.attention_backend in ("flashinfer", "auto"):
+            raise ValueError(
+                "torch_compile is incompatible with attention_backend='flashinfer' "
+                "(or 'auto' which may resolve to flashinfer). "
+                "Use attention_backend='naive' or disable torch_compile."
+            )

@@ -1,27 +1,12 @@
 """Configuration loading for inference server."""
 
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from appinfra.app.fastapi import ApiConfig, UvicornConfig
 
-
-@dataclass
-class SelectionConfig:
-    """Model selection configuration."""
-
-    path: str | None = None  # Path to selection file (written by ops tools)
-    default: str | None = None  # Fallback model name if file missing/empty
-
-
-@dataclass
-class ModelConfig:
-    """Model configuration."""
-
-    selection: SelectionConfig = field(default_factory=SelectionConfig)
-    models_dir: str = ".models"
-    path: str | None = None  # Resolved model path (set by serve tool after resolution)
+from ...models import ModelsConfig
+from .config_overrides import CliOverrides, apply_standard_overrides
 
 
 @dataclass
@@ -45,6 +30,7 @@ class DispatchConfig:
     handler: str = "bounded"
     max_pending: int = 10
     poll_timeout: float = 0.01
+    batch_streaming: bool = False  # Allow streaming requests in batched decode
 
 
 @dataclass
@@ -146,21 +132,12 @@ class ThirdPartyLoggingConfig:
 class InferenceConfig:
     """Complete inference server configuration."""
 
-    model: ModelConfig = field(default_factory=ModelConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
     backends: BackendsConfig = field(default_factory=BackendsConfig)
     engines: EnginesConfig = field(default_factory=EnginesConfig)
     dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
     logging: ThirdPartyLoggingConfig = field(default_factory=ThirdPartyLoggingConfig)
-
-    @classmethod
-    def _parse_model_config(cls, data: dict[str, Any]) -> ModelConfig:
-        """Parse model configuration from models section."""
-        sel = data.get("selection", {}) or {}
-        return ModelConfig(
-            selection=SelectionConfig(path=sel.get("path"), default=sel.get("default")),
-            models_dir=str(data.get("location", ".models")),
-        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "InferenceConfig":
@@ -170,7 +147,7 @@ class InferenceConfig:
         logging = data.get("logging", {}) or {}
 
         return cls(
-            model=cls._parse_model_config(data.get("models", {}) or {}),
+            models=ModelsConfig.from_dict(data.get("models", {}) or {}),
             backends=BackendsConfig(
                 engine=backends.get("engine", "native"),
                 model=backends.get("model", "native"),
@@ -181,6 +158,7 @@ class InferenceConfig:
                 handler=dispatch.get("handler", "bounded"),
                 max_pending=dispatch.get("max_pending", 10),
                 poll_timeout=dispatch.get("poll_timeout", 0.01),
+                batch_streaming=dispatch.get("batch_streaming", False),
             ),
             api=cls._parse_api_config(data.get("api", {}) or {}),
             logging=ThirdPartyLoggingConfig(
@@ -266,28 +244,11 @@ class InferenceConfig:
         )
 
     def apply_env_overrides(self) -> "InferenceConfig":
-        """Apply environment variable overrides."""
-        # Native engine overrides
-        if env_val := os.environ.get("NUM_BLOCKS"):
-            self.engines.native.num_blocks = int(env_val)
-        if env_val := os.environ.get("BLOCK_SIZE"):
-            self.engines.native.block_size = int(env_val)
-        if env_val := os.environ.get("MAX_BATCH_SIZE"):
-            self.engines.native.max_batch_size = int(env_val)
+        """Apply environment variable overrides.
 
-        # Dispatch overrides
-        if env_val := os.environ.get("MAX_PENDING"):
-            self.dispatch.max_pending = int(env_val)
-        if env_val := os.environ.get("HANDLER"):
-            self.dispatch.handler = env_val
-
-        # API overrides
-        if env_val := os.environ.get("HOST"):
-            self.api.host = env_val
-        if env_val := os.environ.get("PORT"):
-            self.api.port = int(env_val)
-
-        return self
+        Uses EnvConfigOverride strategy for env -> config mapping.
+        """
+        return apply_standard_overrides(self, cli_overrides=None)
 
     def apply_cli_overrides(
         self,
@@ -298,17 +259,16 @@ class InferenceConfig:
         model_path: str | None = None,
         engine: str | None = None,
     ) -> "InferenceConfig":
-        """Apply CLI argument overrides."""
-        if host is not None:
-            self.api.host = host
-        if port is not None:
-            self.api.port = port
-        if handler is not None:
-            self.dispatch.handler = handler
-        if log_file is not None:
-            self.api.log_file = log_file
-        if model_path is not None:
-            self.model.path = model_path
-        if engine is not None:
-            self.backends.engine = engine
-        return self
+        """Apply CLI argument overrides.
+
+        Uses CliConfigOverride strategy. CLI takes precedence over env.
+        """
+        cli = CliOverrides(
+            host=host,
+            port=port,
+            handler=handler,
+            log_file=log_file,
+            model_path=model_path,
+            engine=engine,
+        )
+        return apply_standard_overrides(self, cli_overrides=cli)

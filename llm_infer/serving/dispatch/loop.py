@@ -8,14 +8,7 @@ from queue import Empty
 from typing import TYPE_CHECKING, Any
 
 from .handler import RequestHandler
-from .types import (
-    EmbeddingRequest,
-    EmbeddingResponse,
-    MetricsRequest,
-    MetricsResponse,
-    RequestStatus,
-    Response,
-)
+from .processors import RequestProcessor, create_request_processor_chain
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
@@ -25,26 +18,16 @@ def _process_incoming_request(
     handler: RequestHandler,
     request: Any,
     response_q: mp.Queue,  # type: ignore[type-arg]
+    processor_chain: RequestProcessor,
 ) -> None:
-    """Process a single incoming request from the queue."""
-    if isinstance(request, MetricsRequest):
-        _handle_metrics_request(request, handler, response_q)
-        return
-    if isinstance(request, EmbeddingRequest):
-        _handle_embedding_request(request, handler, response_q)
-        return
-    if not handler.submit(request):
-        response_q.put(
-            Response(
-                id=request.id, status=RequestStatus.REJECTED, error="Server at capacity"
-            )
-        )
+    """Process a single incoming request using the processor chain."""
+    processor_chain.process(request, handler, response_q)
 
 
 def run_engine_loop(
     handler: RequestHandler,
-    request_q: mp.Queue,
-    response_q: mp.Queue,
+    request_q: mp.Queue,  # type: ignore[type-arg]
+    response_q: mp.Queue,  # type: ignore[type-arg]
     shutdown: threading.Event,
     lg: Logger | None = None,
     poll_timeout: float = 0.01,
@@ -54,77 +37,16 @@ def run_engine_loop(
     if lg:
         handler.set_logger(lg)
 
+    processor_chain = create_request_processor_chain()
+
     while not shutdown.is_set():
         try:
-            _process_incoming_request(
-                handler, request_q.get(timeout=poll_timeout), response_q
-            )
+            request = request_q.get(timeout=poll_timeout)
+            _process_incoming_request(handler, request, response_q, processor_chain)
         except Empty:
             pass
         for response in handler.step():
             response_q.put(response)
-
-
-def _handle_metrics_request(
-    request: MetricsRequest,
-    handler: RequestHandler,
-    response_q: mp.Queue,
-) -> None:
-    """Handle a metrics request by collecting stats and sending response."""
-    engine = handler.engine
-    stats = engine.memory_stats()
-    seq_stats = handler.sequence_stats()
-
-    if request.reset_peak:
-        engine.reset_peak_memory()
-
-    response_q.put(
-        MetricsResponse(
-            id=request.id,
-            gpu_allocated_bytes=stats["allocated"],
-            gpu_reserved_bytes=stats["reserved"],
-            gpu_peak_bytes=stats["peak"],
-            kv_cache_bytes=stats["kv_cache_bytes"],
-            kv_blocks_used=stats["kv_blocks_used"],
-            kv_blocks_total=stats["kv_blocks_total"],
-            kv_block_size=stats["kv_block_size"],
-            active_sequences=seq_stats["active"],
-            total_sequence_tokens=seq_stats["total_tokens"],
-            pending_requests=handler.pending_count,
-        )
-    )
-
-
-def _make_embedding_error(request_id: str, error: str) -> EmbeddingResponse:
-    """Create a failed embedding response."""
-    return EmbeddingResponse(id=request_id, status=RequestStatus.FAILED, error=error)
-
-
-def _handle_embedding_request(
-    request: EmbeddingRequest,
-    handler: RequestHandler,
-    response_q: mp.Queue,  # type: ignore[type-arg]
-) -> None:
-    """Handle an embedding request by generating embeddings and sending response."""
-    engine = handler.engine
-    if not getattr(engine, "supports_embeddings", lambda: False)():
-        response_q.put(
-            _make_embedding_error(request.id, "Engine does not support embeddings")
-        )
-        return
-
-    try:
-        embeddings, total_tokens = engine.embed(request.inputs, request.dimensions)
-        response_q.put(
-            EmbeddingResponse(
-                id=request.id,
-                status=RequestStatus.COMPLETED,
-                embeddings=embeddings,
-                total_tokens=total_tokens,
-            )
-        )
-    except Exception as e:
-        response_q.put(_make_embedding_error(request.id, str(e)))
 
 
 def run_engine_loop_async(

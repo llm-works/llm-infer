@@ -7,10 +7,12 @@ import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
-from ..dispatch.types import MetricsRequest, MetricsResponse, RequestStatus
+from ..dispatch.metrics import format_metrics_for_api
+from ..dispatch.types import MetricsRequest, MetricsResponse
 from ..dispatch.types import Request as InternalRequest
+from .errors import raise_for_error_status
 from .schemas import GenerateRequest, GenerateResponse, HealthResponse
 
 
@@ -38,34 +40,6 @@ async def health_handler() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-def _format_metrics_response(response: MetricsResponse) -> dict:
-    """Format MetricsResponse into API response dict."""
-    return {
-        "gpu": {
-            "allocated_bytes": response.gpu_allocated_bytes,
-            "reserved_bytes": response.gpu_reserved_bytes,
-            "peak_bytes": response.gpu_peak_bytes,
-            "allocated_mb": response.gpu_allocated_bytes / (1024 * 1024),
-            "reserved_mb": response.gpu_reserved_bytes / (1024 * 1024),
-            "peak_mb": response.gpu_peak_bytes / (1024 * 1024),
-        },
-        "kv_cache": {
-            "bytes": response.kv_cache_bytes,
-            "mb": response.kv_cache_bytes / (1024 * 1024),
-            "blocks_used": response.kv_blocks_used,
-            "blocks_total": response.kv_blocks_total,
-            "blocks_free": response.kv_blocks_total - response.kv_blocks_used,
-            "capacity_tokens": response.kv_blocks_total * response.kv_block_size,
-            "block_size": response.kv_block_size,
-        },
-        "sequences": {
-            "active": response.active_sequences,
-            "total_tokens": response.total_sequence_tokens,
-        },
-        "pending_requests": response.pending_requests,
-    }
-
-
 async def _handle_generate(body: GenerateRequest, ipc: Any) -> GenerateResponse:
     """Handle generate request submission and response."""
     request_id = str(uuid.uuid4())
@@ -81,13 +55,7 @@ async def _handle_generate(body: GenerateRequest, ipc: Any) -> GenerateResponse:
     )
 
     response = await ipc.submit(request_id, internal_request)
-
-    if response.status == RequestStatus.REJECTED:
-        raise HTTPException(
-            status_code=503, detail=response.error or "Server at capacity"
-        )
-    if response.status == RequestStatus.FAILED:
-        raise HTTPException(status_code=500, detail=response.error or "Internal error")
+    raise_for_error_status(response)
 
     return GenerateResponse(
         text=response.result or "",
@@ -120,6 +88,6 @@ def create_routes(model_name: str) -> APIRouter:
         request_id = str(uuid.uuid4())
         metrics_request = MetricsRequest(id=request_id, reset_peak=reset_peak)
         response: MetricsResponse = await ipc.submit(request_id, metrics_request)
-        return _format_metrics_response(response)
+        return format_metrics_for_api(response)
 
     return router
