@@ -68,7 +68,7 @@ class ModelResolver:
             Tuple of (model_name, model_path). One or both may be None.
         """
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
             if data is None:
                 return None, None

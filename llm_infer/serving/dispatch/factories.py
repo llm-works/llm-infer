@@ -177,7 +177,7 @@ class BoundedHandlerFactory(HandlerFactory):
             engine,
             max_pending=config.dispatch.max_pending,
             max_batch_size=engine_factory.max_batch_size(config),
-            batch_streaming=getattr(config.dispatch, "batch_streaming", False),
+            batch_streaming=config.dispatch.batch_streaming,
         )
 
 

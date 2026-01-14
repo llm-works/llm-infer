@@ -30,6 +30,7 @@ class DispatchConfig:
     handler: str = "bounded"
     max_pending: int = 10
     poll_timeout: float = 0.01
+    batch_streaming: bool = False  # Allow streaming requests in batched decode
 
 
 @dataclass
