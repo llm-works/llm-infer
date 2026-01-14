@@ -79,15 +79,15 @@ class MetricsBuilder:
         """Add GPU and KV cache stats from engine."""
         stats = engine.memory_stats()
         self._gpu = GPUStats(
-            allocated_bytes=stats["allocated"],
-            reserved_bytes=stats["reserved"],
-            peak_bytes=stats["peak"],
+            allocated_bytes=stats.get("allocated", 0),
+            reserved_bytes=stats.get("reserved", 0),
+            peak_bytes=stats.get("peak", 0),
         )
         self._kv_cache = KVCacheStats(
-            bytes=stats["kv_cache_bytes"],
-            blocks_used=stats["kv_blocks_used"],
-            blocks_total=stats["kv_blocks_total"],
-            block_size=stats["kv_block_size"],
+            bytes=stats.get("kv_cache_bytes", 0),
+            blocks_used=stats.get("kv_blocks_used", 0),
+            blocks_total=stats.get("kv_blocks_total", 0),
+            block_size=stats.get("kv_block_size", 0),
         )
         return self
 

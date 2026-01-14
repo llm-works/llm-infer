@@ -104,22 +104,34 @@ class LatexFormatter:
         return text
 
     def _process_frac(self, text: str) -> str:
-        """Convert \\frac{a}{b} to a/b."""
+        """Convert \\frac{a}{b} to a/b.
+
+        Note: Does not handle nested braces (e.g., \\frac{\\sqrt{x}}{y}).
+        """
         pattern = r"\\frac\{([^{}]*)\}\{([^{}]*)\}"
         return re.sub(pattern, r"\1/\2", text)
 
     def _process_sqrt(self, text: str) -> str:
-        """Convert \\sqrt{x} to √x."""
+        """Convert \\sqrt{x} to √x.
+
+        Note: Does not handle nested braces (e.g., \\sqrt{\\frac{1}{2}}).
+        """
         pattern = r"\\sqrt\{([^{}]*)\}"
         return re.sub(pattern, r"√\1", text)
 
     def _process_boxed(self, text: str) -> str:
-        """Convert \\boxed{x} to [x]."""
+        """Convert \\boxed{x} to [x].
+
+        Note: Does not handle nested braces.
+        """
         pattern = r"\\boxed\{([^{}]*)\}"
         return re.sub(pattern, r"[\1]", text)
 
     def _process_text(self, text: str) -> str:
-        """Convert \\text{...} to just the text."""
+        """Convert \\text{...} to just the text.
+
+        Note: Does not handle nested braces.
+        """
         pattern = r"\\text\{([^{}]*)\}"
         return re.sub(pattern, r"\1", text)
 
