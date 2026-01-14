@@ -27,8 +27,8 @@ class ThinkConfig:
             enable_suffix=data.get("enable_suffix"),
             disable_suffix=data.get("disable_suffix"),
             system_prompt=data.get("system_prompt"),
-            tags_open=tags.get("open", ["<think>", "<thinking>"]),
-            tags_close=tags.get("close", ["</think>", "</thinking>"]),
+            tags_open=tags.get("open") or ["<think>", "<thinking>"],
+            tags_close=tags.get("close") or ["</think>", "</thinking>"],
         )
 
 
