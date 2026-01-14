@@ -21,8 +21,6 @@ def get_selected_model_name(selection_path: str | Path | None = None) -> str | N
 
     Deprecated: Use ModelResolver.load_selection_file() instead.
     """
-    from pathlib import Path
-
     import yaml
 
     if selection_path is None:

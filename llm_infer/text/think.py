@@ -121,10 +121,12 @@ class ThinkFormatter:
         """Flush remaining buffer at end of stream.
 
         Call this after all chunks have been processed to get any
-        remaining buffered content.
+        remaining buffered content. Clears the buffer after returning.
         """
         if self.buffer:
+            output = self.buffer
+            self.buffer = ""
             if self.in_think:
-                return self.style_start + self.buffer + self.style_end
-            return self.buffer
+                return self.style_start + output + self.style_end
+            return output
         return ""

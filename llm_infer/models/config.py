@@ -139,9 +139,9 @@ class ModelsConfig:
         defaults_data = data.get("defaults") or {}
         defaults = ModelConfig.from_dict("defaults", defaults_data)
 
-        # Parse locations - convert to Path objects
-        locations_raw = data.get("locations", [])
-        locations = [Path(loc) for loc in locations_raw] if locations_raw else []
+        # Parse locations - convert to Path objects (guard against None value)
+        locations_raw = data.get("locations") or []
+        locations = [Path(loc) for loc in locations_raw]
 
         # Parse selection config (by task type, guard against None values)
         selection = data.get("selection", {}) or {}
