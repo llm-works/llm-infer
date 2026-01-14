@@ -158,6 +158,7 @@ class InferenceConfig:
                 handler=dispatch.get("handler", "bounded"),
                 max_pending=dispatch.get("max_pending", 10),
                 poll_timeout=dispatch.get("poll_timeout", 0.01),
+                batch_streaming=dispatch.get("batch_streaming", False),
             ),
             api=cls._parse_api_config(data.get("api", {}) or {}),
             logging=ThirdPartyLoggingConfig(
