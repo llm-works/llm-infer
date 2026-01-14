@@ -30,7 +30,10 @@ num_speculative_tokens: null # Tokens to speculate
 
 # Dtype and trust settings
 dtype: auto                  # auto | float16 | bfloat16 | float32
-trust_remote_code: true      # Trust custom model code from HuggingFace
+# SECURITY WARNING: trust_remote_code allows execution of arbitrary Python
+# from HuggingFace model repos. Only enable for models you trust.
+# Many models (Qwen, etc.) require this to be true.
+trust_remote_code: true
 
 # Warmup: Run initial query on startup to eliminate cold-start latency
 # First vLLM inference is slow due to CUDA kernel warmup and internal caching

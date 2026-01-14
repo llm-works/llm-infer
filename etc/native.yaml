@@ -21,6 +21,6 @@ attention_backend: flashinfer
 # - NOTE: Incompatible with FlashInfer backend (pin_memory not supported by inductor)
 torch_compile: false
 
-# Warmup: Run initial query on startup to trigger torch.compile
-# Useful when torch_compile is enabled to avoid slow first request
+# Warmup: Run initial query on startup to warm up CUDA kernels
+# Useful to avoid slow first request (especially with torch_compile enabled)
 warmup: true
