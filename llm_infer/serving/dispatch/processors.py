@@ -37,9 +37,19 @@ class RequestProcessor(ABC):
         handler: RequestHandler,
         response_q: mp.Queue[Any],
     ) -> None:
-        """Pass to next processor if exists."""
+        """Pass to next processor if exists, or emit error for unhandled requests."""
         if self._next:
             self._next.process(request, handler, response_q)
+        else:
+            # End of chain with no handler - emit error response
+            request_id = getattr(request, "id", "unknown")
+            response_q.put(
+                Response(
+                    id=request_id,
+                    status=RequestStatus.FAILED,
+                    error=f"Unhandled request type: {type(request).__name__}",
+                )
+            )
 
     @abstractmethod
     def can_process(self, request: Any) -> bool:

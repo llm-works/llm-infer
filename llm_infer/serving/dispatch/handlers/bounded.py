@@ -242,6 +242,23 @@ class BoundedQueueHandler(RequestHandler):
         """Run prefill via engine abstraction."""
         self.engine.prefill_request(engine_request)
 
+    def _handle_start_failure(self, request: Request, error: Exception) -> None:
+        """Log and report startup failure to client."""
+        if self._lg:
+            self._lg.warning(
+                "request startup failed",
+                extra={"request_id": request.id, "error": str(error)},
+                exc_info=True,
+            )
+        if self._response_q is not None:
+            self._response_q.put(
+                Response(
+                    id=request.id,
+                    status=RequestStatus.FAILED,
+                    error=f"Request startup failed: {error}",
+                )
+            )
+
     def _start_request(self, request: Request) -> RunningRequest | None:
         """Initialize a request for batched processing."""
         ctx = self._create_context(request)
@@ -268,7 +285,8 @@ class BoundedQueueHandler(RequestHandler):
                 last_streamed_idx=streamed_idx,
                 last_streamed_len=streamed_len,
             )
-        except Exception:
+        except Exception as e:
+            self._handle_start_failure(request, e)
             return None
 
     def _build_response(self, running: RunningRequest) -> Response:

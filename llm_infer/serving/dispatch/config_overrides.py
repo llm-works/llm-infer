@@ -54,7 +54,14 @@ class EnvConfigOverride(ConfigOverride):
         """Apply environment variable overrides."""
         for env_var, config_path, type_conv in self.MAPPINGS:
             if env_val := os.environ.get(env_var):
-                self._set_nested(config, config_path, type_conv(env_val))
+                try:
+                    converted = type_conv(env_val)
+                except (ValueError, TypeError) as e:
+                    raise ValueError(
+                        f"Invalid value for {env_var}={env_val!r} "
+                        f"(expected {type_conv.__name__} for {config_path}): {e}"
+                    ) from e
+                self._set_nested(config, config_path, converted)
 
     def _set_nested(self, config: InferenceConfig, path: str, value: Any) -> None:
         """Set a nested attribute using dot notation."""

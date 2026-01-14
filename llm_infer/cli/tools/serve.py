@@ -119,6 +119,8 @@ class ServeTool(Tool):
     def _apply_model_overrides(self, config: Any, model_name: str) -> None:
         """Apply model-specific settings (task, max_model_len) from unified config."""
         model_cfg = config.models.get(model_name)
+        if model_cfg is None:
+            return
         if model_cfg.task:
             config.engines.vllm.task = model_cfg.task
             self.lg.debug("model override", extra={"task": model_cfg.task})
