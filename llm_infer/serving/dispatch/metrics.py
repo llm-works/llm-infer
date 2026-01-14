@@ -93,10 +93,10 @@ class MetricsBuilder:
 
     def with_handler_stats(self, handler: RequestHandler) -> MetricsBuilder:
         """Add sequence and pending stats from handler."""
-        seq_stats = handler.sequence_stats()
+        seq_stats = handler.sequence_stats() or {}
         self._sequences = SequenceStats(
-            active=seq_stats["active"],
-            total_tokens=seq_stats["total_tokens"],
+            active=seq_stats.get("active", 0),
+            total_tokens=seq_stats.get("total_tokens", 0),
         )
         self._pending_requests = handler.pending_count
         return self
