@@ -83,6 +83,9 @@ class VLLMConfig:
     # Performance tuning
     enforce_eager: bool = False  # Disable CUDA graph for debugging
     disable_custom_all_reduce: bool = False
+    max_cudagraph_capture_size: int | None = (
+        None  # Limit batch sizes for CUDA graph capture (lower = faster startup)
+    )
 
     # Quantization (auto-detected from model, but can override)
     quantization: str | None = None  # awq, gptq, fp8, etc.
@@ -227,6 +230,7 @@ class InferenceConfig:
             kv_cache_dtype=data.get("kv_cache_dtype", "auto"),
             enforce_eager=data.get("enforce_eager", False),
             disable_custom_all_reduce=data.get("disable_custom_all_reduce", False),
+            max_cudagraph_capture_size=data.get("max_cudagraph_capture_size"),
             quantization=data.get("quantization"),
             speculative_model=data.get("speculative_model"),
             num_speculative_tokens=data.get("num_speculative_tokens"),
@@ -258,10 +262,15 @@ class InferenceConfig:
         log_file: str | None = None,
         model_path: str | None = None,
         engine: str | None = None,
+        overrides: dict[str, str] | None = None,
     ) -> "InferenceConfig":
         """Apply CLI argument overrides.
 
         Uses CliConfigOverride strategy. CLI takes precedence over env.
+
+        Args:
+            overrides: Generic key=value overrides using dotted paths,
+                e.g. {"engines.vllm.gpu_memory_utilization": "0.05"}
         """
         cli = CliOverrides(
             host=host,
@@ -270,5 +279,6 @@ class InferenceConfig:
             log_file=log_file,
             model_path=model_path,
             engine=engine,
+            generic=overrides,
         )
         return apply_standard_overrides(self, cli_overrides=cli)

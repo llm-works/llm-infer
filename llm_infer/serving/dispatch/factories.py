@@ -79,11 +79,7 @@ class VLLMEngineFactory(EngineFactory):
         """Build VLLMConfig from inference config."""
         from ...pipelines.engines.vllm_engine import VLLMConfig
 
-        if config.models.path is None:
-            raise ValueError(
-                "models.path is required for vLLM engine "
-                "(set via config, --model-path, or MODEL_PATH)"
-            )
+        self._validate_model_path(config)
         vllm_cfg = config.engines.vllm
         return VLLMConfig(
             model_path=str(config.models.path),
@@ -101,12 +97,21 @@ class VLLMEngineFactory(EngineFactory):
             kv_cache_dtype=vllm_cfg.kv_cache_dtype,
             enforce_eager=vllm_cfg.enforce_eager,
             disable_custom_all_reduce=vllm_cfg.disable_custom_all_reduce,
+            max_cudagraph_capture_size=vllm_cfg.max_cudagraph_capture_size,
             quantization=vllm_cfg.quantization,
             speculative_model=vllm_cfg.speculative_model,
             num_speculative_tokens=vllm_cfg.num_speculative_tokens,
             dtype=vllm_cfg.dtype,
             trust_remote_code=vllm_cfg.trust_remote_code,
         )
+
+    def _validate_model_path(self, config: InferenceConfig) -> None:
+        """Validate model path is set."""
+        if config.models.path is None:
+            raise ValueError(
+                "models.path is required for vLLM engine "
+                "(set via config, --model-path, or MODEL_PATH)"
+            )
 
     def create(self, lg: Any, config: InferenceConfig, on_progress: Any = None) -> Any:
         try:

@@ -75,6 +75,9 @@ class VLLMConfig:
     # Performance tuning
     enforce_eager: bool = False  # Disable CUDA graph for debugging
     disable_custom_all_reduce: bool = False
+    max_cudagraph_capture_size: int | None = (
+        None  # Limit batch sizes for CUDA graph capture (lower = faster startup)
+    )
 
     # Quantization (auto-detected from model, but can override)
     quantization: str | None = None  # awq, gptq, fp8, etc.
@@ -108,6 +111,7 @@ class VLLMConfig:
             kv_cache_dtype=data.get("kv_cache_dtype", "auto"),
             enforce_eager=data.get("enforce_eager", False),
             disable_custom_all_reduce=data.get("disable_custom_all_reduce", False),
+            max_cudagraph_capture_size=data.get("max_cudagraph_capture_size"),
             quantization=data.get("quantization"),
             speculative_model=data.get("speculative_model"),
             num_speculative_tokens=data.get("num_speculative_tokens"),
@@ -129,6 +133,10 @@ class VLLMConfig:
             "disable_custom_all_reduce": self.disable_custom_all_reduce,
             "trust_remote_code": self.trust_remote_code,
         }
+
+        # CUDA graph capture size limit (affects startup time)
+        if self.max_cudagraph_capture_size is not None:
+            kwargs["max_cudagraph_capture_size"] = self.max_cudagraph_capture_size
 
         # Task mode for embedding models
         if self.task == "embed":

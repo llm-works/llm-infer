@@ -82,6 +82,7 @@ class CliOverrides:
     log_file: str | None = None
     model_path: str | None = None
     engine: str | None = None
+    generic: dict[str, str] | None = None  # key=value overrides via -o flag
 
 
 class CliConfigOverride(ConfigOverride):
@@ -107,6 +108,48 @@ class CliConfigOverride(ConfigOverride):
             config.models.path = Path(self.overrides.model_path)
         if self.overrides.engine is not None:
             config.backends.engine = self.overrides.engine
+        # Apply generic key=value overrides last (highest priority)
+        if self.overrides.generic:
+            self._apply_generic(config, self.overrides.generic)
+
+    def _apply_generic(
+        self, config: InferenceConfig, overrides: dict[str, str]
+    ) -> None:
+        """Apply generic dotted-path overrides with type inference."""
+        for key, value in overrides.items():
+            converted = self._convert_value(value)
+            self._set_nested(config, key, converted)
+
+    def _convert_value(self, value: str) -> Any:
+        """Convert string value to appropriate type."""
+        # Handle null/none
+        if value.lower() in ("null", "none"):
+            return None
+        # Handle booleans
+        if value.lower() in ("true", "yes"):
+            return True
+        if value.lower() in ("false", "no"):
+            return False
+        # Handle integers
+        try:
+            return int(value)
+        except ValueError:
+            pass
+        # Handle floats
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        # Default to string
+        return value
+
+    def _set_nested(self, config: InferenceConfig, path: str, value: Any) -> None:
+        """Set a nested attribute using dot notation."""
+        parts = path.split(".")
+        obj: Any = config
+        for part in parts[:-1]:
+            obj = getattr(obj, part)
+        setattr(obj, parts[-1], value)
 
 
 class ConfigOverrideChain:

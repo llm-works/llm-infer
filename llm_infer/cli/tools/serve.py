@@ -17,20 +17,30 @@ class ServeTool(Tool):
         super().__init__(parent, config)
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--host", help="Host to bind to")
-        parser.add_argument("--port", type=int, help="Port to bind to")
+        self._add_model_args(parser)
+        self._add_server_args(parser)
+
+    def _add_model_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add model-related arguments."""
         parser.add_argument(
             "--models-dir", type=Path, help="Directory containing models"
         )
-        parser.add_argument(
-            "--model",
-            help="Model name (subdirectory in models-dir)",
-        )
+        parser.add_argument("--model", help="Model name (subdirectory in models-dir)")
         parser.add_argument(
             "--model-path",
             type=Path,
             help="Direct path to model weights (alternative to --model)",
         )
+        parser.add_argument(
+            "--embed",
+            action="store_true",
+            help="Use default embedding model (from selection.embed)",
+        )
+
+    def _add_server_args(self, parser: argparse.ArgumentParser) -> None:
+        """Add server-related arguments."""
+        parser.add_argument("--host", help="Host to bind to")
+        parser.add_argument("--port", type=int, help="Port to bind to")
         parser.add_argument(
             "--handler", choices=["sequential", "bounded"], help="Request handler type"
         )
@@ -38,9 +48,12 @@ class ServeTool(Tool):
             "--engine", choices=["native", "vllm"], help="Inference engine backend"
         )
         parser.add_argument(
-            "--embed",
-            action="store_true",
-            help="Use default embedding model (from selection.embed)",
+            "-o",
+            "--override",
+            action="append",
+            metavar="KEY=VALUE",
+            dest="overrides",
+            help="Override config value (e.g. -o engines.vllm.gpu_memory_utilization=0.1)",
         )
 
     def _get_raw_config(self) -> dict:
@@ -155,9 +168,24 @@ class ServeTool(Tool):
             handler=self.args.handler,
             model_path=str(model_path),
             engine=self.args.engine,
+            overrides=self._parse_overrides(),
         )
         run_server(self.lg, config)
         return 0
+
+    def _parse_overrides(self) -> dict[str, str] | None:
+        """Parse -o key=value arguments into a dict."""
+        if not self.args.overrides:
+            return None
+        result = {}
+        for item in self.args.overrides:
+            if "=" not in item:
+                raise ValueError(
+                    f"Invalid override format: {item!r} (expected KEY=VALUE)"
+                )
+            key, value = item.split("=", 1)
+            result[key] = value
+        return result
 
     def _resolve_model_path(self, config: Any) -> Path | None:
         """Resolve model path from CLI, selection file, or config default.

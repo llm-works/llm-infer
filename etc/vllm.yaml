@@ -20,6 +20,7 @@ kv_cache_dtype: auto         # KV cache data type
 # Performance tuning
 enforce_eager: false         # Disable CUDA graph (for debugging)
 disable_custom_all_reduce: false
+max_cudagraph_capture_size: 16  # Limit CUDA graph batch sizes (lower = faster startup, null = vLLM default)
 
 # Quantization (auto-detected from model, override if needed)
 quantization: null           # awq | gptq | fp8 | null (auto)
