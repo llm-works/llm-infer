@@ -41,6 +41,7 @@ class ModelConfig:
     max_model_len: int | None = None  # Override engines.vllm.max_model_len
     system_prompt: str | None = None
     think: ThinkConfig = field(default_factory=ThinkConfig)
+    vllm: dict[str, Any] = field(default_factory=dict)  # vLLM-specific overrides
 
     # Sentinel to distinguish "not set" from "explicitly set to None"
     _max_model_len_set: bool = field(default=False, repr=False)
@@ -56,6 +57,7 @@ class ModelConfig:
             _max_model_len_set="max_model_len" in data,
             system_prompt=data.get("system_prompt"),
             think=ThinkConfig.from_dict(think_data),
+            vllm=data.get("vllm") or {},
         )
 
 

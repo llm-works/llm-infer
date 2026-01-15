@@ -20,6 +20,10 @@ models:
   bge-small-en-v1.5:
     task: embed
     max_model_len: null  # Use model default (512)
+    vllm:
+      # Prefix caching with concurrent embedding requests causes KeyError crash in V1 engine
+      # See: https://github.com/vllm-project/vllm/issues/25991
+      enable_prefix_caching: false
 
   # Qwen3 instruct models - support /think /no_think tokens
   qwen3-4b-instruct-2507-awq:

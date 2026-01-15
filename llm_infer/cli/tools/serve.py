@@ -131,7 +131,12 @@ class ServeTool(Tool):
         return InferenceConfig, run_server
 
     def _apply_model_overrides(self, config: Any, model_name: str) -> None:
-        """Apply model-specific settings (task, max_model_len) from unified config."""
+        """Apply model-specific settings from unified config.
+
+        Applies in order: task, max_model_len, then vllm overrides.
+        Model-level vllm overrides allow models to specify required vLLM settings
+        (e.g., embedding models need enable_prefix_caching=false).
+        """
         model_cfg = config.models.get(model_name)
         if model_cfg is None:
             return
@@ -143,6 +148,16 @@ class ServeTool(Tool):
             self.lg.debug(
                 "model override", extra={"max_model_len": model_cfg.max_model_len}
             )
+        # Apply model-specific vLLM overrides
+        for key, value in model_cfg.vllm.items():
+            if hasattr(config.engines.vllm, key):
+                setattr(config.engines.vllm, key, value)
+                self.lg.debug("model vllm override", extra={key: value})
+            else:
+                self.lg.warning(
+                    "unknown vllm config key in model override",
+                    extra={"key": key, "model": model_name},
+                )
 
     def run(self, **kwargs: Any) -> int:
         raw_config = self._get_raw_config()
@@ -157,11 +172,12 @@ class ServeTool(Tool):
 
         InferenceConfig, run_server = self._import_server_deps()  # noqa: N806
         config = InferenceConfig.from_dict(raw_config)
-        config.apply_env_overrides()
         model_path = self._resolve_model_path(config)
         if model_path is None:
             return 1
 
+        # Apply overrides in precedence order: model < env < cli
+        # (apply_cli_overrides internally applies env first, then cli)
         self._apply_model_overrides(config, model_path.name)
         config.apply_cli_overrides(
             host=self.args.host,
