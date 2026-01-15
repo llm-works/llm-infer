@@ -17,6 +17,28 @@ if TYPE_CHECKING:
     from .config import InferenceConfig
 
 
+def _set_nested_attr(obj: Any, path: str, value: Any) -> None:
+    """Set a nested attribute using dot notation.
+
+    Args:
+        obj: Root object to traverse.
+        path: Dot-separated path (e.g., "engines.vllm.gpu_memory_utilization").
+        value: Value to set.
+
+    Raises:
+        ValueError: If any part of the path doesn't exist on the object.
+    """
+    parts = path.split(".")
+    target = obj
+    for part in parts[:-1]:
+        if not hasattr(target, part):
+            raise ValueError(f"Invalid config path: {path!r} (no attribute {part!r})")
+        target = getattr(target, part)
+    if not hasattr(target, parts[-1]):
+        raise ValueError(f"Invalid config path: {path!r} (no attribute {parts[-1]!r})")
+    setattr(target, parts[-1], value)
+
+
 class ConfigOverride(ABC):
     """Abstract base for configuration override strategies."""
 
@@ -61,15 +83,7 @@ class EnvConfigOverride(ConfigOverride):
                         f"Invalid value for {env_var}={env_val!r} "
                         f"(expected {type_conv.__name__} for {config_path}): {e}"
                     ) from e
-                self._set_nested(config, config_path, converted)
-
-    def _set_nested(self, config: InferenceConfig, path: str, value: Any) -> None:
-        """Set a nested attribute using dot notation."""
-        parts = path.split(".")
-        obj = config
-        for part in parts[:-1]:
-            obj = getattr(obj, part)
-        setattr(obj, parts[-1], value)
+                _set_nested_attr(config, config_path, converted)
 
 
 @dataclass
@@ -118,7 +132,7 @@ class CliConfigOverride(ConfigOverride):
         """Apply generic dotted-path overrides with type inference."""
         for key, value in overrides.items():
             converted = self._convert_value(value)
-            self._set_nested(config, key, converted)
+            _set_nested_attr(config, key, converted)
 
     def _convert_value(self, value: str) -> Any:
         """Convert string value to appropriate type."""
@@ -135,21 +149,16 @@ class CliConfigOverride(ConfigOverride):
             return int(value)
         except ValueError:
             pass
-        # Handle floats
+        # Handle floats (convert whole numbers like 1e3 to int)
         try:
-            return float(value)
+            f = float(value)
+            if f.is_integer():
+                return int(f)
+            return f
         except ValueError:
             pass
         # Default to string
         return value
-
-    def _set_nested(self, config: InferenceConfig, path: str, value: Any) -> None:
-        """Set a nested attribute using dot notation."""
-        parts = path.split(".")
-        obj: Any = config
-        for part in parts[:-1]:
-            obj = getattr(obj, part)
-        setattr(obj, parts[-1], value)
 
 
 class ConfigOverrideChain:

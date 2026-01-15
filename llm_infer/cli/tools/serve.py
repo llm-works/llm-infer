@@ -184,6 +184,11 @@ class ServeTool(Tool):
                     f"Invalid override format: {item!r} (expected KEY=VALUE)"
                 )
             key, value = item.split("=", 1)
+            key = key.strip()
+            if not key:
+                raise ValueError(
+                    f"Invalid override format: {item!r} (key cannot be empty)"
+                )
             result[key] = value
         return result
 
