@@ -1,6 +1,6 @@
 logging:
-  level: debug
-  location: 1
+  level: info
+  location: false
   location_color: gray-5
 
   handlers:

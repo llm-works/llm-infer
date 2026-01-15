@@ -55,8 +55,12 @@ class VLLMConfig:
     """vLLM engine configuration.
 
     Comprehensive exposure of vLLM's AsyncEngineArgs for power users.
-    Only used when backends.engine = "vllm".
+    Used both for configuration storage (engines.vllm in YAML) and
+    runtime engine initialization.
     """
+
+    # Model path (set at runtime, not in YAML config)
+    model_path: str = ""
 
     # Task mode: "generate" for LLM, "embed" for embedding models
     task: str = "generate"
@@ -83,6 +87,9 @@ class VLLMConfig:
     # Performance tuning
     enforce_eager: bool = False  # Disable CUDA graph for debugging
     disable_custom_all_reduce: bool = False
+    max_cudagraph_capture_size: int | None = (
+        None  # Limit batch sizes for CUDA graph capture (lower = faster startup)
+    )
 
     # Quantization (auto-detected from model, but can override)
     quantization: str | None = None  # awq, gptq, fp8, etc.
@@ -99,6 +106,69 @@ class VLLMConfig:
 
     # Warmup
     warmup: bool = True  # Run warmup query on startup to eliminate cold-start latency
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], model_path: str = "") -> "VLLMConfig":
+        """Create config from dictionary (vllm section of config file).
+
+        Args:
+            data: Dictionary with vLLM config values.
+            model_path: Path to model weights.
+
+        Returns:
+            VLLMConfig instance with values from dict, defaults for missing keys.
+        """
+        from dataclasses import fields
+
+        kwargs: dict[str, Any] = {"model_path": model_path}
+        for f in fields(cls):
+            if f.name != "model_path" and f.name in data:
+                kwargs[f.name] = data[f.name]
+        return cls(**kwargs)
+
+    def to_llm_kwargs(self) -> dict[str, Any]:
+        """Convert to kwargs for vLLM LLM constructor.
+
+        Returns a dict suitable for passing to vLLM's LLM(**kwargs).
+        Note: vLLM availability is checked by VLLMEngineFactory before this is called.
+        """
+        kwargs: dict[str, Any] = {
+            "model": self.model_path,
+            "dtype": self.dtype,
+            "gpu_memory_utilization": self.gpu_memory_utilization,
+            "cpu_offload_gb": self.cpu_offload_gb,
+            "swap_space": self.swap_space,
+            "tensor_parallel_size": self.tensor_parallel_size,
+            "pipeline_parallel_size": self.pipeline_parallel_size,
+            "max_num_seqs": self.max_num_seqs,
+            "scheduling_policy": self.scheduling_policy,
+            "enable_prefix_caching": self.enable_prefix_caching,
+            "kv_cache_dtype": self.kv_cache_dtype,
+            "enforce_eager": self.enforce_eager,
+            "disable_custom_all_reduce": self.disable_custom_all_reduce,
+            "trust_remote_code": self.trust_remote_code,
+        }
+        self._add_optional_kwargs(kwargs)
+        return kwargs
+
+    def _add_optional_kwargs(self, kwargs: dict[str, Any]) -> None:
+        """Add optional vLLM kwargs (only when not None)."""
+        # Fields that vLLM auto-calculates when None
+        optional_fields = [
+            ("max_cudagraph_capture_size", self.max_cudagraph_capture_size),
+            ("max_model_len", self.max_model_len),
+            ("max_num_batched_tokens", self.max_num_batched_tokens),
+            ("quantization", self.quantization),
+            ("speculative_model", self.speculative_model),
+            ("num_speculative_tokens", self.num_speculative_tokens),
+        ]
+        for key, value in optional_fields:
+            if value is not None:
+                kwargs[key] = value
+
+        # Task mode only needed for embedding models
+        if self.task == "embed":
+            kwargs["task"] = "embed"
 
 
 @dataclass
@@ -227,6 +297,7 @@ class InferenceConfig:
             kv_cache_dtype=data.get("kv_cache_dtype", "auto"),
             enforce_eager=data.get("enforce_eager", False),
             disable_custom_all_reduce=data.get("disable_custom_all_reduce", False),
+            max_cudagraph_capture_size=data.get("max_cudagraph_capture_size"),
             quantization=data.get("quantization"),
             speculative_model=data.get("speculative_model"),
             num_speculative_tokens=data.get("num_speculative_tokens"),
@@ -258,10 +329,15 @@ class InferenceConfig:
         log_file: str | None = None,
         model_path: str | None = None,
         engine: str | None = None,
+        overrides: dict[str, str] | None = None,
     ) -> "InferenceConfig":
         """Apply CLI argument overrides.
 
         Uses CliConfigOverride strategy. CLI takes precedence over env.
+
+        Args:
+            overrides: Generic key=value overrides using dotted paths,
+                e.g. {"engines.vllm.gpu_memory_utilization": "0.05"}
         """
         cli = CliOverrides(
             host=host,
@@ -270,5 +346,6 @@ class InferenceConfig:
             log_file=log_file,
             model_path=model_path,
             engine=engine,
+            generic=overrides,
         )
         return apply_standard_overrides(self, cli_overrides=cli)

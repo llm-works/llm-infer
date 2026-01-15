@@ -15,6 +15,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ...serving.dispatch.config import VLLMConfig
+
 # Check for vLLM availability
 _VLLM_AVAILABLE = False
 _VLLM_ERROR: str | None = None
@@ -37,112 +39,6 @@ def _check_vllm_available() -> None:
             f"vLLM is not installed. Install it with: pip install vllm\n"
             f"Original error: {_VLLM_ERROR}"
         )
-
-
-@dataclass
-class VLLMConfig:
-    """Configuration for vLLM engine.
-
-    Comprehensive exposure of vLLM's AsyncEngineArgs for power users.
-    All fields have sensible defaults matching vLLM's defaults.
-    """
-
-    # Model (required, set from inference config)
-    model_path: str = ""
-
-    # Task mode: "generate" for LLM, "embed" for embedding models
-    task: str = "generate"
-
-    # Memory management
-    gpu_memory_utilization: float = 0.9
-    cpu_offload_gb: float = 0.0
-    swap_space: int = 4  # GB
-    max_model_len: int | None = None  # Max context length (None = use model default)
-
-    # Parallelism
-    tensor_parallel_size: int = 1
-    pipeline_parallel_size: int = 1
-
-    # Scheduling
-    max_num_seqs: int = 256
-    max_num_batched_tokens: int | None = None  # Auto-calculated if None
-    scheduling_policy: str = "fcfs"  # fcfs, priority
-
-    # Caching
-    enable_prefix_caching: bool = True
-    kv_cache_dtype: str = "auto"
-
-    # Performance tuning
-    enforce_eager: bool = False  # Disable CUDA graph for debugging
-    disable_custom_all_reduce: bool = False
-
-    # Quantization (auto-detected from model, but can override)
-    quantization: str | None = None  # awq, gptq, fp8, etc.
-
-    # Speculative decoding (advanced)
-    speculative_model: str | None = None
-    num_speculative_tokens: int | None = None
-
-    # Dtype
-    dtype: str = "auto"  # auto, float16, bfloat16, float32
-
-    # Trust remote code (for custom models)
-    trust_remote_code: bool = True
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any], model_path: str) -> VLLMConfig:
-        """Create config from dictionary (vllm section of llm-infer.yaml)."""
-        return cls(
-            model_path=model_path,
-            task=data.get("task", "generate"),
-            gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),
-            cpu_offload_gb=data.get("cpu_offload_gb", 0.0),
-            swap_space=data.get("swap_space", 4),
-            max_model_len=data.get("max_model_len"),
-            tensor_parallel_size=data.get("tensor_parallel_size", 1),
-            pipeline_parallel_size=data.get("pipeline_parallel_size", 1),
-            max_num_seqs=data.get("max_num_seqs", 256),
-            max_num_batched_tokens=data.get("max_num_batched_tokens"),
-            scheduling_policy=data.get("scheduling_policy", "fcfs"),
-            enable_prefix_caching=data.get("enable_prefix_caching", True),
-            kv_cache_dtype=data.get("kv_cache_dtype", "auto"),
-            enforce_eager=data.get("enforce_eager", False),
-            disable_custom_all_reduce=data.get("disable_custom_all_reduce", False),
-            quantization=data.get("quantization"),
-            speculative_model=data.get("speculative_model"),
-            num_speculative_tokens=data.get("num_speculative_tokens"),
-            dtype=data.get("dtype", "auto"),
-            trust_remote_code=data.get("trust_remote_code", True),
-        )
-
-    def to_llm_kwargs(self) -> dict[str, Any]:
-        """Convert to kwargs for vLLM LLM constructor."""
-        _check_vllm_available()
-
-        kwargs: dict[str, Any] = {
-            "model": self.model_path,
-            "dtype": self.dtype,
-            "gpu_memory_utilization": self.gpu_memory_utilization,
-            "swap_space": self.swap_space,
-            "tensor_parallel_size": self.tensor_parallel_size,
-            "enforce_eager": self.enforce_eager,
-            "disable_custom_all_reduce": self.disable_custom_all_reduce,
-            "trust_remote_code": self.trust_remote_code,
-        }
-
-        # Task mode for embedding models
-        if self.task == "embed":
-            kwargs["task"] = "embed"
-
-        # Max model length (context window)
-        if self.max_model_len is not None:
-            kwargs["max_model_len"] = self.max_model_len
-
-        # Optional fields
-        if self.quantization is not None:
-            kwargs["quantization"] = self.quantization
-
-        return kwargs
 
 
 @dataclass
@@ -225,9 +121,8 @@ class VLLMEngine:
             Initialized VLLMEngine
         """
         model_path = config.get("model", {}).get("path", "")
-        vllm_config_data = config.get("vllm", {}) or {}
-
-        vllm_config = VLLMConfig.from_dict(vllm_config_data, model_path)
+        vllm_data = config.get("vllm", {}) or {}
+        vllm_config = VLLMConfig.from_dict(vllm_data, model_path)
         return cls(vllm_config, lg)
 
     @property
