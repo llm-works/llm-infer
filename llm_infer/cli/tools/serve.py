@@ -172,11 +172,12 @@ class ServeTool(Tool):
 
         InferenceConfig, run_server = self._import_server_deps()  # noqa: N806
         config = InferenceConfig.from_dict(raw_config)
-        config.apply_env_overrides()
         model_path = self._resolve_model_path(config)
         if model_path is None:
             return 1
 
+        # Apply overrides in precedence order: model < env < cli
+        # (apply_cli_overrides internally applies env first, then cli)
         self._apply_model_overrides(config, model_path.name)
         config.apply_cli_overrides(
             host=self.args.host,
