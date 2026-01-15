@@ -11,7 +11,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin, get_type_hints
 
 if TYPE_CHECKING:
     from .config import InferenceConfig
@@ -91,6 +91,7 @@ def _normalize_type(field_type: type | None) -> tuple[type | None, bool]:
     """Normalize a type annotation to its base type.
 
     Handles Optional[T] (T | None) by extracting T and noting nullability.
+    Supports both modern syntax (int | None) and typing module (Optional[int]).
 
     Args:
         field_type: The type annotation to normalize.
@@ -103,8 +104,8 @@ def _normalize_type(field_type: type | None) -> tuple[type | None, bool]:
 
     origin = get_origin(field_type)
 
-    # Handle Union types (including X | None which is Optional[X])
-    if origin is type(int | str):  # UnionType
+    # Handle Union types: both modern (int | None) and typing.Union/Optional
+    if origin is type(int | str) or origin is Union:
         args = get_args(field_type)
         non_none_args = [a for a in args if a is not type(None)]
         is_nullable = type(None) in args
