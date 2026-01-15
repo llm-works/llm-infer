@@ -80,7 +80,10 @@ def _get_field_type(obj: Any, attr: str) -> type | None:
     try:
         hints = get_type_hints(type(obj))
         return hints.get(attr)
-    except Exception:
+    except (TypeError, NameError, AttributeError):
+        # TypeError: object has no __annotations__
+        # NameError: forward reference cannot be resolved
+        # AttributeError: type object has no attribute
         return None
 
 

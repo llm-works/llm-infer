@@ -130,36 +130,45 @@ class VLLMConfig:
         """Convert to kwargs for vLLM LLM constructor.
 
         Returns a dict suitable for passing to vLLM's LLM(**kwargs).
-        Only includes non-default/relevant options.
+        Note: vLLM availability is checked by VLLMEngineFactory before this is called.
         """
         kwargs: dict[str, Any] = {
             "model": self.model_path,
             "dtype": self.dtype,
             "gpu_memory_utilization": self.gpu_memory_utilization,
+            "cpu_offload_gb": self.cpu_offload_gb,
             "swap_space": self.swap_space,
             "tensor_parallel_size": self.tensor_parallel_size,
+            "pipeline_parallel_size": self.pipeline_parallel_size,
+            "max_num_seqs": self.max_num_seqs,
+            "scheduling_policy": self.scheduling_policy,
+            "enable_prefix_caching": self.enable_prefix_caching,
+            "kv_cache_dtype": self.kv_cache_dtype,
             "enforce_eager": self.enforce_eager,
             "disable_custom_all_reduce": self.disable_custom_all_reduce,
             "trust_remote_code": self.trust_remote_code,
         }
+        self._add_optional_kwargs(kwargs)
+        return kwargs
 
-        # CUDA graph capture size limit (affects startup time)
-        if self.max_cudagraph_capture_size is not None:
-            kwargs["max_cudagraph_capture_size"] = self.max_cudagraph_capture_size
+    def _add_optional_kwargs(self, kwargs: dict[str, Any]) -> None:
+        """Add optional vLLM kwargs (only when not None)."""
+        # Fields that vLLM auto-calculates when None
+        optional_fields = [
+            ("max_cudagraph_capture_size", self.max_cudagraph_capture_size),
+            ("max_model_len", self.max_model_len),
+            ("max_num_batched_tokens", self.max_num_batched_tokens),
+            ("quantization", self.quantization),
+            ("speculative_model", self.speculative_model),
+            ("num_speculative_tokens", self.num_speculative_tokens),
+        ]
+        for key, value in optional_fields:
+            if value is not None:
+                kwargs[key] = value
 
-        # Task mode for embedding models
+        # Task mode only needed for embedding models
         if self.task == "embed":
             kwargs["task"] = "embed"
-
-        # Max model length (context window)
-        if self.max_model_len is not None:
-            kwargs["max_model_len"] = self.max_model_len
-
-        # Optional quantization
-        if self.quantization is not None:
-            kwargs["quantization"] = self.quantization
-
-        return kwargs
 
 
 @dataclass
