@@ -55,8 +55,12 @@ class VLLMConfig:
     """vLLM engine configuration.
 
     Comprehensive exposure of vLLM's AsyncEngineArgs for power users.
-    Only used when backends.engine = "vllm".
+    Used both for configuration storage (engines.vllm in YAML) and
+    runtime engine initialization.
     """
+
+    # Model path (set at runtime, not in YAML config)
+    model_path: str = ""
 
     # Task mode: "generate" for LLM, "embed" for embedding models
     task: str = "generate"
@@ -102,6 +106,60 @@ class VLLMConfig:
 
     # Warmup
     warmup: bool = True  # Run warmup query on startup to eliminate cold-start latency
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], model_path: str = "") -> "VLLMConfig":
+        """Create config from dictionary (vllm section of config file).
+
+        Args:
+            data: Dictionary with vLLM config values.
+            model_path: Path to model weights.
+
+        Returns:
+            VLLMConfig instance with values from dict, defaults for missing keys.
+        """
+        from dataclasses import fields
+
+        kwargs: dict[str, Any] = {"model_path": model_path}
+        for f in fields(cls):
+            if f.name != "model_path" and f.name in data:
+                kwargs[f.name] = data[f.name]
+        return cls(**kwargs)
+
+    def to_llm_kwargs(self) -> dict[str, Any]:
+        """Convert to kwargs for vLLM LLM constructor.
+
+        Returns a dict suitable for passing to vLLM's LLM(**kwargs).
+        Only includes non-default/relevant options.
+        """
+        kwargs: dict[str, Any] = {
+            "model": self.model_path,
+            "dtype": self.dtype,
+            "gpu_memory_utilization": self.gpu_memory_utilization,
+            "swap_space": self.swap_space,
+            "tensor_parallel_size": self.tensor_parallel_size,
+            "enforce_eager": self.enforce_eager,
+            "disable_custom_all_reduce": self.disable_custom_all_reduce,
+            "trust_remote_code": self.trust_remote_code,
+        }
+
+        # CUDA graph capture size limit (affects startup time)
+        if self.max_cudagraph_capture_size is not None:
+            kwargs["max_cudagraph_capture_size"] = self.max_cudagraph_capture_size
+
+        # Task mode for embedding models
+        if self.task == "embed":
+            kwargs["task"] = "embed"
+
+        # Max model length (context window)
+        if self.max_model_len is not None:
+            kwargs["max_model_len"] = self.max_model_len
+
+        # Optional quantization
+        if self.quantization is not None:
+            kwargs["quantization"] = self.quantization
+
+        return kwargs
 
 
 @dataclass

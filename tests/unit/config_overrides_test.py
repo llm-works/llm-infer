@@ -8,6 +8,7 @@ from llm_infer.serving.dispatch.config_overrides import (
     CliConfigOverride,
     CliOverrides,
     _set_nested_attr,
+    parse_override_args,
 )
 
 pytestmark = pytest.mark.unit
@@ -107,126 +108,188 @@ class TestSetNestedAttr:
             _set_nested_attr(config, "engines.vllm.setting", 123)
 
 
-class TestConvertValue:
-    """Tests for CliConfigOverride._convert_value type inference."""
+class TestConvertValueInferred:
+    """Tests for CliConfigOverride._convert_value_inferred type inference.
+
+    This tests the fallback behavior when target field type is unknown.
+    """
 
     @pytest.fixture
     def converter(self) -> CliConfigOverride:
         """Create a CliConfigOverride instance for testing."""
         return CliConfigOverride(CliOverrides())
 
-    # Null/None handling
-    def test_null_lowercase(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("null") is None
-
-    def test_null_uppercase(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("NULL") is None
-
-    def test_none_lowercase(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("none") is None
-
-    def test_none_mixed_case(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("None") is None
-
     # Boolean handling
     def test_true_lowercase(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("true") is True
+        assert converter._convert_value_inferred("true") is True
 
     def test_true_uppercase(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("TRUE") is True
+        assert converter._convert_value_inferred("TRUE") is True
 
     def test_yes(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("yes") is True
+        assert converter._convert_value_inferred("yes") is True
 
     def test_false_lowercase(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("false") is False
+        assert converter._convert_value_inferred("false") is False
 
     def test_false_uppercase(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("FALSE") is False
+        assert converter._convert_value_inferred("FALSE") is False
 
     def test_no(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("no") is False
+        assert converter._convert_value_inferred("no") is False
 
     # Integer handling
     def test_positive_integer(self, converter: CliConfigOverride) -> None:
-        result = converter._convert_value("42")
+        result = converter._convert_value_inferred("42")
         assert result == 42
         assert isinstance(result, int)
 
     def test_negative_integer(self, converter: CliConfigOverride) -> None:
-        result = converter._convert_value("-5")
+        result = converter._convert_value_inferred("-5")
         assert result == -5
         assert isinstance(result, int)
 
     def test_zero(self, converter: CliConfigOverride) -> None:
-        result = converter._convert_value("0")
+        result = converter._convert_value_inferred("0")
         assert result == 0
         assert isinstance(result, int)
 
     def test_leading_zeros(self, converter: CliConfigOverride) -> None:
         """Leading zeros should parse as integer (octal not supported)."""
-        result = converter._convert_value("007")
+        result = converter._convert_value_inferred("007")
         assert result == 7
         assert isinstance(result, int)
 
     # Float handling
     def test_positive_float(self, converter: CliConfigOverride) -> None:
-        result = converter._convert_value("3.14")
+        result = converter._convert_value_inferred("3.14")
         assert result == 3.14
         assert isinstance(result, float)
 
     def test_negative_float(self, converter: CliConfigOverride) -> None:
-        result = converter._convert_value("-2.5")
+        result = converter._convert_value_inferred("-2.5")
         assert result == -2.5
         assert isinstance(result, float)
 
-    def test_scientific_notation_whole_number(
+    def test_scientific_notation_whole_becomes_int(
         self, converter: CliConfigOverride
     ) -> None:
-        """Scientific notation that results in whole number should be int."""
-        result = converter._convert_value("1e3")
+        """Scientific notation resulting in whole number becomes int."""
+        result = converter._convert_value_inferred("1e3")
         assert result == 1000
         assert isinstance(result, int)
 
-    def test_scientific_notation_large(self, converter: CliConfigOverride) -> None:
-        """Large scientific notation whole number should be int."""
-        result = converter._convert_value("1e10")
+    def test_scientific_notation_large_becomes_int(
+        self, converter: CliConfigOverride
+    ) -> None:
+        """Large scientific notation whole number becomes int."""
+        result = converter._convert_value_inferred("1e10")
         assert result == 10000000000
         assert isinstance(result, int)
 
-    def test_scientific_notation_fractional(self, converter: CliConfigOverride) -> None:
-        """Scientific notation with fractional result should be float."""
-        result = converter._convert_value("1.5e2")
-        assert result == 150.0
-        assert isinstance(result, int)  # 150.0 is a whole number
+    def test_scientific_notation_150_becomes_int(
+        self, converter: CliConfigOverride
+    ) -> None:
+        """1.5e2 = 150.0 which is a whole number, so becomes int."""
+        result = converter._convert_value_inferred("1.5e2")
+        assert result == 150
+        assert isinstance(result, int)
 
-    def test_scientific_notation_non_whole(self, converter: CliConfigOverride) -> None:
-        """Scientific notation with non-whole result should be float."""
-        result = converter._convert_value("1.23e2")
-        assert result == 123.0
-        assert isinstance(result, int)  # 123.0 is a whole number
+    def test_scientific_notation_123_becomes_int(
+        self, converter: CliConfigOverride
+    ) -> None:
+        """1.23e2 = 123.0 which is a whole number, so becomes int."""
+        result = converter._convert_value_inferred("1.23e2")
+        assert result == 123
+        assert isinstance(result, int)
 
     def test_actual_fractional_result(self, converter: CliConfigOverride) -> None:
         """Scientific notation with actual fractional result stays float."""
-        result = converter._convert_value("1e-1")
+        result = converter._convert_value_inferred("1e-1")
         assert result == 0.1
         assert isinstance(result, float)
 
     # String fallback
     def test_plain_string(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("hello") == "hello"
+        assert converter._convert_value_inferred("hello") == "hello"
 
     def test_string_with_spaces(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("hello world") == "hello world"
+        assert converter._convert_value_inferred("hello world") == "hello world"
 
     def test_empty_string(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("") == ""
+        assert converter._convert_value_inferred("") == ""
 
     def test_whitespace_string(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("  ") == "  "
+        assert converter._convert_value_inferred("  ") == "  "
 
     def test_path_like_string(self, converter: CliConfigOverride) -> None:
-        assert converter._convert_value("/path/to/file") == "/path/to/file"
+        assert converter._convert_value_inferred("/path/to/file") == "/path/to/file"
+
+
+class TestConvertToType:
+    """Tests for CliConfigOverride._convert_to_type with explicit types."""
+
+    @pytest.fixture
+    def converter(self) -> CliConfigOverride:
+        """Create a CliConfigOverride instance for testing."""
+        return CliConfigOverride(CliOverrides())
+
+    def test_convert_to_float(self, converter: CliConfigOverride) -> None:
+        """String converted to float stays float, even if whole number."""
+        result = converter._convert_to_type("150", float, "test.path")
+        assert result == 150.0
+        assert isinstance(result, float)
+
+    def test_convert_to_int(self, converter: CliConfigOverride) -> None:
+        """String converted to int."""
+        result = converter._convert_to_type("42", int, "test.path")
+        assert result == 42
+        assert isinstance(result, int)
+
+    def test_convert_scientific_to_int(self, converter: CliConfigOverride) -> None:
+        """Scientific notation can be converted to int if it's a whole number."""
+        result = converter._convert_to_type("1e3", int, "test.path")
+        assert result == 1000
+        assert isinstance(result, int)
+
+    def test_convert_fractional_to_int_raises(
+        self, converter: CliConfigOverride
+    ) -> None:
+        """Fractional value cannot be converted to int."""
+        with pytest.raises(ValueError, match="expected integer"):
+            converter._convert_to_type("3.14", int, "test.path")
+
+    def test_convert_to_bool_true(self, converter: CliConfigOverride) -> None:
+        """String converted to bool (true variants)."""
+        assert converter._convert_to_type("true", bool, "test") is True
+        assert converter._convert_to_type("TRUE", bool, "test") is True
+        assert converter._convert_to_type("yes", bool, "test") is True
+        assert converter._convert_to_type("1", bool, "test") is True
+
+    def test_convert_to_bool_false(self, converter: CliConfigOverride) -> None:
+        """String converted to bool (false variants)."""
+        assert converter._convert_to_type("false", bool, "test") is False
+        assert converter._convert_to_type("FALSE", bool, "test") is False
+        assert converter._convert_to_type("no", bool, "test") is False
+        assert converter._convert_to_type("0", bool, "test") is False
+
+    def test_convert_invalid_bool_raises(self, converter: CliConfigOverride) -> None:
+        """Invalid boolean string raises ValueError."""
+        with pytest.raises(ValueError, match="expected boolean"):
+            converter._convert_to_type("maybe", bool, "test.path")
+
+    def test_convert_to_str(self, converter: CliConfigOverride) -> None:
+        """Any value can be kept as string."""
+        assert converter._convert_to_type("hello", str, "test") == "hello"
+        assert converter._convert_to_type("123", str, "test") == "123"
+
+    def test_type_mismatch_gives_clear_error(
+        self, converter: CliConfigOverride
+    ) -> None:
+        """Type conversion failure includes path in error."""
+        with pytest.raises(ValueError, match="my.config.path") as exc:
+            converter._convert_to_type("not-a-number", int, "my.config.path")
+        assert "cannot be converted to int" in str(exc.value)
 
 
 class TestCliConfigOverrideGeneric:
@@ -281,83 +344,112 @@ class TestCliConfigOverrideGeneric:
         assert config.api.port == 9000
 
 
-class TestParseOverrides:
-    """Tests for ServeTool._parse_overrides CLI argument parsing."""
+class TestTypeValidation:
+    """Tests for type-aware validation in generic overrides."""
 
-    @staticmethod
-    def _parse_overrides(overrides: list[str] | None) -> dict[str, str] | None:
-        """Standalone implementation of _parse_overrides for testing."""
-        if not overrides:
-            return None
-        result = {}
-        for item in overrides:
-            if "=" not in item:
-                raise ValueError(
-                    f"Invalid override format: {item!r} (expected KEY=VALUE)"
-                )
-            key, value = item.split("=", 1)
-            key = key.strip()
-            if not key:
-                raise ValueError(
-                    f"Invalid override format: {item!r} (key cannot be empty)"
-                )
-            result[key] = value
-        return result
+    def test_float_field_gets_float_value(self) -> None:
+        """Float field receives float value, not int."""
+        config = MockConfig()
+        overrides = CliOverrides(generic={"engines.gpu_memory_utilization": "0.5"})
+        CliConfigOverride(overrides).apply(config)
+        assert config.engines.gpu_memory_utilization == 0.5
+        assert isinstance(config.engines.gpu_memory_utilization, float)
+
+    def test_int_field_gets_int_value(self) -> None:
+        """Int field receives int value."""
+        config = MockConfig()
+        overrides = CliOverrides(generic={"engines.max_batch_size": "64"})
+        CliConfigOverride(overrides).apply(config)
+        assert config.engines.max_batch_size == 64
+        assert isinstance(config.engines.max_batch_size, int)
+
+    def test_bool_field_rejects_invalid_string(self) -> None:
+        """Boolean field rejects non-boolean string values."""
+        config = MockConfig()
+        overrides = CliOverrides(generic={"engines.enforce_eager": "maybe"})
+        with pytest.raises(ValueError, match="expected boolean"):
+            CliConfigOverride(overrides).apply(config)
+
+    def test_int_field_rejects_fractional(self) -> None:
+        """Int field rejects fractional values."""
+        config = MockConfig()
+        overrides = CliOverrides(generic={"engines.max_batch_size": "3.14"})
+        with pytest.raises(ValueError, match="expected integer"):
+            CliConfigOverride(overrides).apply(config)
+
+    def test_float_field_rejects_boolean_string(self) -> None:
+        """Float field rejects boolean-like strings."""
+        config = MockConfig()
+        overrides = CliOverrides(generic={"engines.gpu_memory_utilization": "true"})
+        with pytest.raises(ValueError, match="cannot be converted to float"):
+            CliConfigOverride(overrides).apply(config)
+
+    def test_str_field_accepts_numeric_string(self) -> None:
+        """String field keeps numeric values as strings."""
+        config = MockConfig()
+        overrides = CliOverrides(generic={"api.host": "123"})
+        CliConfigOverride(overrides).apply(config)
+        assert config.api.host == "123"
+        assert isinstance(config.api.host, str)
+
+
+class TestParseOverrideArgs:
+    """Tests for parse_override_args CLI argument parsing."""
 
     def test_none_input(self) -> None:
         """Test that None input returns None."""
-        assert self._parse_overrides(None) is None
+        assert parse_override_args(None) is None
 
     def test_empty_list(self) -> None:
         """Test that empty list returns None."""
-        assert self._parse_overrides([]) is None
+        assert parse_override_args([]) is None
 
     def test_single_override(self) -> None:
         """Test parsing a single override."""
-        result = self._parse_overrides(["key=value"])
+        result = parse_override_args(["key=value"])
         assert result == {"key": "value"}
 
     def test_multiple_overrides(self) -> None:
         """Test parsing multiple overrides."""
-        result = self._parse_overrides(["key1=value1", "key2=value2"])
+        result = parse_override_args(["key1=value1", "key2=value2"])
         assert result == {"key1": "value1", "key2": "value2"}
 
     def test_dotted_key(self) -> None:
         """Test parsing dotted path keys."""
-        result = self._parse_overrides(["engines.vllm.gpu_memory_utilization=0.5"])
+        result = parse_override_args(["engines.vllm.gpu_memory_utilization=0.5"])
         assert result == {"engines.vllm.gpu_memory_utilization": "0.5"}
 
     def test_value_with_equals(self) -> None:
         """Test that value can contain equals sign."""
-        result = self._parse_overrides(["key=value=with=equals"])
+        result = parse_override_args(["key=value=with=equals"])
         assert result == {"key": "value=with=equals"}
 
     def test_empty_value(self) -> None:
         """Test that empty value is allowed."""
-        result = self._parse_overrides(["key="])
+        result = parse_override_args(["key="])
         assert result == {"key": ""}
 
     def test_missing_equals_raises(self) -> None:
         """Test that missing equals sign raises ValueError."""
         with pytest.raises(ValueError, match="expected KEY=VALUE"):
-            self._parse_overrides(["invalid"])
+            parse_override_args(["invalid"])
 
     def test_empty_key_raises(self) -> None:
         """Test that empty key raises ValueError."""
         with pytest.raises(ValueError, match="key cannot be empty"):
-            self._parse_overrides(["=value"])
+            parse_override_args(["=value"])
 
     def test_whitespace_key_raises(self) -> None:
         """Test that whitespace-only key raises ValueError."""
         with pytest.raises(ValueError, match="key cannot be empty"):
-            self._parse_overrides(["  =value"])
+            parse_override_args(["  =value"])
 
     def test_key_with_leading_whitespace_stripped(self) -> None:
         """Test that leading whitespace in key is stripped."""
-        result = self._parse_overrides(["  key=value"])
+        result = parse_override_args(["  key=value"])
         assert result == {"key": "value"}
 
     def test_key_with_trailing_whitespace_stripped(self) -> None:
         """Test that trailing whitespace in key is stripped."""
-        result = self._parse_overrides(["key  =value"])
+        result = parse_override_args(["key  =value"])
         assert result == {"key": "value"}

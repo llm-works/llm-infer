@@ -7,6 +7,7 @@ from typing import Any
 from appinfra.app.tools import Tool, ToolConfig
 
 from ...models import ModelResolver
+from ...serving.dispatch.config_overrides import parse_override_args
 
 
 class ServeTool(Tool):
@@ -175,22 +176,7 @@ class ServeTool(Tool):
 
     def _parse_overrides(self) -> dict[str, str] | None:
         """Parse -o key=value arguments into a dict."""
-        if not self.args.overrides:
-            return None
-        result = {}
-        for item in self.args.overrides:
-            if "=" not in item:
-                raise ValueError(
-                    f"Invalid override format: {item!r} (expected KEY=VALUE)"
-                )
-            key, value = item.split("=", 1)
-            key = key.strip()
-            if not key:
-                raise ValueError(
-                    f"Invalid override format: {item!r} (key cannot be empty)"
-                )
-            result[key] = value
-        return result
+        return parse_override_args(self.args.overrides)
 
     def _resolve_model_path(self, config: Any) -> Path | None:
         """Resolve model path from CLI, selection file, or config default.

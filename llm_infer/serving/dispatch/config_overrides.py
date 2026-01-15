@@ -11,10 +11,106 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args, get_origin, get_type_hints
 
 if TYPE_CHECKING:
     from .config import InferenceConfig
+
+
+def parse_override_args(overrides: list[str] | None) -> dict[str, str] | None:
+    """Parse KEY=VALUE override arguments into a dict.
+
+    Args:
+        overrides: List of "KEY=VALUE" strings from CLI (e.g., -o flag).
+
+    Returns:
+        Dict mapping keys to values, or None if no overrides.
+
+    Raises:
+        ValueError: If any override is malformed (missing '=' or empty key).
+    """
+    if not overrides:
+        return None
+    result = {}
+    for item in overrides:
+        if "=" not in item:
+            raise ValueError(f"Invalid override format: {item!r} (expected KEY=VALUE)")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Invalid override format: {item!r} (key cannot be empty)")
+        result[key] = value.strip()
+    return result
+
+
+def _get_nested_target(obj: Any, path: str) -> tuple[Any, str]:
+    """Get the target object and final attribute name for a dotted path.
+
+    Args:
+        obj: Root object to traverse.
+        path: Dot-separated path (e.g., "engines.vllm.gpu_memory_utilization").
+
+    Returns:
+        Tuple of (target_object, final_attr_name).
+
+    Raises:
+        ValueError: If any part of the path doesn't exist.
+    """
+    parts = path.split(".")
+    target = obj
+    for part in parts[:-1]:
+        if not hasattr(target, part):
+            raise ValueError(f"Invalid config path: {path!r} (no attribute {part!r})")
+        target = getattr(target, part)
+    if not hasattr(target, parts[-1]):
+        raise ValueError(f"Invalid config path: {path!r} (no attribute {parts[-1]!r})")
+    return target, parts[-1]
+
+
+def _get_field_type(obj: Any, attr: str) -> type | None:
+    """Get the type annotation for a field on an object.
+
+    Args:
+        obj: Object to inspect.
+        attr: Attribute name.
+
+    Returns:
+        The type annotation, or None if not found.
+    """
+    try:
+        hints = get_type_hints(type(obj))
+        return hints.get(attr)
+    except Exception:
+        return None
+
+
+def _normalize_type(field_type: type | None) -> tuple[type | None, bool]:
+    """Normalize a type annotation to its base type.
+
+    Handles Optional[T] (T | None) by extracting T and noting nullability.
+
+    Args:
+        field_type: The type annotation to normalize.
+
+    Returns:
+        Tuple of (base_type, is_nullable).
+    """
+    if field_type is None:
+        return None, True
+
+    origin = get_origin(field_type)
+
+    # Handle Union types (including X | None which is Optional[X])
+    if origin is type(int | str):  # UnionType
+        args = get_args(field_type)
+        non_none_args = [a for a in args if a is not type(None)]
+        is_nullable = type(None) in args
+        if len(non_none_args) == 1:
+            return non_none_args[0], is_nullable
+        # Multiple non-None types - can't determine single base type
+        return None, is_nullable
+
+    return field_type, False
 
 
 def _set_nested_attr(obj: Any, path: str, value: Any) -> None:
@@ -28,15 +124,8 @@ def _set_nested_attr(obj: Any, path: str, value: Any) -> None:
     Raises:
         ValueError: If any part of the path doesn't exist on the object.
     """
-    parts = path.split(".")
-    target = obj
-    for part in parts[:-1]:
-        if not hasattr(target, part):
-            raise ValueError(f"Invalid config path: {path!r} (no attribute {part!r})")
-        target = getattr(target, part)
-    if not hasattr(target, parts[-1]):
-        raise ValueError(f"Invalid config path: {path!r} (no attribute {parts[-1]!r})")
-    setattr(target, parts[-1], value)
+    target, attr = _get_nested_target(obj, path)
+    setattr(target, attr, value)
 
 
 class ConfigOverride(ABC):
@@ -129,16 +218,100 @@ class CliConfigOverride(ConfigOverride):
     def _apply_generic(
         self, config: InferenceConfig, overrides: dict[str, str]
     ) -> None:
-        """Apply generic dotted-path overrides with type inference."""
+        """Apply generic dotted-path overrides with type-aware conversion."""
         for key, value in overrides.items():
-            converted = self._convert_value(value)
-            _set_nested_attr(config, key, converted)
+            # Get target and expected type
+            target, attr = _get_nested_target(config, key)
+            field_type = _get_field_type(target, attr)
+            base_type, is_nullable = _normalize_type(field_type)
 
-    def _convert_value(self, value: str) -> Any:
-        """Convert string value to appropriate type."""
+            # Convert with type awareness
+            converted = self._convert_value_typed(value, base_type, is_nullable, key)
+            setattr(target, attr, converted)
+
+    def _convert_value_typed(
+        self, value: str, expected_type: type | None, is_nullable: bool, path: str
+    ) -> Any:
+        """Convert string value to the expected type.
+
+        Args:
+            value: String value to convert.
+            expected_type: Expected type (or None if unknown).
+            is_nullable: Whether None is allowed.
+            path: Config path (for error messages).
+
+        Returns:
+            Converted value.
+
+        Raises:
+            ValueError: If conversion fails or type doesn't match.
+        """
         # Handle null/none
         if value.lower() in ("null", "none"):
+            if not is_nullable and expected_type is not None:
+                raise ValueError(
+                    f"Invalid value for {path}: 'null' not allowed "
+                    f"(field type is {expected_type.__name__}, not Optional)"
+                )
             return None
+
+        # If we know the expected type, convert directly to it
+        if expected_type is not None:
+            return self._convert_to_type(value, expected_type, path)
+
+        # Fall back to inference if type is unknown
+        return self._convert_value_inferred(value)
+
+    def _convert_to_type(self, value: str, expected_type: type, path: str) -> Any:
+        """Convert string value to a specific type.
+
+        Args:
+            value: String value to convert.
+            expected_type: Target type.
+            path: Config path (for error messages).
+
+        Returns:
+            Converted value.
+
+        Raises:
+            ValueError: If conversion fails.
+        """
+        try:
+            if expected_type is bool:
+                # Special handling for booleans (can't just call bool())
+                if value.lower() in ("true", "yes", "1"):
+                    return True
+                if value.lower() in ("false", "no", "0"):
+                    return False
+                raise ValueError("expected boolean (true/false/yes/no)")
+
+            if expected_type is int:
+                # Handle scientific notation for ints
+                f = float(value)
+                if not f.is_integer():
+                    raise ValueError(f"expected integer, got {value!r}")
+                return int(f)
+
+            if expected_type is float:
+                return float(value)
+
+            if expected_type is str:
+                return value
+
+            # For other types, try direct conversion
+            return expected_type(value)
+
+        except (ValueError, TypeError) as e:
+            raise ValueError(
+                f"Invalid value for {path}: {value!r} cannot be converted to "
+                f"{expected_type.__name__} ({e})"
+            ) from e
+
+    def _convert_value_inferred(self, value: str) -> Any:
+        """Convert string value using type inference (fallback).
+
+        Used when the target field's type annotation is unknown.
+        """
         # Handle booleans
         if value.lower() in ("true", "yes"):
             return True

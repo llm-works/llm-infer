@@ -6,6 +6,7 @@ Uses class-based registry pattern for clean extensibility.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -75,36 +76,6 @@ class NativeEngineFactory(EngineFactory):
 class VLLMEngineFactory(EngineFactory):
     """Factory for vLLM-backed inference engine."""
 
-    def _build_engine_config(self, config: InferenceConfig) -> Any:
-        """Build VLLMConfig from inference config."""
-        from ...pipelines.engines.vllm_engine import VLLMConfig
-
-        self._validate_model_path(config)
-        vllm_cfg = config.engines.vllm
-        return VLLMConfig(
-            model_path=str(config.models.path),
-            task=vllm_cfg.task,
-            gpu_memory_utilization=vllm_cfg.gpu_memory_utilization,
-            cpu_offload_gb=vllm_cfg.cpu_offload_gb,
-            swap_space=vllm_cfg.swap_space,
-            max_model_len=vllm_cfg.max_model_len,
-            tensor_parallel_size=vllm_cfg.tensor_parallel_size,
-            pipeline_parallel_size=vllm_cfg.pipeline_parallel_size,
-            max_num_seqs=vllm_cfg.max_num_seqs,
-            max_num_batched_tokens=vllm_cfg.max_num_batched_tokens,
-            scheduling_policy=vllm_cfg.scheduling_policy,
-            enable_prefix_caching=vllm_cfg.enable_prefix_caching,
-            kv_cache_dtype=vllm_cfg.kv_cache_dtype,
-            enforce_eager=vllm_cfg.enforce_eager,
-            disable_custom_all_reduce=vllm_cfg.disable_custom_all_reduce,
-            max_cudagraph_capture_size=vllm_cfg.max_cudagraph_capture_size,
-            quantization=vllm_cfg.quantization,
-            speculative_model=vllm_cfg.speculative_model,
-            num_speculative_tokens=vllm_cfg.num_speculative_tokens,
-            dtype=vllm_cfg.dtype,
-            trust_remote_code=vllm_cfg.trust_remote_code,
-        )
-
     def _validate_model_path(self, config: InferenceConfig) -> None:
         """Validate model path is set."""
         if config.models.path is None:
@@ -122,8 +93,9 @@ class VLLMEngineFactory(EngineFactory):
                 "Install with: pip install vllm\nOr use native engine: backends.engine=native"
             ) from e
 
-        engine_config = self._build_engine_config(config)
-        return VLLMEngine(engine_config, lg)
+        self._validate_model_path(config)
+        vllm_cfg = replace(config.engines.vllm, model_path=str(config.models.path))
+        return VLLMEngine(vllm_cfg, lg)
 
     def warmup_enabled(self, config: InferenceConfig) -> bool:
         return config.engines.vllm.warmup
