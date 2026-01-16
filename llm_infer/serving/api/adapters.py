@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..dispatch.types import AdapterListRequest, AdapterRefreshRequest
@@ -54,7 +54,12 @@ async def _list_adapters(request: Request) -> AdapterListResponse:
     request_id = f"adapter-list-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterListRequest(id=request_id)
 
-    response = await ipc.submit(request_id, internal_request)
+    try:
+        response = await ipc.submit(request_id, internal_request)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to list adapters: {e}"
+        ) from e
 
     return AdapterListResponse(
         adapters=[
@@ -87,7 +92,12 @@ async def _refresh_adapters(
     request_id = f"adapter-refresh-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterRefreshRequest(id=request_id, adapter_id=adapter_id)
 
-    response = await ipc.submit(request_id, internal_request)
+    try:
+        response = await ipc.submit(request_id, internal_request)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to refresh adapters: {e}"
+        ) from e
 
     return RefreshResponse(
         adapter_id=response.adapter_id,

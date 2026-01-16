@@ -55,15 +55,20 @@ class RequestHandler(ABC):
     Template Method: _process_request() defines the request processing
     algorithm, with subclasses implementing submit() and step() for
     queue management.
+
+    Subclasses must call super().__init__() in their __init__ method.
     """
 
-    _response_q: mp.Queue | None = None
-    _lg: Logger | None = None
-    _lora_base_path: Path | None = None
-    _adapter_manager: AdapterManager | None = None
-    _loaded_adapters: set[str] | None = (
-        None  # Track adapters loaded by vLLM (lazy init)
-    )
+    def __init__(self) -> None:
+        """Initialize base handler state.
+
+        Subclasses must call super().__init__() to ensure proper initialization.
+        """
+        self._response_q: mp.Queue | None = None
+        self._lg: Logger | None = None
+        self._lora_base_path: Path | None = None
+        self._adapter_manager: AdapterManager | None = None
+        self._loaded_adapters: set[str] | None = None
 
     def set_logger(self, lg: Logger) -> None:
         """Set the logger for request context creation."""
@@ -81,6 +86,10 @@ class RequestHandler(ABC):
                 skip enabled-check (fall back to path-only validation).
         """
         self._adapter_manager = manager
+
+    def get_adapter_manager(self) -> AdapterManager | None:
+        """Get the adapter manager for external access (e.g., processors)."""
+        return self._adapter_manager
 
     def set_lora_base_path(self, path: str | None) -> None:
         """Set the base path for LoRA adapter resolution.

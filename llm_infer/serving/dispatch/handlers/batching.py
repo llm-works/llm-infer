@@ -61,6 +61,7 @@ class ContinuousBatchingHandler(RequestHandler):
             max_batch_size: Maximum requests to batch together.
             max_pending: Maximum total pending requests before rejection.
         """
+        super().__init__()
         self._engine = engine
         self.max_batch_size = max_batch_size
         self.max_pending = max_pending

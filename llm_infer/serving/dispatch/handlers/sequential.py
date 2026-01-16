@@ -31,6 +31,7 @@ class SequentialHandler(RequestHandler):
         Args:
             engine: The inference engine to use for generation.
         """
+        super().__init__()
         self._engine = engine
         self.queue: deque[Request] = deque()
         self.current: Request | None = None

@@ -124,7 +124,7 @@ class AdapterProcessor(RequestProcessor):
         response_q: mp.Queue[Any],
     ) -> None:
         """List all loaded adapters."""
-        manager = handler._adapter_manager
+        manager = handler.get_adapter_manager()
         if manager is None:
             response_q.put(AdapterListResponse(id=request.id, adapters=[]))
             return
@@ -146,7 +146,7 @@ class AdapterProcessor(RequestProcessor):
         response_q: mp.Queue[Any],
     ) -> None:
         """Refresh adapters (single or full scan)."""
-        manager = handler._adapter_manager
+        manager = handler.get_adapter_manager()
         if manager is None:
             response_q.put(self._make_refresh_response(request, 0, "disabled"))
             return
