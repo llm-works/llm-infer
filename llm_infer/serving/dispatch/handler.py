@@ -16,13 +16,11 @@ from .types import Request, RequestStatus, Response, StreamChunk
 class AdapterError(Exception):
     """Raised when adapter resolution fails."""
 
-    pass
-
 
 def _stable_adapter_id(adapter_id: str) -> int:
     """Generate deterministic integer ID from adapter name.
 
-    Uses MD5 hash to ensure consistent IDs across process restarts.
+    Uses SHA-256 hash to ensure consistent IDs across process restarts.
     Python's built-in hash() is randomized per-process since Python 3.3.
 
     Args:
@@ -31,13 +29,14 @@ def _stable_adapter_id(adapter_id: str) -> int:
     Returns:
         Positive 31-bit integer suitable for vLLM's lora_int_id.
     """
-    return int(hashlib.md5(adapter_id.encode()).hexdigest(), 16) % (2**31)
+    return int(hashlib.sha256(adapter_id.encode()).hexdigest(), 16) % (2**31)
 
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
     from ...primitives.protocols import InferenceEngineProtocol
+    from ..adapters import AdapterManager
 
 
 class RequestHandler(ABC):
@@ -59,10 +58,24 @@ class RequestHandler(ABC):
     _response_q: mp.Queue | None = None
     _lg: Logger | None = None
     _lora_base_path: Path | None = None
+    _adapter_manager: AdapterManager | None = None
 
     def set_logger(self, lg: Logger) -> None:
         """Set the logger for request context creation."""
         self._lg = lg
+
+    def set_adapter_manager(self, manager: AdapterManager | None) -> None:
+        """Set the adapter manager for validation.
+
+        When set, adapter_id must be registered (enabled) in the manager
+        for inference to proceed. This enforces the `enabled` field in
+        adapter config.yaml files.
+
+        Args:
+            manager: AdapterManager instance for validation, or None to
+                skip enabled-check (fall back to path-only validation).
+        """
+        self._adapter_manager = manager
 
     def set_lora_base_path(self, path: str | None) -> None:
         """Set the base path for LoRA adapter resolution.
@@ -192,25 +205,20 @@ class RequestHandler(ABC):
             )
         return adapter_path
 
-    def _resolve_lora_request(self, adapter_id: str | None) -> Any | None:
-        """Resolve adapter_id to a vLLM LoRARequest.
+    def _check_adapter_enabled(self, adapter_id: str) -> None:
+        """Raise AdapterError if adapter is not enabled in manager."""
+        if self._adapter_manager and not self._adapter_manager.is_available(adapter_id):
+            raise AdapterError(
+                f"adapter '{adapter_id}' is not enabled. "
+                "Set 'enabled: true' in the adapter's config.yaml."
+            )
 
-        Returns:
-            LoRARequest if adapter_id is valid, None if adapter_id is None.
-
-        Raises:
-            AdapterError: If adapter_id is invalid, not found, or LoRA module unavailable.
-        """
-        if not adapter_id:
-            return None
-
-        adapter_path = self._validate_adapter_path(adapter_id)
-
-        if not adapter_path.exists():
-            raise AdapterError(f"adapter '{adapter_id}' not found at {adapter_path}")
-
+    def _import_lora_request_class(self, adapter_id: str) -> type:
+        """Import and return vLLM LoRARequest class, raising AdapterError if unavailable."""
         try:
             from vllm.lora.request import LoRARequest
+
+            return LoRARequest
         except ImportError:
             if self._lg:
                 self._lg.warning(
@@ -220,7 +228,27 @@ class RequestHandler(ABC):
                 f"adapter_id '{adapter_id}' specified but vLLM LoRA module not available"
             )
 
-        return LoRARequest(
+    def _resolve_lora_request(self, adapter_id: str | None) -> Any | None:
+        """Resolve adapter_id to a vLLM LoRARequest.
+
+        Returns:
+            LoRARequest if adapter_id is valid, None if adapter_id is None.
+
+        Raises:
+            AdapterError: If adapter_id is invalid, not enabled, not found,
+                or LoRA module unavailable.
+        """
+        if not adapter_id:
+            return None
+
+        adapter_path = self._validate_adapter_path(adapter_id)
+        self._check_adapter_enabled(adapter_id)
+
+        if not adapter_path.exists():
+            raise AdapterError(f"adapter '{adapter_id}' not found at {adapter_path}")
+
+        lora_request_cls = self._import_lora_request_class(adapter_id)
+        return lora_request_cls(
             lora_name=adapter_id,
             lora_int_id=_stable_adapter_id(adapter_id),
             lora_path=str(adapter_path),
@@ -266,6 +294,13 @@ class RequestHandler(ABC):
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             )
+        except AdapterError as e:
+            # Adapter validation errors (invalid ID, not enabled, not found)
+            if self._lg:
+                self._lg.warning(
+                    "adapter error", extra={"request_id": request.id, "error": str(e)}
+                )
+            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
         except Exception as e:
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
 
@@ -334,6 +369,18 @@ class RequestHandler(ABC):
             )
             self._stream_tokens_to_queue(request, stream)
             return self._finalize_stream(request, stream)
+        except AdapterError as e:
+            # Adapter validation errors (invalid ID, not enabled, not found)
+            if self._lg:
+                self._lg.warning(
+                    "adapter error", extra={"request_id": request.id, "error": str(e)}
+                )
+            if self._response_q is not None:
+                error_chunk = StreamChunk(
+                    id=request.id, token="", is_final=True, finish_reason="error"
+                )
+                self._response_q.put(error_chunk)
+            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
         except Exception as e:
             if self._response_q is not None:
                 error_chunk = StreamChunk(

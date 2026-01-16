@@ -241,6 +241,7 @@ class BootSequence:
             # Initialize adapter manager and scan for adapters
             self._adapter_manager = AdapterManager(lora_cfg.base_path, self._lg)
             count = self._adapter_manager.scan()
+            self._handler.set_adapter_manager(self._adapter_manager)
             self._lg.info(
                 "LoRA enabled",
                 extra={"base_path": lora_cfg.base_path, "adapters_loaded": count},
