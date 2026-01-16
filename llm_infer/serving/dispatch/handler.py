@@ -267,7 +267,7 @@ class RequestHandler(ABC):
         try:
             from vllm.lora.request import LoRARequest
 
-            return LoRARequest
+            return LoRARequest  # type: ignore[no-any-return]
         except ImportError:
             if self._lg:
                 self._lg.warning(
