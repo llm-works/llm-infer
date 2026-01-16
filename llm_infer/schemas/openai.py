@@ -66,6 +66,12 @@ class ChatCompletionRequest(BaseModel):
     user: str | None = None
     seed: int | None = None
 
+    # llm-infer extension: LoRA adapter selection
+    adapter_id: str | None = Field(
+        None,
+        description="Name of LoRA adapter to use for this request (llm-infer extension)",
+    )
+
     @model_validator(mode="after")
     def validate_unsupported(self) -> "ChatCompletionRequest":
         """Reject requests with unsupported features that would silently fail."""
@@ -165,6 +171,12 @@ class CompletionRequest(BaseModel):
     logit_bias: dict[str, float] | None = None
     logprobs: int | None = None
     user: str | None = None
+
+    # llm-infer extension: LoRA adapter selection
+    adapter_id: str | None = Field(
+        None,
+        description="Name of LoRA adapter to use for this request (llm-infer extension)",
+    )
 
     @model_validator(mode="after")
     def validate_unsupported(self) -> "CompletionRequest":

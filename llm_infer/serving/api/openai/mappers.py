@@ -80,6 +80,7 @@ def chat_request_to_internal(
         use_chat_template=None,  # Let engine auto-detect based on model type
         stop_sequences=normalize_stop_sequences(body.stop),
         messages=messages,
+        adapter_id=body.adapter_id,  # LoRA adapter selection
     )
 
 
@@ -102,6 +103,7 @@ def completion_request_to_internal(
         stream=body.stream,
         use_chat_template=False,  # Raw completion, no chat template
         stop_sequences=normalize_stop_sequences(body.stop),
+        adapter_id=body.adapter_id,  # LoRA adapter selection
     )
 
 

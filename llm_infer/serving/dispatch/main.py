@@ -10,6 +10,8 @@ from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
 from appinfra.time import ETA, Ticker, delta_str, since, start
 
+from ..adapters import AdapterManager
+from ..api.adapters import create_adapter_router
 from ..api.openai.router import create_openai_router
 from ..api.routes import create_health_handler, create_routes
 from .config import InferenceConfig
@@ -180,6 +182,7 @@ class BootSequence:
         self._engine: Any = None
         self._handler: RequestHandler | None = None
         self._memory_ticker: Ticker | None = None
+        self._adapter_manager: AdapterManager | None = None
 
         # Shutdown coordination
         self._shutdown = threading.Event()
@@ -229,6 +232,20 @@ class BootSequence:
         """Phase 3: Create request handler."""
         self._handler = create_handler(self._lg, self._engine, self._config)
         self._lg.info("handler created", extra={"type": self._config.dispatch.handler})
+
+        # Configure LoRA if enabled
+        lora_cfg = self._config.engines.vllm.lora
+        if lora_cfg.enabled and lora_cfg.base_path:
+            self._handler.set_lora_base_path(lora_cfg.base_path)
+
+            # Initialize adapter manager and scan for adapters
+            self._adapter_manager = AdapterManager(lora_cfg.base_path, self._lg)
+            count = self._adapter_manager.scan()
+            self._handler.set_adapter_manager(self._adapter_manager)
+            self._lg.info(
+                "LoRA enabled",
+                extra={"base_path": lora_cfg.base_path, "adapters_loaded": count},
+            )
 
     def warmup(self) -> None:
         """Phase 4: Run warmup query if configured."""
@@ -322,31 +339,49 @@ class BootSequence:
     # Internal helpers
     # -----------------------------------------------------------------------
 
-    def _build_server(self, model_name: str) -> Server:
-        """Build the HTTP server."""
-        cfg = self._config
-        health_handler = create_health_handler(self._ready)
+    def _add_lora_routes(self, builder: Any) -> Any:
+        """Add LoRA adapter routes if enabled (call in routes mode)."""
+        lora_cfg = self._config.engines.vllm.lora
+        if lora_cfg.enabled and lora_cfg.base_path:
+            builder = builder.with_router(create_adapter_router(), prefix="/v1")
+        return builder
 
+    def _build_server_builder(self) -> Any:
+        """Build initial ServerBuilder with host/port/metadata."""
+        cfg = self._config.api
         return (
             ServerBuilder("inference")
-            .with_host(cfg.api.host)
-            .with_port(cfg.api.port)
-            .with_title(cfg.api.title)
-            .with_description(cfg.api.description)
-            .with_version(cfg.api.version)
+            .with_host(cfg.host)
+            .with_port(cfg.port)
+            .with_title(cfg.title)
+            .with_description(cfg.description)
+            .with_version(cfg.version)
+        )
+
+    def _build_server(self, model_name: str) -> Server:
+        """Build the HTTP server."""
+        cfg = self._config.api
+        health_handler = create_health_handler(self._ready)
+
+        routes_builder = (
+            self._build_server_builder()
             .routes.with_route("/health", health_handler)
             .with_router(create_routes(model_name))
             .with_router(create_openai_router(model_name), prefix="/v1")
-            .done()
+        )
+        routes_builder = self._add_lora_routes(routes_builder)
+
+        return (
+            routes_builder.done()
             .subprocess.with_ipc(self._request_q, self._response_q)
-            .with_log_file(cfg.api.log_file)
+            .with_log_file(cfg.log_file)
             .with_auto_restart(enabled=True)
-            .with_response_timeout(cfg.api.response_timeout)
+            .with_response_timeout(cfg.response_timeout)
             .done()
-            .uvicorn.with_workers(cfg.api.uvicorn.workers)
-            .with_timeout_keep_alive(cfg.api.uvicorn.timeout_keep_alive)
-            .with_log_level(cfg.api.uvicorn.log_level)
-            .with_access_log(cfg.api.uvicorn.access_log)
+            .uvicorn.with_workers(cfg.uvicorn.workers)
+            .with_timeout_keep_alive(cfg.uvicorn.timeout_keep_alive)
+            .with_log_level(cfg.uvicorn.log_level)
+            .with_access_log(cfg.uvicorn.access_log)
             .done()
             .build()
         )

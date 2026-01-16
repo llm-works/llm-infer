@@ -58,6 +58,7 @@ class BoundedQueueHandler(RequestHandler):
             batch_streaming: Allow streaming requests to join batched decode.
                 When True, streaming requests batch with others for better throughput.
         """
+        super().__init__()
         self._engine = engine
         self.max_pending = max_pending
         self.max_batch_size = max_batch_size

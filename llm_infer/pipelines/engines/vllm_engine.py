@@ -29,6 +29,8 @@ except ImportError as e:
     _VLLM_ERROR = str(e)
 
 if TYPE_CHECKING:
+    from vllm.lora.request import LoRARequest
+
     from ...context import RequestContext
 
 
@@ -203,6 +205,7 @@ class VLLMEngine:
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
         messages: list[dict[str, str]] | None = None,
+        lora_request: LoRARequest | None = None,
     ) -> str:
         """Generate text completion (blocking).
 
@@ -217,6 +220,7 @@ class VLLMEngine:
             stop_sequences: Sequences that stop generation
             context: Request context for logging
             messages: Chat messages (alternative to prompt)
+            lora_request: Optional vLLM LoRARequest for adapter inference
 
         Returns:
             Generated text
@@ -238,6 +242,7 @@ class VLLMEngine:
         outputs = self._engine.generate(
             prompts=[final_prompt],
             sampling_params=sampling_params,
+            lora_request=lora_request,
             use_tqdm=False,
         )
 
@@ -273,6 +278,7 @@ class VLLMEngine:
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
         messages: list[dict[str, str]] | None = None,
+        lora_request: LoRARequest | None = None,
     ) -> VLLMStreamingResult:
         """Generate text with streaming (sync wrapper)."""
         final_prompt = self._prepare_prompt(prompt, messages, use_chat_template)
@@ -285,7 +291,10 @@ class VLLMEngine:
             stop_sequences=stop_sequences,
         )
         outputs = self._engine.generate(
-            prompts=[final_prompt], sampling_params=sampling_params, use_tqdm=False
+            prompts=[final_prompt],
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+            use_tqdm=False,
         )
         return self._build_streaming_result(outputs, final_prompt)
 

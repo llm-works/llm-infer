@@ -46,7 +46,11 @@ def run_engine_loop(
         except Empty:
             pass
         for response in handler.step():
+            if lg:
+                lg.trace("queueing response", extra={"response_id": response.id})
             response_q.put(response)
+            if lg:
+                lg.trace("response queued", extra={"response_id": response.id})
 
 
 def run_engine_loop_async(

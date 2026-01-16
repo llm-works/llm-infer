@@ -95,6 +95,7 @@ class ChatClient(Protocol):
         model: str = "default",
         temperature: float = 1.0,
         max_tokens: int | None = None,
+        adapter_id: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request."""
@@ -107,6 +108,7 @@ class ChatClient(Protocol):
         model: str = "default",
         temperature: float = 1.0,
         max_tokens: int | None = None,
+        adapter_id: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Send a streaming chat completion request, yielding tokens."""
@@ -171,6 +173,7 @@ class OpenAIClient:
         model: str = "default",
         temperature: float = 1.0,
         max_tokens: int | None = None,
+        adapter_id: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request.
@@ -181,6 +184,7 @@ class OpenAIClient:
             model: Model name to use.
             temperature: Sampling temperature (0.0 to 2.0).
             max_tokens: Maximum tokens to generate.
+            adapter_id: Optional LoRA adapter name for vLLM (llm-infer extension).
             **kwargs: Additional parameters passed to the API.
 
         Returns:
@@ -193,7 +197,13 @@ class OpenAIClient:
         url = f"{self._base_url}/chat/completions"
         built_messages = self._build_messages(messages, system)
         payload = self._build_payload(
-            built_messages, model, temperature, max_tokens, stream=False, **kwargs
+            built_messages,
+            model,
+            temperature,
+            max_tokens,
+            stream=False,
+            adapter_id=adapter_id,
+            **kwargs,
         )
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -201,20 +211,7 @@ class OpenAIClient:
             resp.raise_for_status()
             data = resp.json()
 
-        # Extract response components
-        choices = data.get("choices", [])
-        if not choices:
-            raise ValueError("API returned empty choices array")
-        choice = choices[0]
-        content = choice["message"]["content"]
-        finish_reason = _parse_finish_reason(choice.get("finish_reason"))
-        usage = _parse_usage(data.get("usage"))
-
-        response = ChatResponse(
-            content=content,
-            usage=usage,
-            finish_reason=finish_reason,
-        )
+        response = _parse_chat_response(data)
         self._last_response = response
         return response
 
@@ -225,6 +222,7 @@ class OpenAIClient:
         model: str = "default",
         temperature: float = 1.0,
         max_tokens: int | None = None,
+        adapter_id: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Send a streaming chat completion request.
@@ -238,6 +236,7 @@ class OpenAIClient:
             model: Model name to use.
             temperature: Sampling temperature (0.0 to 2.0).
             max_tokens: Maximum tokens to generate.
+            adapter_id: Optional LoRA adapter name for vLLM (llm-infer extension).
             **kwargs: Additional parameters passed to the API.
 
         Yields:
@@ -250,7 +249,13 @@ class OpenAIClient:
         url = f"{self._base_url}/chat/completions"
         built_messages = self._build_messages(messages, system)
         payload = self._build_payload(
-            built_messages, model, temperature, max_tokens, stream=True, **kwargs
+            built_messages,
+            model,
+            temperature,
+            max_tokens,
+            stream=True,
+            adapter_id=adapter_id,
+            **kwargs,
         )
 
         state = _StreamState()
@@ -409,6 +414,19 @@ def _parse_usage(data: dict[str, Any] | None) -> ChatCompletionUsage | None:
         prompt_tokens=data.get("prompt_tokens", 0),
         completion_tokens=data.get("completion_tokens", 0),
         total_tokens=data.get("total_tokens", 0),
+    )
+
+
+def _parse_chat_response(data: dict[str, Any]) -> ChatResponse:
+    """Parse API response data into ChatResponse."""
+    choices = data.get("choices", [])
+    if not choices:
+        raise ValueError("API returned empty choices array")
+    choice = choices[0]
+    return ChatResponse(
+        content=choice["message"]["content"],
+        usage=_parse_usage(data.get("usage")),
+        finish_reason=_parse_finish_reason(choice.get("finish_reason")),
     )
 
 

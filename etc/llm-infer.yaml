@@ -49,7 +49,8 @@ api:
   port: 8000
 
   # Response timeout for client requests (seconds)
-  response_timeout: 60.0
+  # Note: First LoRA request may take 2+ minutes for kernel compilation
+  response_timeout: 180.0
 
   # Uvicorn log isolation
   log_file: null          # Set to path to isolate uvicorn logs (e.g., .logs/uvicorn.log)
