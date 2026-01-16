@@ -1194,7 +1194,7 @@ completed requests successfully, but responses never reached the API subprocess,
 timeouts.
 
 **Symptom:**
-```
+```text
 # Server logs show successful processing (81ms):
 [D] requested   request_id[chatcmpl-22bbd67...] stream[False]
 [D] decoded     [79ms]

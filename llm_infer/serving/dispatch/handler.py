@@ -241,6 +241,10 @@ class RequestHandler(ABC):
             return
 
         # Fallback: read config.yaml directly (for testing or when manager not set)
+        self._check_adapter_config_file(adapter_id, adapter_path)
+
+    def _check_adapter_config_file(self, adapter_id: str, adapter_path: Path) -> None:
+        """Check adapter config.yaml exists and has enabled: true."""
         config_path = adapter_path / "config.yaml"
         if not config_path.exists():
             raise AdapterError(
@@ -255,6 +259,12 @@ class RequestHandler(ABC):
             raise AdapterError(
                 f"failed to read adapter '{adapter_id}' config: {e}"
             ) from e
+
+        if not isinstance(config, dict):
+            raise AdapterError(
+                f"adapter '{adapter_id}' config.yaml must be a mapping, "
+                f"got {type(config).__name__}"
+            )
 
         if not config.get("enabled", False):
             raise AdapterError(
@@ -302,8 +312,10 @@ class RequestHandler(ABC):
             AdapterError: If adapter_id is invalid, not enabled, not found,
                 or LoRA module unavailable.
         """
-        if not adapter_id:
+        if adapter_id is None:
             return None
+        if not adapter_id:
+            raise AdapterError("adapter_id cannot be empty")
 
         adapter_path = self._validate_adapter_path(adapter_id)
         if not adapter_path.exists():
