@@ -1181,3 +1181,71 @@ rather than re-tokenizing and re-decoding. The tokenizer's byte-level tokens don
 Unicode character boundaries, making per-token decoding fundamentally broken for multi-byte
 characters.
 
+
+### 15. appinfra `with_on_startup` Breaks IPC Response Queue
+
+**Date:** 2026-01-16
+
+**File:** `llm_infer/serving/dispatch/main.py`
+
+**Problem:** When using appinfra's `with_on_startup()` callback with subprocess mode
+(`.subprocess.with_ipc()`), the response queue stopped delivering messages. The main process
+completed requests successfully, but responses never reached the API subprocess, causing client
+timeouts.
+
+**Symptom:**
+```
+# Server logs show successful processing (81ms):
+[D] requested   request_id[chatcmpl-22bbd67...] stream[False]
+[D] decoded     [79ms]
+[D] complete    [81ms] prompt_tokens[30] completion_tokens[34]
+[T] queueing response  response_id[chatcmpl-22bbd67...]
+[T] response queued    response_id[chatcmpl-22bbd67...]
+
+# But client times out after 180s:
+TimeoutError: Request chatcmpl-22bbd67... timed out after 180.0s
+```
+
+**Root cause:** A bug in appinfra's handling of startup callbacks when combined with subprocess IPC
+mode. The startup callback execution interfered with the response queue listener thread in the API
+subprocess. The exact mechanism was in appinfra's internal code.
+
+**Debugging approach:**
+1. Added trace logging around `response_q.put()` - confirmed responses WERE being queued
+2. Confirmed engine completed requests in ~80ms but API timed out at 180s
+3. Disabled `with_on_startup()` callback - IPC started working immediately
+4. Re-enabled callback after appinfra fix - confirmed fix worked
+
+**Code that triggered the bug:**
+```python
+# This startup callback broke IPC when combined with subprocess mode
+def _add_lora_startup(self, builder: Any) -> Any:
+    lora_cfg = self._config.engines.vllm.lora
+    if lora_cfg.enabled and lora_cfg.base_path:
+        builder = builder.with_on_startup(
+            self._create_adapter_startup_callback(lora_cfg.base_path)
+        )
+    return builder
+
+# Used with subprocess IPC:
+builder.subprocess.with_ipc(self._request_q, self._response_q)
+```
+
+**Fix:** Bug was in appinfra - reported and fixed by appinfra team.
+
+**Trace logging added for future debugging:**
+```python
+# In loop.py - trace-level logging for response queue operations
+for response in handler.step():
+    if lg:
+        lg.trace("queueing response", extra={"response_id": response.id})
+    response_q.put(response)
+    if lg:
+        lg.trace("response queued", extra={"response_id": response.id})
+```
+
+**Insight:** When debugging IPC issues between processes, add logging on BOTH sides of the queue.
+Confirming that `put()` succeeds but the other side never receives narrows the problem to the
+queue consumer or the queue itself. In this case, it pointed to appinfra's IPC listener being
+broken by the startup callback.
+

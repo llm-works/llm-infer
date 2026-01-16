@@ -42,7 +42,7 @@ warmup: true
 
 # LoRA/QLoRA adapter support
 lora:
-  enabled: false             # Enable LoRA adapter support
+  enabled: true              # Enable LoRA adapter support
   max_loras: 4               # Maximum concurrent adapters in GPU memory
   max_lora_rank: 64          # Maximum LoRA rank supported
   base_path: !path "~/ops/models/adapters/LoRA" # Base directory for adapter weights

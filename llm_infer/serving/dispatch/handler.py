@@ -59,6 +59,9 @@ class RequestHandler(ABC):
     _lg: Logger | None = None
     _lora_base_path: Path | None = None
     _adapter_manager: AdapterManager | None = None
+    _loaded_adapters: set[str] | None = (
+        None  # Track adapters loaded by vLLM (lazy init)
+    )
 
     def set_logger(self, lg: Logger) -> None:
         """Set the logger for request context creation."""
@@ -205,11 +208,33 @@ class RequestHandler(ABC):
             )
         return adapter_path
 
-    def _check_adapter_enabled(self, adapter_id: str) -> None:
-        """Raise AdapterError if adapter is not enabled in manager."""
-        if self._adapter_manager and not self._adapter_manager.is_available(adapter_id):
+    def _check_adapter_enabled(self, adapter_path: Path) -> None:
+        """Check adapter is enabled by reading its config.yaml directly.
+
+        Reads from filesystem each time to support hot-reload of adapters
+        without requiring handler restart.
+
+        Raises:
+            AdapterError: If adapter is not enabled or config is missing/invalid.
+        """
+        config_path = adapter_path / "config.yaml"
+        if not config_path.exists():
             raise AdapterError(
-                f"adapter '{adapter_id}' is not enabled. "
+                f"adapter config not found at {config_path}. "
+                "Create config.yaml with 'enabled: true'."
+            )
+
+        try:
+            import yaml
+
+            with open(config_path, encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+        except Exception as e:
+            raise AdapterError(f"failed to read adapter config: {e}")
+
+        if not config.get("enabled", False):
+            raise AdapterError(
+                f"adapter '{adapter_path.name}' is not enabled. "
                 "Set 'enabled: true' in the adapter's config.yaml."
             )
 
@@ -228,6 +253,21 @@ class RequestHandler(ABC):
                 f"adapter_id '{adapter_id}' specified but vLLM LoRA module not available"
             )
 
+    def _log_and_track_adapter(self, adapter_id: str, adapter_path: Path) -> None:
+        """Log adapter usage and track as loaded. Warns on first load."""
+        if self._loaded_adapters is None:
+            self._loaded_adapters = set()
+        is_first_load = adapter_id not in self._loaded_adapters
+        if self._lg:
+            if is_first_load:
+                self._lg.info(
+                    "loading LoRA adapter (first use, kernel compilation may take 1-2 min)",
+                    extra={"adapter_id": adapter_id, "path": str(adapter_path)},
+                )
+            else:
+                self._lg.debug("using LoRA adapter", extra={"adapter_id": adapter_id})
+        self._loaded_adapters.add(adapter_id)
+
     def _resolve_lora_request(self, adapter_id: str | None) -> Any | None:
         """Resolve adapter_id to a vLLM LoRARequest.
 
@@ -242,13 +282,12 @@ class RequestHandler(ABC):
             return None
 
         adapter_path = self._validate_adapter_path(adapter_id)
-        self._check_adapter_enabled(adapter_id)
-
         if not adapter_path.exists():
             raise AdapterError(f"adapter '{adapter_id}' not found at {adapter_path}")
+        self._check_adapter_enabled(adapter_path)
+        self._log_and_track_adapter(adapter_id, adapter_path)
 
-        lora_request_cls = self._import_lora_request_class(adapter_id)
-        return lora_request_cls(
+        return self._import_lora_request_class(adapter_id)(
             lora_name=adapter_id,
             lora_int_id=_stable_adapter_id(adapter_id),
             lora_path=str(adapter_path),

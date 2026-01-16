@@ -339,45 +339,59 @@ class BootSequence:
     # Internal helpers
     # -----------------------------------------------------------------------
 
-    def _add_lora_routes(self, builder: Any) -> Any:
-        """Add LoRA adapter routes if enabled."""
+    def _add_lora_startup(self, builder: Any) -> Any:
+        """Add LoRA startup callback if enabled (must be called before .routes)."""
         lora_cfg = self._config.engines.vllm.lora
         if lora_cfg.enabled and lora_cfg.base_path:
-            builder = builder.with_router(create_adapter_router(), prefix="/v1")
             builder = builder.with_on_startup(
                 self._create_adapter_startup_callback(lora_cfg.base_path)
             )
         return builder
 
-    def _build_server(self, model_name: str) -> Server:
-        """Build the HTTP server."""
-        cfg = self._config
-        health_handler = create_health_handler(self._ready)
+    def _add_lora_routes(self, builder: Any) -> Any:
+        """Add LoRA adapter routes if enabled (call in routes mode)."""
+        lora_cfg = self._config.engines.vllm.lora
+        if lora_cfg.enabled and lora_cfg.base_path:
+            builder = builder.with_router(create_adapter_router(), prefix="/v1")
+        return builder
 
+    def _build_server_builder(self) -> Any:
+        """Build initial ServerBuilder with host/port/metadata."""
+        cfg = self._config.api
         builder = (
             ServerBuilder("inference")
-            .with_host(cfg.api.host)
-            .with_port(cfg.api.port)
-            .with_title(cfg.api.title)
-            .with_description(cfg.api.description)
-            .with_version(cfg.api.version)
+            .with_host(cfg.host)
+            .with_port(cfg.port)
+            .with_title(cfg.title)
+            .with_description(cfg.description)
+            .with_version(cfg.version)
+        )
+        return self._add_lora_startup(builder)
+
+    def _build_server(self, model_name: str) -> Server:
+        """Build the HTTP server."""
+        cfg = self._config.api
+        health_handler = create_health_handler(self._ready)
+
+        routes_builder = (
+            self._build_server_builder()
             .routes.with_route("/health", health_handler)
             .with_router(create_routes(model_name))
             .with_router(create_openai_router(model_name), prefix="/v1")
         )
-        builder = self._add_lora_routes(builder)
+        routes_builder = self._add_lora_routes(routes_builder)
 
         return (
-            builder.done()
+            routes_builder.done()
             .subprocess.with_ipc(self._request_q, self._response_q)
-            .with_log_file(cfg.api.log_file)
+            .with_log_file(cfg.log_file)
             .with_auto_restart(enabled=True)
-            .with_response_timeout(cfg.api.response_timeout)
+            .with_response_timeout(cfg.response_timeout)
             .done()
-            .uvicorn.with_workers(cfg.api.uvicorn.workers)
-            .with_timeout_keep_alive(cfg.api.uvicorn.timeout_keep_alive)
-            .with_log_level(cfg.api.uvicorn.log_level)
-            .with_access_log(cfg.api.uvicorn.access_log)
+            .uvicorn.with_workers(cfg.uvicorn.workers)
+            .with_timeout_keep_alive(cfg.uvicorn.timeout_keep_alive)
+            .with_log_level(cfg.uvicorn.log_level)
+            .with_access_log(cfg.uvicorn.access_log)
             .done()
             .build()
         )

@@ -28,6 +28,7 @@ models:
   # Qwen2.5 instruct models - support /think /no_think tokens
   qwen2.5-0.5b-instruct:
     system_prompt: null
+    max_model_len: 4096  # Don't need 16K for a tiny test model
     think:
       default: false
       enable_suffix: " /think"
@@ -36,6 +37,9 @@ models:
       tags:
         open: ["<think>", "<thinking>"]
         close: ["</think>", "</thinking>"]
+    vllm:
+      enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
   # Qwen3 instruct models - support /think /no_think tokens
   qwen3-4b-instruct-2507-awq:
