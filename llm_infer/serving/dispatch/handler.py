@@ -199,12 +199,15 @@ class RequestHandler(ABC):
             LoRARequest if adapter_id is valid, None if adapter_id is None.
 
         Raises:
-            AdapterError: If adapter_id is invalid or LoRA module unavailable.
+            AdapterError: If adapter_id is invalid, not found, or LoRA module unavailable.
         """
         if not adapter_id:
             return None
 
         adapter_path = self._validate_adapter_path(adapter_id)
+
+        if not adapter_path.exists():
+            raise AdapterError(f"adapter '{adapter_id}' not found at {adapter_path}")
 
         try:
             from vllm.lora.request import LoRARequest

@@ -213,7 +213,6 @@ class AdapterManager:
         """Convert adapter to dict for API response."""
         return {
             "adapter_id": adapter.adapter_id,
-            "path": str(adapter.path),
             "description": adapter.description,
             "loaded_at": adapter.loaded_at.isoformat(),
         }

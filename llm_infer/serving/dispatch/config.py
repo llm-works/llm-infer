@@ -165,7 +165,12 @@ class VLLMConfig:
         return kwargs
 
     def _add_optional_kwargs(self, kwargs: dict[str, Any]) -> None:
-        """Add optional vLLM kwargs (only when not None)."""
+        """Add optional and conditional vLLM kwargs.
+
+        Handles fields that are only set when:
+        - Not None (vLLM auto-calculates these when omitted)
+        - Conditionally enabled (task mode, LoRA)
+        """
         # Fields that vLLM auto-calculates when None
         optional_fields = [
             ("max_cudagraph_capture_size", self.max_cudagraph_capture_size),

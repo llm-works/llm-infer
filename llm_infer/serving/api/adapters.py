@@ -14,7 +14,6 @@ class AdapterInfo(BaseModel):
     """Information about a loaded adapter."""
 
     adapter_id: str = Field(..., description="Unique identifier")
-    path: str = Field(..., description="Full path to adapter weights")
     description: str | None = Field(None, description="Optional description")
     loaded_at: str = Field(..., description="ISO timestamp when adapter was loaded")
 
