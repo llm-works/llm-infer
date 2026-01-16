@@ -278,14 +278,14 @@ class RequestHandler(ABC):
             from vllm.lora.request import LoRARequest
 
             return LoRARequest  # type: ignore[no-any-return]
-        except ImportError:
+        except ImportError as e:
             if self._lg:
                 self._lg.warning(
                     "vLLM LoRA module not available", extra={"adapter_id": adapter_id}
                 )
             raise AdapterError(
                 f"adapter_id '{adapter_id}' specified but vLLM LoRA module not available"
-            )
+            ) from e
 
     def _log_and_track_adapter(self, adapter_id: str, adapter_path: Path) -> None:
         """Log adapter usage and track as loaded. Warns on first load."""

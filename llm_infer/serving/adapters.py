@@ -147,6 +147,14 @@ class AdapterManager:
                 )
             return None
 
+        if not isinstance(config, dict):
+            if self._lg:
+                self._lg.warning(
+                    "adapter config must be a mapping",
+                    extra={"path": str(config_path), "type": type(config).__name__},
+                )
+            return None
+
         return LoadedAdapter(
             adapter_id=path.name,
             path=path,
