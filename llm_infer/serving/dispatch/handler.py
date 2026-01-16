@@ -252,7 +252,9 @@ class RequestHandler(ABC):
             with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
         except Exception as e:
-            raise AdapterError(f"failed to read adapter '{adapter_id}' config: {e}")
+            raise AdapterError(
+                f"failed to read adapter '{adapter_id}' config: {e}"
+            ) from e
 
         if not config.get("enabled", False):
             raise AdapterError(

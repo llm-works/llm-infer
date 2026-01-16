@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -214,11 +214,3 @@ class AdapterManager:
             if self._lg:
                 self._lg.debug("adapter unloaded", extra={"adapter_id": adapter_id})
             return None
-
-    def to_dict(self, adapter: LoadedAdapter) -> dict[str, Any]:
-        """Convert adapter to dict for API response."""
-        return {
-            "adapter_id": adapter.adapter_id,
-            "description": adapter.description,
-            "loaded_at": adapter.loaded_at.isoformat(),
-        }
