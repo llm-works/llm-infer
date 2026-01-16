@@ -17,6 +17,35 @@ if TYPE_CHECKING:
     from appinfra.log import Logger
 
 
+def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
+    """Validate adapter_id and resolve to safe path within base_path.
+
+    Performs security checks to prevent path traversal attacks:
+    - Rejects path separators (/, \\)
+    - Rejects parent directory references (..)
+    - Ensures resolved path stays within base_path
+
+    Args:
+        adapter_id: The adapter name to validate.
+        base_path: The base directory adapters must reside in.
+
+    Returns:
+        Resolved Path if valid, None if validation fails.
+    """
+    # Reject path separators and traversal sequences
+    if "/" in adapter_id or "\\" in adapter_id or ".." in adapter_id:
+        return None
+
+    resolved_base = base_path.resolve()
+    adapter_path = (base_path / adapter_id).resolve()
+
+    # Ensure resolved path stays within base_path
+    if not adapter_path.is_relative_to(resolved_base):
+        return None
+
+    return adapter_path
+
+
 @dataclass
 class LoadedAdapter:
     """An adapter that has been discovered and is enabled."""
@@ -152,7 +181,16 @@ class AdapterManager:
         if not self._base_path:
             return None
 
-        path = self._base_path / adapter_id
+        # Validate adapter_id to prevent path traversal
+        path = validate_adapter_id(adapter_id, self._base_path)
+        if path is None:
+            if self._lg:
+                self._lg.warning(
+                    "rejected adapter_id with invalid characters",
+                    extra={"adapter_id": adapter_id},
+                )
+            return None
+
         if not path.exists() or not path.is_dir():
             # Remove if it was previously loaded but no longer exists
             self._adapters.pop(adapter_id, None)

@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...context import Event, RequestContext
+from ..adapters import validate_adapter_id
 from .types import Request, RequestStatus, Response, StreamChunk
+
+
+class AdapterError(Exception):
+    """Raised when adapter resolution fails."""
+
+    pass
 
 
 def _stable_adapter_id(adapter_id: str) -> int:
@@ -161,51 +168,54 @@ class RequestHandler(ABC):
             return self._process_streaming_request(request)
         return self._process_blocking_request(request)
 
-    def _validate_adapter_path(self, adapter_id: str) -> Path | None:
-        """Validate adapter_id and resolve to safe path.
+    def _validate_adapter_path(self, adapter_id: str) -> Path:
+        """Validate adapter_id and return resolved path.
 
-        Returns None if validation fails (path traversal attempt or escaped base).
+        Raises:
+            AdapterError: If LoRA not configured or adapter_id is invalid.
         """
-        # Reject path separators and traversal sequences
-        if "/" in adapter_id or "\\" in adapter_id or ".." in adapter_id:
+        if not self._lora_base_path:
+            raise AdapterError(
+                f"adapter_id '{adapter_id}' specified but LoRA not configured "
+                "(lora.base_path not set)"
+            )
+
+        adapter_path = validate_adapter_id(adapter_id, self._lora_base_path)
+        if adapter_path is None:
             if self._lg:
                 self._lg.warning(
-                    "rejected adapter_id with path characters",
-                    extra={"adapter_id": adapter_id},
+                    "rejected invalid adapter_id", extra={"adapter_id": adapter_id}
                 )
-            return None
-
-        assert self._lora_base_path is not None
-        adapter_path = (self._lora_base_path / adapter_id).resolve()
-
-        # Ensure resolved path stays within base_path
-        if not adapter_path.is_relative_to(self._lora_base_path.resolve()):
-            if self._lg:
-                self._lg.warning(
-                    "adapter path escaped base directory",
-                    extra={"adapter_id": adapter_id, "resolved": str(adapter_path)},
-                )
-            return None
-
+            raise AdapterError(
+                f"invalid adapter_id '{adapter_id}': must be a simple name without "
+                "path separators or parent references"
+            )
         return adapter_path
 
     def _resolve_lora_request(self, adapter_id: str | None) -> Any | None:
         """Resolve adapter_id to a vLLM LoRARequest.
 
-        Uses convention-based path resolution: base_path / adapter_id.
-        Validates that adapter_id is safe (no path traversal).
+        Returns:
+            LoRARequest if adapter_id is valid, None if adapter_id is None.
+
+        Raises:
+            AdapterError: If adapter_id is invalid or LoRA module unavailable.
         """
-        if not adapter_id or not self._lora_base_path:
+        if not adapter_id:
             return None
 
         adapter_path = self._validate_adapter_path(adapter_id)
-        if adapter_path is None:
-            return None
 
         try:
             from vllm.lora.request import LoRARequest
         except ImportError:
-            return None
+            if self._lg:
+                self._lg.warning(
+                    "vLLM LoRA module not available", extra={"adapter_id": adapter_id}
+                )
+            raise AdapterError(
+                f"adapter_id '{adapter_id}' specified but vLLM LoRA module not available"
+            )
 
         return LoRARequest(
             lora_name=adapter_id,
