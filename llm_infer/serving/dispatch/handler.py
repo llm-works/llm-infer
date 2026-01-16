@@ -262,7 +262,7 @@ class RequestHandler(ABC):
                 "Set 'enabled: true' in the adapter's config.yaml."
             )
 
-    def _import_lora_request_class(self, adapter_id: str) -> type:
+    def _import_lora_request_class(self, adapter_id: str) -> type[Any]:
         """Import and return vLLM LoRARequest class, raising AdapterError if unavailable."""
         try:
             from vllm.lora.request import LoRARequest
