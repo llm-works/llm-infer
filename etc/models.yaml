@@ -25,6 +25,18 @@ models:
       # See: https://github.com/vllm-project/vllm/issues/25991
       enable_prefix_caching: false
 
+  # Qwen2.5 instruct models - support /think /no_think tokens
+  qwen2.5-0.5b-instruct:
+    system_prompt: null
+    think:
+      default: false
+      enable_suffix: " /think"
+      disable_suffix: " /no_think"
+      system_prompt: "You MUST wrap all your step-by-step reasoning inside <think></think> XML tags. After </think>, output ONLY the final answer with no explanation."
+      tags:
+        open: ["<think>", "<thinking>"]
+        close: ["</think>", "</thinking>"]
+
   # Qwen3 instruct models - support /think /no_think tokens
   qwen3-4b-instruct-2507-awq:
     system_prompt: null

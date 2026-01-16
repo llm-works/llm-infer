@@ -10,6 +10,16 @@ from .config_overrides import CliOverrides, apply_standard_overrides
 
 
 @dataclass
+class LoRAConfig:
+    """LoRA adapter configuration for vLLM engine."""
+
+    enabled: bool = False  # Enable LoRA/QLoRA adapter support
+    max_loras: int = 4  # Maximum concurrent adapters in GPU memory
+    max_lora_rank: int = 64  # Maximum LoRA rank supported
+    base_path: str | None = None  # Base directory for adapter weights
+
+
+@dataclass
 class NativeEngineConfig:
     """Native engine configuration."""
 
@@ -107,6 +117,9 @@ class VLLMConfig:
     # Warmup
     warmup: bool = True  # Run warmup query on startup to eliminate cold-start latency
 
+    # LoRA adapter support (nested config)
+    lora: LoRAConfig = field(default_factory=LoRAConfig)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any], model_path: str = "") -> "VLLMConfig":
         """Create config from dictionary (vllm section of config file).
@@ -169,6 +182,12 @@ class VLLMConfig:
         # Task mode only needed for embedding models
         if self.task == "embed":
             kwargs["task"] = "embed"
+
+        # LoRA settings
+        if self.lora.enabled:
+            kwargs["enable_lora"] = True
+            kwargs["max_loras"] = self.lora.max_loras
+            kwargs["max_lora_rank"] = self.lora.max_lora_rank
 
 
 @dataclass
@@ -304,6 +323,17 @@ class InferenceConfig:
             dtype=data.get("dtype", "auto"),
             trust_remote_code=data.get("trust_remote_code", True),
             warmup=data.get("warmup", True),
+            lora=cls._parse_lora_config(data.get("lora", {}) or {}),
+        )
+
+    @classmethod
+    def _parse_lora_config(cls, data: dict[str, Any]) -> LoRAConfig:
+        """Parse LoRA configuration section."""
+        return LoRAConfig(
+            enabled=data.get("enabled", False),
+            max_loras=data.get("max_loras", 4),
+            max_lora_rank=data.get("max_lora_rank", 64),
+            base_path=data.get("base_path"),
         )
 
     @classmethod

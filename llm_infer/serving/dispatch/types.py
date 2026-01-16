@@ -36,6 +36,7 @@ class Request:
     use_chat_template: bool | None = None
     stop_sequences: list[str] | None = None
     messages: list[dict[str, str]] | None = None  # Chat messages for multi-turn
+    adapter_id: str | None = None  # LoRA adapter name for vLLM
 
 
 @dataclass

@@ -10,6 +10,8 @@ from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
 from appinfra.time import ETA, Ticker, delta_str, since, start
 
+from ..adapters import AdapterManager
+from ..api.adapters import create_adapter_router
 from ..api.openai.router import create_openai_router
 from ..api.routes import create_health_handler, create_routes
 from .config import InferenceConfig
@@ -180,6 +182,7 @@ class BootSequence:
         self._engine: Any = None
         self._handler: RequestHandler | None = None
         self._memory_ticker: Ticker | None = None
+        self._adapter_manager: AdapterManager | None = None
 
         # Shutdown coordination
         self._shutdown = threading.Event()
@@ -229,6 +232,19 @@ class BootSequence:
         """Phase 3: Create request handler."""
         self._handler = create_handler(self._lg, self._engine, self._config)
         self._lg.info("handler created", extra={"type": self._config.dispatch.handler})
+
+        # Configure LoRA if enabled
+        lora_cfg = self._config.engines.vllm.lora
+        if lora_cfg.enabled and lora_cfg.base_path:
+            self._handler.set_lora_base_path(lora_cfg.base_path)
+
+            # Initialize adapter manager and scan for adapters
+            self._adapter_manager = AdapterManager(lora_cfg.base_path, self._lg)
+            count = self._adapter_manager.scan()
+            self._lg.info(
+                "LoRA enabled",
+                extra={"base_path": lora_cfg.base_path, "adapters_loaded": count},
+            )
 
     def warmup(self) -> None:
         """Phase 4: Run warmup query if configured."""
@@ -322,12 +338,22 @@ class BootSequence:
     # Internal helpers
     # -----------------------------------------------------------------------
 
+    def _add_lora_routes(self, builder: Any) -> Any:
+        """Add LoRA adapter routes if enabled."""
+        lora_cfg = self._config.engines.vllm.lora
+        if lora_cfg.enabled and lora_cfg.base_path:
+            builder = builder.with_router(create_adapter_router(), prefix="/v1")
+            builder = builder.with_on_startup(
+                self._create_adapter_startup_callback(lora_cfg.base_path)
+            )
+        return builder
+
     def _build_server(self, model_name: str) -> Server:
         """Build the HTTP server."""
         cfg = self._config
         health_handler = create_health_handler(self._ready)
 
-        return (
+        builder = (
             ServerBuilder("inference")
             .with_host(cfg.api.host)
             .with_port(cfg.api.port)
@@ -337,7 +363,11 @@ class BootSequence:
             .routes.with_route("/health", health_handler)
             .with_router(create_routes(model_name))
             .with_router(create_openai_router(model_name), prefix="/v1")
-            .done()
+        )
+        builder = self._add_lora_routes(builder)
+
+        return (
+            builder.done()
             .subprocess.with_ipc(self._request_q, self._response_q)
             .with_log_file(cfg.api.log_file)
             .with_auto_restart(enabled=True)
@@ -350,6 +380,17 @@ class BootSequence:
             .done()
             .build()
         )
+
+    def _create_adapter_startup_callback(self, base_path: str) -> Any:
+        """Create startup callback for adapter manager initialization."""
+
+        async def on_startup(app: Any) -> None:
+            """Initialize adapter manager in API subprocess."""
+            manager = AdapterManager(base_path)
+            manager.scan()
+            app.state.adapter_manager = manager
+
+        return on_startup
 
     def _install_signal_handlers(self) -> None:
         """Install signal handlers for graceful shutdown."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...context import Event, RequestContext
@@ -33,10 +34,20 @@ class RequestHandler(ABC):
 
     _response_q: mp.Queue | None = None
     _lg: Logger | None = None
+    _lora_base_path: Path | None = None
 
     def set_logger(self, lg: Logger) -> None:
         """Set the logger for request context creation."""
         self._lg = lg
+
+    def set_lora_base_path(self, path: str | None) -> None:
+        """Set the base path for LoRA adapter resolution.
+
+        Args:
+            path: Base directory for adapter weights. Adapter paths are
+                constructed as base_path / adapter_id.
+        """
+        self._lora_base_path = Path(path).expanduser() if path else None
 
     def set_response_queue(self, response_q: mp.Queue) -> None:
         """
@@ -133,9 +144,35 @@ class RequestHandler(ABC):
             return self._process_streaming_request(request)
         return self._process_blocking_request(request)
 
-    def _build_generate_params(self, request: Request) -> dict:
+    def _resolve_lora_request(self, adapter_id: str | None) -> Any | None:
+        """Resolve adapter_id to a vLLM LoRARequest.
+
+        Uses convention-based path resolution: base_path / adapter_id.
+
+        Args:
+            adapter_id: Adapter name from the request.
+
+        Returns:
+            LoRARequest if adapter_id provided and base_path configured, None otherwise.
+        """
+        if not adapter_id or not self._lora_base_path:
+            return None
+
+        try:
+            from vllm.lora.request import LoRARequest
+        except ImportError:
+            return None
+
+        adapter_path = self._lora_base_path / adapter_id
+        return LoRARequest(
+            lora_name=adapter_id,
+            lora_int_id=hash(adapter_id) % (2**31),  # Stable ID from name
+            lora_path=str(adapter_path),
+        )
+
+    def _build_generate_params(self, request: Request) -> dict[str, Any]:
         """Build parameters for engine.generate from request."""
-        return {
+        params: dict[str, Any] = {
             "prompt": request.prompt,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
@@ -147,6 +184,9 @@ class RequestHandler(ABC):
             "context": request.context,
             "messages": request.messages,
         }
+        if lora_request := self._resolve_lora_request(request.adapter_id):
+            params["lora_request"] = lora_request
+        return params
 
     def _process_blocking_request(self, request: Request) -> Response:
         """Process request with blocking generation (non-streaming)."""
@@ -193,9 +233,9 @@ class RequestHandler(ABC):
         )
         self._response_q.put(final_chunk)
 
-    def _build_stream_params(self, request: Request) -> dict:
+    def _build_stream_params(self, request: Request) -> dict[str, Any]:
         """Build parameters for generate_stream_sync from request."""
-        return {
+        params: dict[str, Any] = {
             "prompt": request.prompt,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
@@ -207,6 +247,9 @@ class RequestHandler(ABC):
             "context": request.context,
             "messages": request.messages,
         }
+        if lora_request := self._resolve_lora_request(request.adapter_id):
+            params["lora_request"] = lora_request
+        return params
 
     def _finalize_stream(self, request: Request, stream: Any) -> Response:
         """Finalize streaming: send final chunk, mark context, return response."""
