@@ -7,7 +7,7 @@ No database - purely file-based discovery.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +25,7 @@ class LoadedAdapter:
     path: Path
     enabled: bool = True
     description: str | None = None
-    loaded_at: datetime = field(default_factory=datetime.utcnow)
+    loaded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class AdapterManager:

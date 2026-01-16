@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import multiprocessing as mp
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -9,6 +10,22 @@ from typing import TYPE_CHECKING, Any
 
 from ...context import Event, RequestContext
 from .types import Request, RequestStatus, Response, StreamChunk
+
+
+def _stable_adapter_id(adapter_id: str) -> int:
+    """Generate deterministic integer ID from adapter name.
+
+    Uses MD5 hash to ensure consistent IDs across process restarts.
+    Python's built-in hash() is randomized per-process since Python 3.3.
+
+    Args:
+        adapter_id: The adapter name string.
+
+    Returns:
+        Positive 31-bit integer suitable for vLLM's lora_int_id.
+    """
+    return int(hashlib.md5(adapter_id.encode()).hexdigest(), 16) % (2**31)
+
 
 if TYPE_CHECKING:
     from appinfra.log import Logger
@@ -144,18 +161,45 @@ class RequestHandler(ABC):
             return self._process_streaming_request(request)
         return self._process_blocking_request(request)
 
+    def _validate_adapter_path(self, adapter_id: str) -> Path | None:
+        """Validate adapter_id and resolve to safe path.
+
+        Returns None if validation fails (path traversal attempt or escaped base).
+        """
+        # Reject path separators and traversal sequences
+        if "/" in adapter_id or "\\" in adapter_id or ".." in adapter_id:
+            if self._lg:
+                self._lg.warning(
+                    "rejected adapter_id with path characters",
+                    extra={"adapter_id": adapter_id},
+                )
+            return None
+
+        assert self._lora_base_path is not None
+        adapter_path = (self._lora_base_path / adapter_id).resolve()
+
+        # Ensure resolved path stays within base_path
+        if not adapter_path.is_relative_to(self._lora_base_path.resolve()):
+            if self._lg:
+                self._lg.warning(
+                    "adapter path escaped base directory",
+                    extra={"adapter_id": adapter_id, "resolved": str(adapter_path)},
+                )
+            return None
+
+        return adapter_path
+
     def _resolve_lora_request(self, adapter_id: str | None) -> Any | None:
         """Resolve adapter_id to a vLLM LoRARequest.
 
         Uses convention-based path resolution: base_path / adapter_id.
-
-        Args:
-            adapter_id: Adapter name from the request.
-
-        Returns:
-            LoRARequest if adapter_id provided and base_path configured, None otherwise.
+        Validates that adapter_id is safe (no path traversal).
         """
         if not adapter_id or not self._lora_base_path:
+            return None
+
+        adapter_path = self._validate_adapter_path(adapter_id)
+        if adapter_path is None:
             return None
 
         try:
@@ -163,10 +207,9 @@ class RequestHandler(ABC):
         except ImportError:
             return None
 
-        adapter_path = self._lora_base_path / adapter_id
         return LoRARequest(
             lora_name=adapter_id,
-            lora_int_id=hash(adapter_id) % (2**31),  # Stable ID from name
+            lora_int_id=_stable_adapter_id(adapter_id),
             lora_path=str(adapter_path),
         )
 

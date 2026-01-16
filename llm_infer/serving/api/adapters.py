@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ..adapters import AdapterManager
@@ -59,7 +59,9 @@ async def _list_adapters(request: Request) -> AdapterListResponse:
 
 async def _refresh_adapters(
     request: Request,
-    adapter_id: str | None = None,
+    adapter_id: str | None = Query(
+        default=None, description="Specific adapter to refresh"
+    ),
 ) -> RefreshResponse:
     """Rescan adapter directory and reload enabled adapters.
 
