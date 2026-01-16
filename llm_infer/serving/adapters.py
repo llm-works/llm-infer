@@ -38,7 +38,9 @@ def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
     Returns:
         Resolved Path if valid, None if validation fails.
     """
-    # Reject path separators and traversal sequences
+    # Reject empty, ".", path separators, and traversal sequences
+    if not adapter_id or adapter_id == ".":
+        return None
     if "/" in adapter_id or "\\" in adapter_id or ".." in adapter_id:
         return None
 
@@ -95,6 +97,19 @@ class AdapterManager:
     def base_path(self) -> Path | None:
         return self._base_path
 
+    def _is_scannable(self) -> bool:
+        """Check if base_path is valid for scanning."""
+        if not self._base_path or not self._base_path.exists():
+            return False
+        if not self._base_path.is_dir():
+            if self._lg:
+                self._lg.warning(
+                    "adapter base_path is not a directory",
+                    extra={"path": str(self._base_path)},
+                )
+            return False
+        return True
+
     def scan(self) -> int:
         """Scan base_path for adapters and load enabled ones.
 
@@ -102,15 +117,13 @@ class AdapterManager:
             Number of enabled adapters found.
         """
         self._adapters.clear()
-
-        if not self._base_path or not self._base_path.exists():
+        if not self._is_scannable():
             return 0
 
         count = 0
-        for entry in self._base_path.iterdir():
+        for entry in self._base_path.iterdir():  # type: ignore[union-attr]
             if not entry.is_dir():
                 continue
-
             adapter = self._load_adapter(entry)
             if adapter and adapter.enabled:
                 self._adapters[adapter.adapter_id] = adapter
@@ -126,7 +139,6 @@ class AdapterManager:
 
         if self._lg:
             self._lg.info("adapter scan complete", extra={"enabled_count": count})
-
         return count
 
     def _load_adapter(self, path: Path) -> LoadedAdapter | None:
