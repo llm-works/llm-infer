@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
+
 from ...context import Event, RequestContext
 from ..adapters import validate_adapter_id
 from .types import Request, RequestStatus, Response, StreamChunk
@@ -208,33 +210,44 @@ class RequestHandler(ABC):
             )
         return adapter_path
 
-    def _check_adapter_enabled(self, adapter_path: Path) -> None:
-        """Check adapter is enabled by reading its config.yaml directly.
+    def _check_adapter_enabled(self, adapter_id: str, adapter_path: Path) -> None:
+        """Check adapter is enabled for use.
 
-        Reads from filesystem each time to support hot-reload of adapters
-        without requiring handler restart.
+        If AdapterManager is set, uses its cached enabled-adapters list.
+        Otherwise falls back to reading config.yaml from disk (useful for
+        testing or when manager is not configured).
+
+        To hot-reload adapters, use the /v1/adapters/refresh endpoint.
 
         Raises:
             AdapterError: If adapter is not enabled or config is missing/invalid.
         """
+        # Use manager if available (preferred - avoids per-request disk I/O)
+        if self._adapter_manager is not None:
+            if not self._adapter_manager.is_available(adapter_id):
+                raise AdapterError(
+                    f"adapter '{adapter_id}' is not enabled. "
+                    "Enable it in the adapter's config.yaml and call /v1/adapters/refresh."
+                )
+            return
+
+        # Fallback: read config.yaml directly (for testing or when manager not set)
         config_path = adapter_path / "config.yaml"
         if not config_path.exists():
             raise AdapterError(
-                f"adapter config not found at {config_path}. "
+                f"adapter '{adapter_id}' has no config.yaml. "
                 "Create config.yaml with 'enabled: true'."
             )
 
         try:
-            import yaml
-
             with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
         except Exception as e:
-            raise AdapterError(f"failed to read adapter config: {e}")
+            raise AdapterError(f"failed to read adapter '{adapter_id}' config: {e}")
 
         if not config.get("enabled", False):
             raise AdapterError(
-                f"adapter '{adapter_path.name}' is not enabled. "
+                f"adapter '{adapter_id}' is not enabled. "
                 "Set 'enabled: true' in the adapter's config.yaml."
             )
 
@@ -283,8 +296,13 @@ class RequestHandler(ABC):
 
         adapter_path = self._validate_adapter_path(adapter_id)
         if not adapter_path.exists():
-            raise AdapterError(f"adapter '{adapter_id}' not found at {adapter_path}")
-        self._check_adapter_enabled(adapter_path)
+            if self._lg:
+                self._lg.warning(
+                    "adapter not found",
+                    extra={"adapter_id": adapter_id, "path": str(adapter_path)},
+                )
+            raise AdapterError(f"adapter '{adapter_id}' not found")
+        self._check_adapter_enabled(adapter_id, adapter_path)
         self._log_and_track_adapter(adapter_id, adapter_path)
 
         return self._import_lora_request_class(adapter_id)(

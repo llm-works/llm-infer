@@ -25,6 +25,12 @@ def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
     - Rejects parent directory references (..)
     - Ensures resolved path stays within base_path
 
+    Note on symlinks: Both base_path and adapter directories may be symlinks.
+    The validation resolves all symlinks before checking containment, so a
+    symlinked adapter directory is allowed as long as its real path is within
+    the real base_path. This enables sharing adapter weights across deployments
+    while maintaining security boundaries.
+
     Args:
         adapter_id: The adapter name to validate.
         base_path: The base directory adapters must reside in.
