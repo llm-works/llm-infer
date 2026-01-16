@@ -384,10 +384,11 @@ class BootSequence:
 
     def _create_adapter_startup_callback(self, base_path: str) -> Any:
         """Create startup callback for adapter manager initialization."""
+        lg = self._lg
 
         async def on_startup(app: Any) -> None:
             """Initialize adapter manager in API subprocess."""
-            manager = AdapterManager(base_path)
+            manager = AdapterManager(base_path, lg)
             manager.scan()
             app.state.adapter_manager = manager
 

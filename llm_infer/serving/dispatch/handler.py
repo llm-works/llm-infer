@@ -254,8 +254,8 @@ class RequestHandler(ABC):
             lora_path=str(adapter_path),
         )
 
-    def _build_generate_params(self, request: Request) -> dict[str, Any]:
-        """Build parameters for engine.generate from request."""
+    def _build_engine_params(self, request: Request) -> dict[str, Any]:
+        """Build parameters for engine generate/stream methods from request."""
         params: dict[str, Any] = {
             "prompt": request.prompt,
             "max_tokens": request.max_tokens,
@@ -276,7 +276,7 @@ class RequestHandler(ABC):
         """Process request with blocking generation (non-streaming)."""
         ctx = request.context
         try:
-            result = self.engine.generate(**self._build_generate_params(request))
+            result = self.engine.generate(**self._build_engine_params(request))
             if ctx:
                 ctx.mark(Event.DECODED)
             prompt_tokens = self.engine.count_tokens(request.prompt)
@@ -324,24 +324,6 @@ class RequestHandler(ABC):
         )
         self._response_q.put(final_chunk)
 
-    def _build_stream_params(self, request: Request) -> dict[str, Any]:
-        """Build parameters for generate_stream_sync from request."""
-        params: dict[str, Any] = {
-            "prompt": request.prompt,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "top_k": request.top_k,
-            "repetition_penalty": request.repetition_penalty,
-            "use_chat_template": request.use_chat_template,
-            "stop_sequences": request.stop_sequences,
-            "context": request.context,
-            "messages": request.messages,
-        }
-        if lora_request := self._resolve_lora_request(request.adapter_id):
-            params["lora_request"] = lora_request
-        return params
-
     def _finalize_stream(self, request: Request, stream: Any) -> Response:
         """Finalize streaming: send final chunk, mark context, return response."""
         ctx = request.context
@@ -365,7 +347,7 @@ class RequestHandler(ABC):
         """Process request with streaming generation."""
         try:
             stream = self.engine.generate_stream_sync(
-                **self._build_stream_params(request)
+                **self._build_engine_params(request)
             )
             self._stream_tokens_to_queue(request, stream)
             return self._finalize_stream(request, stream)
