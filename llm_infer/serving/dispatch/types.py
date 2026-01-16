@@ -115,3 +115,50 @@ class EmbeddingResponse:
     embeddings: list[list[float]] | None = None
     total_tokens: int = 0
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Adapter control requests (for LoRA adapter management via IPC)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AdapterInfo:
+    """Serializable adapter information for IPC responses."""
+
+    adapter_id: str
+    description: str | None
+    loaded_at: str  # ISO timestamp
+
+
+@dataclass
+class AdapterListRequest:
+    """Request to list loaded adapters (sent from API subprocess)."""
+
+    id: str
+
+
+@dataclass
+class AdapterListResponse:
+    """Response containing adapter list."""
+
+    id: str
+    adapters: list[AdapterInfo]
+
+
+@dataclass
+class AdapterRefreshRequest:
+    """Request to refresh adapters (sent from API subprocess)."""
+
+    id: str
+    adapter_id: str | None = None  # None = full rescan, else refresh single adapter
+
+
+@dataclass
+class AdapterRefreshResponse:
+    """Response from adapter refresh operation."""
+
+    id: str
+    adapter_id: str | None  # Echo back which adapter (None if full scan)
+    adapters_loaded: int  # Count of enabled adapters after refresh
+    status: str  # 'loaded', 'unloaded', or 'scanned'

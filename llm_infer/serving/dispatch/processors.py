@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 from .metrics import build_metrics_response
 from .types import (
+    AdapterInfo,
+    AdapterListRequest,
+    AdapterListResponse,
+    AdapterRefreshRequest,
+    AdapterRefreshResponse,
     EmbeddingRequest,
     EmbeddingResponse,
     MetricsRequest,
@@ -95,6 +100,79 @@ class MetricsProcessor(RequestProcessor):
         response_q.put(response)
 
 
+class AdapterProcessor(RequestProcessor):
+    """Handles adapter management requests (list, refresh)."""
+
+    def can_process(self, request: Any) -> bool:
+        return isinstance(request, (AdapterListRequest, AdapterRefreshRequest))
+
+    def handle(
+        self,
+        request: AdapterListRequest | AdapterRefreshRequest,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        if isinstance(request, AdapterListRequest):
+            self._handle_list(request, handler, response_q)
+        else:
+            self._handle_refresh(request, handler, response_q)
+
+    def _handle_list(
+        self,
+        request: AdapterListRequest,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        """List all loaded adapters."""
+        manager = handler._adapter_manager
+        if manager is None:
+            response_q.put(AdapterListResponse(id=request.id, adapters=[]))
+            return
+
+        adapters = [
+            AdapterInfo(
+                adapter_id=a.adapter_id,
+                description=a.description,
+                loaded_at=a.loaded_at.isoformat(),
+            )
+            for a in manager.list()
+        ]
+        response_q.put(AdapterListResponse(id=request.id, adapters=adapters))
+
+    def _handle_refresh(
+        self,
+        request: AdapterRefreshRequest,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        """Refresh adapters (single or full scan)."""
+        manager = handler._adapter_manager
+        if manager is None:
+            response_q.put(self._make_refresh_response(request, 0, "disabled"))
+            return
+
+        if request.adapter_id:
+            adapter = manager.refresh_one(request.adapter_id)
+            status = "loaded" if adapter else "unloaded"
+            response_q.put(
+                self._make_refresh_response(request, len(manager.list()), status)
+            )
+        else:
+            count = manager.scan()
+            response_q.put(self._make_refresh_response(request, count, "scanned"))
+
+    def _make_refresh_response(
+        self, request: AdapterRefreshRequest, adapters_loaded: int, status: str
+    ) -> AdapterRefreshResponse:
+        """Create an adapter refresh response."""
+        return AdapterRefreshResponse(
+            id=request.id,
+            adapter_id=request.adapter_id,
+            adapters_loaded=adapters_loaded,
+            status=status,
+        )
+
+
 def _make_embedding_error(request_id: str, error: str) -> EmbeddingResponse:
     """Create a failed embedding response."""
     return EmbeddingResponse(id=request_id, status=RequestStatus.FAILED, error=error)
@@ -168,9 +246,12 @@ def create_request_processor_chain() -> RequestProcessor:
 
     Chain order:
     1. MetricsProcessor - handles metrics requests
-    2. EmbeddingProcessor - handles embedding requests
-    3. InferenceProcessor - handles inference requests (default)
+    2. AdapterProcessor - handles adapter management requests
+    3. EmbeddingProcessor - handles embedding requests
+    4. InferenceProcessor - handles inference requests (default)
     """
     chain = MetricsProcessor()
-    chain.set_next(EmbeddingProcessor()).set_next(InferenceProcessor())
+    chain.set_next(AdapterProcessor()).set_next(EmbeddingProcessor()).set_next(
+        InferenceProcessor()
+    )
     return chain

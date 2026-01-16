@@ -1,13 +1,18 @@
-"""LoRA adapter API endpoints."""
+"""LoRA adapter API endpoints.
+
+These endpoints communicate with the main process via IPC to manage adapters.
+The main process holds the single source of truth for adapter state.
+"""
 
 from __future__ import annotations
 
-from typing import cast
+import uuid
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
-from ..adapters import AdapterManager
+from ..dispatch.types import AdapterListRequest, AdapterRefreshRequest
 
 
 class AdapterInfo(BaseModel):
@@ -35,24 +40,32 @@ class RefreshResponse(BaseModel):
     status: str = Field(..., description="Result: 'loaded', 'unloaded', or 'scanned'")
 
 
-def _get_manager(request: Request) -> AdapterManager:
-    """Get adapter manager from app state."""
-    manager = getattr(request.app.state, "adapter_manager", None)
-    if manager is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Adapter management not enabled. Set lora.enabled=true and lora.base_path in config.",
-        )
-    return cast(AdapterManager, manager)
+def _get_ipc(request: Request) -> Any:
+    """Get IPC channel from app state."""
+    return request.app.state.ipc_channel
 
 
 async def _list_adapters(request: Request) -> AdapterListResponse:
-    """List all loaded adapters."""
-    manager = _get_manager(request)
-    adapters = manager.list()
+    """List all loaded adapters.
+
+    Queries the main process for the current adapter list.
+    """
+    ipc = _get_ipc(request)
+    request_id = f"adapter-list-{uuid.uuid4().hex[:16]}"
+    internal_request = AdapterListRequest(id=request_id)
+
+    response = await ipc.submit(request_id, internal_request)
+
     return AdapterListResponse(
-        adapters=[AdapterInfo(**manager.to_dict(a)) for a in adapters],
-        count=len(adapters),
+        adapters=[
+            AdapterInfo(
+                adapter_id=a.adapter_id,
+                description=a.description,
+                loaded_at=a.loaded_at,
+            )
+            for a in response.adapters
+        ],
+        count=len(response.adapters),
     )
 
 
@@ -66,25 +79,21 @@ async def _refresh_adapters(
 
     If adapter_id is provided, only refresh that specific adapter.
     Otherwise, rescan the entire directory.
-    """
-    manager = _get_manager(request)
 
-    if adapter_id:
-        # Refresh single adapter
-        adapter = manager.refresh_one(adapter_id)
-        return RefreshResponse(
-            adapter_id=adapter_id,
-            adapters_loaded=len(manager.list()),
-            status="loaded" if adapter else "unloaded",
-        )
-    else:
-        # Full rescan
-        count = manager.scan()
-        return RefreshResponse(
-            adapter_id=None,
-            adapters_loaded=count,
-            status="scanned",
-        )
+    This operation is performed in the main process, ensuring the
+    adapter state used for inference validation is updated.
+    """
+    ipc = _get_ipc(request)
+    request_id = f"adapter-refresh-{uuid.uuid4().hex[:16]}"
+    internal_request = AdapterRefreshRequest(id=request_id, adapter_id=adapter_id)
+
+    response = await ipc.submit(request_id, internal_request)
+
+    return RefreshResponse(
+        adapter_id=response.adapter_id,
+        adapters_loaded=response.adapters_loaded,
+        status=response.status,
+    )
 
 
 def create_adapter_router() -> APIRouter:

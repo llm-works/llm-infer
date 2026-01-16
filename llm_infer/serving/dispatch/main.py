@@ -339,15 +339,6 @@ class BootSequence:
     # Internal helpers
     # -----------------------------------------------------------------------
 
-    def _add_lora_startup(self, builder: Any) -> Any:
-        """Add LoRA startup callback if enabled (must be called before .routes)."""
-        lora_cfg = self._config.engines.vllm.lora
-        if lora_cfg.enabled and lora_cfg.base_path:
-            builder = builder.with_on_startup(
-                self._create_adapter_startup_callback(lora_cfg.base_path)
-            )
-        return builder
-
     def _add_lora_routes(self, builder: Any) -> Any:
         """Add LoRA adapter routes if enabled (call in routes mode)."""
         lora_cfg = self._config.engines.vllm.lora
@@ -358,7 +349,7 @@ class BootSequence:
     def _build_server_builder(self) -> Any:
         """Build initial ServerBuilder with host/port/metadata."""
         cfg = self._config.api
-        builder = (
+        return (
             ServerBuilder("inference")
             .with_host(cfg.host)
             .with_port(cfg.port)
@@ -366,7 +357,6 @@ class BootSequence:
             .with_description(cfg.description)
             .with_version(cfg.version)
         )
-        return self._add_lora_startup(builder)
 
     def _build_server(self, model_name: str) -> Server:
         """Build the HTTP server."""
@@ -395,18 +385,6 @@ class BootSequence:
             .done()
             .build()
         )
-
-    def _create_adapter_startup_callback(self, base_path: str) -> Any:
-        """Create startup callback for adapter manager initialization."""
-        lg = self._lg
-
-        async def on_startup(app: Any) -> None:
-            """Initialize adapter manager in API subprocess."""
-            manager = AdapterManager(base_path, lg)
-            manager.scan()
-            app.state.adapter_manager = manager
-
-        return on_startup
 
     def _install_signal_handlers(self) -> None:
         """Install signal handlers for graceful shutdown."""
