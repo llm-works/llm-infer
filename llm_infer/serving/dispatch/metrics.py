@@ -18,6 +18,10 @@ class GPUStats:
     allocated_bytes: int
     reserved_bytes: int
     peak_bytes: int
+    device_used_bytes: int = 0
+    device_total_bytes: int = 0
+    device_free_bytes: int = 0
+    model_memory_bytes: int = 0
 
     @property
     def allocated_mb(self) -> float:
@@ -31,6 +35,22 @@ class GPUStats:
     def peak_mb(self) -> float:
         return self.peak_bytes / (1024 * 1024)
 
+    @property
+    def device_used_mb(self) -> float:
+        return self.device_used_bytes / (1024 * 1024)
+
+    @property
+    def device_total_mb(self) -> float:
+        return self.device_total_bytes / (1024 * 1024)
+
+    @property
+    def device_free_mb(self) -> float:
+        return self.device_free_bytes / (1024 * 1024)
+
+    @property
+    def model_memory_mb(self) -> float:
+        return self.model_memory_bytes / (1024 * 1024)
+
 
 @dataclass
 class KVCacheStats:
@@ -40,6 +60,7 @@ class KVCacheStats:
     blocks_used: int
     blocks_total: int
     block_size: int
+    usage_perc: float = 0.0  # vLLM reports usage as percentage (0-1)
 
     @property
     def mb(self) -> float:
@@ -82,12 +103,17 @@ class MetricsBuilder:
             allocated_bytes=stats.get("allocated", 0),
             reserved_bytes=stats.get("reserved", 0),
             peak_bytes=stats.get("peak", 0),
+            device_used_bytes=stats.get("device_used", 0),
+            device_total_bytes=stats.get("device_total", 0),
+            device_free_bytes=stats.get("device_free", 0),
+            model_memory_bytes=stats.get("model_memory", 0),
         )
         self._kv_cache = KVCacheStats(
             bytes=stats.get("kv_cache_bytes", 0),
             blocks_used=stats.get("kv_blocks_used", 0),
             blocks_total=stats.get("kv_blocks_total", 0),
             block_size=stats.get("kv_block_size", 0),
+            usage_perc=stats.get("kv_cache_usage_perc", 0.0),
         )
         return self
 
@@ -112,6 +138,10 @@ class MetricsBuilder:
             gpu_allocated_bytes=gpu.allocated_bytes,
             gpu_reserved_bytes=gpu.reserved_bytes,
             gpu_peak_bytes=gpu.peak_bytes,
+            gpu_device_used_bytes=gpu.device_used_bytes,
+            gpu_device_total_bytes=gpu.device_total_bytes,
+            gpu_device_free_bytes=gpu.device_free_bytes,
+            gpu_model_memory_bytes=gpu.model_memory_bytes,
             kv_cache_bytes=kv.bytes,
             kv_blocks_used=kv.blocks_used,
             kv_blocks_total=kv.blocks_total,
@@ -121,24 +151,37 @@ class MetricsBuilder:
             pending_requests=self._pending_requests,
         )
 
-    def build_api_response(self) -> dict[str, Any]:
+    def build_api_response(self) -> dict[str, Any]:  # cq: max-lines=45
         """Build API response dict with nested structure."""
-        gpu = self._gpu or GPUStats(0, 0, 0)
+        gpu = self._gpu or GPUStats(0, 0, 0, 0, 0, 0)
         kv = self._kv_cache or KVCacheStats(0, 0, 0, 0)
         seq = self._sequences or SequenceStats(0, 0)
 
         return {
             "gpu": {
-                "allocated_bytes": gpu.allocated_bytes,
-                "reserved_bytes": gpu.reserved_bytes,
-                "peak_bytes": gpu.peak_bytes,
-                "allocated_mb": gpu.allocated_mb,
-                "reserved_mb": gpu.reserved_mb,
-                "peak_mb": gpu.peak_mb,
+                "torch": {
+                    "allocated_bytes": gpu.allocated_bytes,
+                    "reserved_bytes": gpu.reserved_bytes,
+                    "peak_bytes": gpu.peak_bytes,
+                    "allocated_mb": gpu.allocated_mb,
+                    "reserved_mb": gpu.reserved_mb,
+                    "peak_mb": gpu.peak_mb,
+                },
+                "device": {
+                    "used_bytes": gpu.device_used_bytes,
+                    "total_bytes": gpu.device_total_bytes,
+                    "free_bytes": gpu.device_free_bytes,
+                    "used_mb": gpu.device_used_mb,
+                    "total_mb": gpu.device_total_mb,
+                    "free_mb": gpu.device_free_mb,
+                },
+                "model_memory_bytes": gpu.model_memory_bytes,
+                "model_memory_mb": gpu.model_memory_mb,
             },
             "kv_cache": {
-                "bytes": kv.bytes,
-                "mb": kv.mb,
+                "allocated_bytes": kv.bytes,
+                "allocated_mb": kv.mb,
+                "usage_perc": kv.usage_perc,
                 "blocks_used": kv.blocks_used,
                 "blocks_total": kv.blocks_total,
                 "blocks_free": kv.blocks_free,
@@ -177,6 +220,10 @@ def format_metrics_for_api(response: MetricsResponse) -> dict[str, Any]:
         allocated_bytes=response.gpu_allocated_bytes,
         reserved_bytes=response.gpu_reserved_bytes,
         peak_bytes=response.gpu_peak_bytes,
+        device_used_bytes=response.gpu_device_used_bytes,
+        device_total_bytes=response.gpu_device_total_bytes,
+        device_free_bytes=response.gpu_device_free_bytes,
+        model_memory_bytes=response.gpu_model_memory_bytes,
     )
     builder._kv_cache = KVCacheStats(
         bytes=response.kv_cache_bytes,

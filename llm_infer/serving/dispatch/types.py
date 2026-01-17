@@ -81,20 +81,26 @@ class MetricsResponse:
     """Response with server metrics."""
 
     id: str
-    # GPU memory
+    # GPU memory (torch - per-process)
     gpu_allocated_bytes: int
     gpu_reserved_bytes: int
     gpu_peak_bytes: int
+    # GPU memory (pynvml - device-level, for vLLM)
+    gpu_device_used_bytes: int = 0
+    gpu_device_total_bytes: int = 0
+    gpu_device_free_bytes: int = 0
+    # Model memory (estimated from GPU delta during load)
+    gpu_model_memory_bytes: int = 0
     # KV cache
-    kv_cache_bytes: int
-    kv_blocks_used: int
-    kv_blocks_total: int
-    kv_block_size: int
+    kv_cache_bytes: int = 0
+    kv_blocks_used: int = 0
+    kv_blocks_total: int = 0
+    kv_block_size: int = 0
     # Sequences
-    active_sequences: int
-    total_sequence_tokens: int
+    active_sequences: int = 0
+    total_sequence_tokens: int = 0
     # Request queue
-    pending_requests: int
+    pending_requests: int = 0
 
 
 @dataclass

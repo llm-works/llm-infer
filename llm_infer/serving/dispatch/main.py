@@ -8,6 +8,7 @@ from typing import Any
 
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
+from appinfra.size import size_str
 from appinfra.time import ETA, Ticker, delta_str, since, start
 
 from ..adapters import AdapterManager
@@ -397,24 +398,35 @@ class BootSequence:
         signal.signal(signal.SIGTERM, handler)
 
     def _log_gpu_stats(self) -> None:
-        """Log current GPU memory stats."""
-        import torch
+        """Log current GPU memory stats from engine."""
+        stats = self._engine.memory_stats()
 
-        if not torch.cuda.is_available():
-            return
+        # Prefer device-level stats (pynvml) for vLLM, fall back to torch stats
+        if stats.get("device_used", 0) > 0:
+            # Calculate KV cache used from usage percentage
+            kv_total = stats.get("kv_cache_bytes", 0)
+            kv_usage_perc = stats.get("kv_cache_usage_perc", 0.0)
+            kv_used = int(kv_total * kv_usage_perc) if kv_total else 0
 
-        allocated = torch.cuda.memory_allocated() / (1024**3)
-        reserved = torch.cuda.memory_reserved() / (1024**3)
-        peak = torch.cuda.max_memory_allocated() / (1024**3)
-
-        self._lg.info(
-            "GPU stats",
-            extra={
-                "allocated_gb": f"{allocated:.2f}",
-                "reserved_gb": f"{reserved:.2f}",
-                "peak_gb": f"{peak:.2f}",
-            },
-        )
+            self._lg.info(
+                "GPU memory",
+                extra={
+                    "total": size_str(stats["device_total"]),
+                    "used": size_str(stats["device_used"]),
+                    "free": size_str(stats["device_free"]),
+                    "model": size_str(stats.get("model_memory", 0)),
+                    "kv": f"total[{size_str(kv_total)}] used[{size_str(kv_used)}]",
+                },
+            )
+        elif stats.get("allocated", 0) > 0:
+            self._lg.info(
+                "GPU memory",
+                extra={
+                    "allocated": size_str(stats["allocated"]),
+                    "reserved": size_str(stats["reserved"]),
+                    "peak": size_str(stats["peak"]),
+                },
+            )
 
     def _log_kv_cache_info(self) -> None:
         """Log KV cache allocation info (native engine only)."""
@@ -434,22 +446,9 @@ class BootSequence:
 
     def _start_memory_ticker(self) -> None:
         """Start periodic GPU memory logging."""
-        import torch
 
         def log_stats() -> None:
-            if not torch.cuda.is_available():
-                return
-            allocated = torch.cuda.memory_allocated() / (1024**3)
-            reserved = torch.cuda.memory_reserved() / (1024**3)
-            peak = torch.cuda.max_memory_allocated() / (1024**3)
-            self._lg.info(
-                "GPU stats",
-                extra={
-                    "allocated_gb": f"{allocated:.2f}",
-                    "reserved_gb": f"{reserved:.2f}",
-                    "peak_gb": f"{peak:.2f}",
-                },
-            )
+            self._log_gpu_stats()
 
         self._memory_ticker = Ticker(self._lg, log_stats, secs=120.0, initial=False)
         threading.Thread(target=self._memory_ticker.run, daemon=True).start()

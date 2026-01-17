@@ -97,6 +97,7 @@ class VLLMConfig:
     # Performance tuning
     enforce_eager: bool = False  # Disable CUDA graph for debugging
     disable_custom_all_reduce: bool = False
+    disable_log_stats: bool = False  # Enable stats for get_metrics() API
     max_cudagraph_capture_size: int | None = (
         None  # Limit batch sizes for CUDA graph capture (lower = faster startup)
     )
@@ -159,6 +160,7 @@ class VLLMConfig:
             "kv_cache_dtype": self.kv_cache_dtype,
             "enforce_eager": self.enforce_eager,
             "disable_custom_all_reduce": self.disable_custom_all_reduce,
+            "disable_log_stats": self.disable_log_stats,
             "trust_remote_code": self.trust_remote_code,
         }
         self._add_optional_kwargs(kwargs)
@@ -321,6 +323,7 @@ class InferenceConfig:
             kv_cache_dtype=data.get("kv_cache_dtype", "auto"),
             enforce_eager=data.get("enforce_eager", False),
             disable_custom_all_reduce=data.get("disable_custom_all_reduce", False),
+            disable_log_stats=data.get("disable_log_stats", False),
             max_cudagraph_capture_size=data.get("max_cudagraph_capture_size"),
             quantization=data.get("quantization"),
             speculative_model=data.get("speculative_model"),
