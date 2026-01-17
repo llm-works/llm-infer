@@ -153,7 +153,7 @@ class MetricsBuilder:
 
     def build_api_response(self) -> dict[str, Any]:  # cq: max-lines=45
         """Build API response dict with nested structure."""
-        gpu = self._gpu or GPUStats(0, 0, 0, 0, 0, 0)
+        gpu = self._gpu or GPUStats(0, 0, 0)
         kv = self._kv_cache or KVCacheStats(0, 0, 0, 0)
         seq = self._sequences or SequenceStats(0, 0)
 

@@ -113,7 +113,8 @@ class VLLMEngine:
     def _get_physical_device_index(self) -> int:
         """Map torch logical device to pynvml physical device index.
 
-        Handles CUDA_VISIBLE_DEVICES remapping.
+        Handles CUDA_VISIBLE_DEVICES remapping. Falls back to logical index
+        if env var uses non-integer format (UUIDs, MIG device IDs).
         """
         import os
 
@@ -125,10 +126,13 @@ class VLLMEngine:
         cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
         if not cuda_visible:
             return logical_idx
-        visible_devices = [int(d.strip()) for d in cuda_visible.split(",")]
-        if logical_idx < len(visible_devices):
-            return visible_devices[logical_idx]
-        return 0
+        try:
+            visible_devices = [int(d.strip()) for d in cuda_visible.split(",")]
+            if logical_idx < len(visible_devices):
+                return visible_devices[logical_idx]
+        except ValueError:
+            pass  # Non-integer format (UUID, MIG), fall back to logical index
+        return logical_idx
 
     def _init_nvml(self) -> Any | None:
         """Initialize pynvml and return device handle, or None if unavailable."""

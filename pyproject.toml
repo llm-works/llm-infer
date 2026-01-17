@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 cuda = [
     "flashinfer-python>=0.2.0,<1.0.0",
+    "pynvml>=11.0.0,<13.0.0",  # Device-level GPU stats for vLLM backend
 ]
 dev = [
     "coverage>=7.0.0,<8.0.0",
