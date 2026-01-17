@@ -90,11 +90,17 @@ class VLLMEngine:
         self._config = config
         self._lg = lg
 
-        # Get kwargs for LLM constructor
-        llm_kwargs = config.to_llm_kwargs()
+        # Initialize pynvml for device-level GPU stats
+        self._nvml_handle = self._init_nvml()
+
+        # Track GPU memory before loading to estimate model size
+        mem_before = self._get_device_memory_used()
 
         # Create the sync LLM engine
-        self._engine = LLM(**llm_kwargs)
+        self._engine = LLM(**config.to_llm_kwargs())
+
+        # Estimate model and KV cache memory
+        self._init_memory_estimation(mem_before)
 
         # Get tokenizer for protocol methods
         self._tokenizer = self._engine.get_tokenizer()
@@ -103,6 +109,253 @@ class VLLMEngine:
         self._eos_token_id: int | None = None
         if hasattr(self._tokenizer, "eos_token_id"):
             self._eos_token_id = self._tokenizer.eos_token_id
+
+    def _get_physical_device_index(self) -> int:
+        """Map torch logical device to pynvml physical device index.
+
+        Handles CUDA_VISIBLE_DEVICES remapping. Falls back to logical index
+        if env var uses non-integer format (UUIDs, MIG device IDs).
+        """
+        import os
+
+        import torch
+
+        if not torch.cuda.is_available():
+            return 0
+        logical_idx: int = torch.cuda.current_device()
+        cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if not cuda_visible:
+            return logical_idx
+        try:
+            visible_devices = [int(d.strip()) for d in cuda_visible.split(",")]
+            if logical_idx < len(visible_devices):
+                return visible_devices[logical_idx]
+        except ValueError:
+            pass  # Non-integer format (UUID, MIG), fall back to logical index
+        return logical_idx
+
+    def _init_nvml(self) -> Any | None:
+        """Initialize pynvml and return device handle, or None if unavailable."""
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            return pynvml.nvmlDeviceGetHandleByIndex(self._get_physical_device_index())
+        except ImportError:
+            if self._lg:
+                self._lg.warning(
+                    "pynvml not available, device-level GPU stats disabled"
+                )
+        except Exception as e:
+            if self._lg:
+                self._lg.warning(
+                    "pynvml init failed, device-level GPU stats disabled",
+                    extra={"exception": e},
+                )
+        return None
+
+    def _init_memory_estimation(self, mem_before: int | None) -> None:
+        """Estimate model and KV cache memory from GPU usage delta."""
+        mem_after = self._get_device_memory_used()
+        if mem_before is not None and mem_after is not None:
+            self._model_memory_bytes = max(0, mem_after - mem_before)
+        else:
+            self._model_memory_bytes = 0
+
+        # Get KV cache size and block config from vLLM
+        self._kv_cache_bytes, self._kv_blocks_total, self._kv_block_size = (
+            self._get_kv_cache_info()
+        )
+
+        # The delta includes model + KV cache + overhead; subtract KV cache
+        if self._kv_cache_bytes > 0 and self._model_memory_bytes > self._kv_cache_bytes:
+            self._model_memory_bytes -= self._kv_cache_bytes
+
+        if self._lg:
+            self._lg.debug(
+                "memory estimation complete",
+                extra={
+                    "mem_before": mem_before,
+                    "mem_after": mem_after,
+                    "model_memory": self._model_memory_bytes,
+                    "kv_cache": self._kv_cache_bytes,
+                },
+            )
+
+    def _get_device_memory_used(self) -> int | None:
+        """Get current GPU memory usage via pynvml."""
+        if self._nvml_handle is None:
+            return None
+        try:
+            import pynvml
+
+            info = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
+            return int(info.used)
+        except Exception:
+            return None
+
+    def _get_configs_from_engine(self) -> tuple[Any, Any] | None:
+        """Extract cache_config and model_config from vLLM engine (V0/V1)."""
+        if not hasattr(self._engine, "llm_engine"):
+            return None
+        llm_engine = self._engine.llm_engine
+
+        cache_config = getattr(llm_engine, "cache_config", None)
+        model_config = getattr(llm_engine, "model_config", None)
+
+        # Fallback to vllm_config if direct attributes not found
+        if not cache_config or not model_config:
+            vllm_config = getattr(llm_engine, "vllm_config", None)
+            if vllm_config:
+                cache_config = cache_config or getattr(
+                    vllm_config, "cache_config", None
+                )
+                model_config = model_config or getattr(
+                    vllm_config, "model_config", None
+                )
+
+        if cache_config and model_config:
+            return cache_config, model_config
+        return None
+
+    def _get_kv_cache_info(self) -> tuple[int, int, int]:
+        """Extract KV cache size and block config from vLLM engine."""
+        try:
+            configs = self._get_configs_from_engine()
+            if configs:
+                cache_config, model_config = configs
+                if (
+                    hasattr(cache_config, "num_gpu_blocks")
+                    and cache_config.num_gpu_blocks
+                ):
+                    block_size = getattr(cache_config, "block_size", 16)
+                    blocks_total = cache_config.num_gpu_blocks
+                    kv_bytes = self._calculate_kv_cache_bytes(
+                        cache_config, model_config
+                    )
+                    return kv_bytes, blocks_total, block_size
+        except Exception as e:
+            if self._lg:
+                self._lg.warning("Failed to get KV cache info", extra={"exception": e})
+        return 0, 0, 0
+
+    def _get_arch_from_hf_config(self, hf_config: Any) -> tuple[int, int, int] | None:
+        """Extract model architecture from HuggingFace config.
+
+        Returns:
+            Tuple of (num_layers, num_heads, head_dim) or None if extraction fails.
+        """
+        num_layers = getattr(hf_config, "num_hidden_layers", None)
+        num_heads = getattr(hf_config, "num_key_value_heads", None)
+        if num_heads is None:
+            num_heads = getattr(hf_config, "num_attention_heads", None)
+        head_dim = getattr(hf_config, "head_dim", None)
+        if head_dim is None:
+            hidden = getattr(hf_config, "hidden_size", None)
+            n_heads = getattr(hf_config, "num_attention_heads", None)
+            if hidden and n_heads:
+                head_dim = hidden // n_heads
+
+        if num_layers and num_heads and head_dim:
+            return num_layers, num_heads, head_dim
+        return None
+
+    def _get_arch_from_vllm_config(
+        self, model_config: Any
+    ) -> tuple[int, int, int] | None:
+        """Extract model architecture from vLLM config methods (V0/V1)."""
+        # V1: direct methods
+        try:
+            return (
+                model_config.get_num_layers(),
+                model_config.get_num_kv_heads(),
+                model_config.get_head_size(),
+            )
+        except (TypeError, AttributeError):
+            pass
+
+        # V0: methods with parallel_config
+        if hasattr(model_config, "parallel_config"):
+            pc = model_config.parallel_config
+            return (
+                model_config.get_num_layers(pc),
+                model_config.get_num_kv_heads(pc),
+                model_config.get_head_size(),
+            )
+        return None
+
+    def _get_kv_cache_dtype_size(self, cache_config: Any) -> int:
+        """Get KV cache element size in bytes from cache config."""
+        dtype_sizes = {
+            "float16": 2,
+            "bfloat16": 2,
+            "float32": 4,
+            "fp8": 1,
+            "fp8_e4m3": 1,
+            "fp8_e5m2": 1,
+        }
+        # vLLM uses cache_dtype attribute
+        cache_dtype = getattr(cache_config, "cache_dtype", None)
+        if cache_dtype and cache_dtype != "auto":
+            return dtype_sizes.get(str(cache_dtype).lower(), 2)
+        return 2  # Default to float16
+
+    def _calculate_kv_cache_bytes(self, cache_config: Any, model_config: Any) -> int:
+        """Calculate KV cache size in bytes from vLLM configs."""
+        try:
+            block_size = cache_config.block_size
+            num_blocks = cache_config.num_gpu_blocks
+            dtype_size = self._get_kv_cache_dtype_size(cache_config)
+
+            # Try HuggingFace config first (most reliable)
+            hf_config = getattr(model_config, "hf_config", None)
+            if hf_config:
+                arch = self._get_arch_from_hf_config(hf_config)
+                if arch:
+                    return self._compute_kv_cache_total(
+                        *arch, block_size, num_blocks, dtype_size
+                    )
+
+            # Fallback to vLLM model config methods
+            arch = self._get_arch_from_vllm_config(model_config)
+            if arch:
+                return self._compute_kv_cache_total(
+                    *arch, block_size, num_blocks, dtype_size
+                )
+
+        except Exception as e:
+            if self._lg:
+                self._lg.warning("KV cache calculation failed", extra={"exception": e})
+        return 0
+
+    def _compute_kv_cache_total(
+        self,
+        num_layers: int,
+        num_heads: int,
+        head_dim: int,
+        block_size: int,
+        num_blocks: int,
+        dtype_size: int = 2,
+    ) -> int:
+        """Compute KV cache total bytes from architecture params."""
+        # KV cache per block = 2 * num_layers * num_heads * head_dim * block_size * dtype_size
+        kv_per_block = 2 * num_layers * num_heads * head_dim * block_size * dtype_size
+        total = num_blocks * kv_per_block
+
+        if self._lg:
+            self._lg.debug(
+                "KV cache calculated",
+                extra={
+                    "layers": num_layers,
+                    "heads": num_heads,
+                    "head_dim": head_dim,
+                    "blocks": num_blocks,
+                    "block_size": block_size,
+                    "dtype_size": dtype_size,
+                    "total_gb": round(total / 1e9, 2),
+                },
+            )
+        return total
 
     @property
     def model_name(self) -> str:
@@ -451,32 +704,67 @@ class VLLMEngine:
     # InferenceEngineProtocol: Utility methods
     # -------------------------------------------------------------------------
 
-    def memory_stats(self) -> dict[str, int]:
-        """Return memory statistics.
+    def _fetch_device_memory_stats(self) -> tuple[int, int, int] | None:
+        """Fetch device memory stats via pynvml. Returns (used, total, free)."""
+        if self._nvml_handle is None:
+            return None
+        try:
+            import pynvml
 
-        Note: vLLM manages memory internally, these are approximate.
-        """
+            info = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
+            return int(info.used), int(info.total), int(info.free)
+        except Exception:
+            return None
+
+    def _fetch_kv_cache_usage(self) -> tuple[float, int] | None:
+        """Fetch KV cache usage from vLLM metrics. Returns (usage_perc, blocks_used)."""
+        try:
+            for metric in self._engine.get_metrics():
+                if not hasattr(metric, "value"):
+                    continue
+                if metric.name == "vllm:kv_cache_usage_perc":
+                    blocks_used = 0
+                    if self._kv_blocks_total > 0:
+                        blocks_used = int(metric.value * self._kv_blocks_total)
+                    return metric.value, blocks_used
+        except Exception as e:
+            if self._lg:
+                self._lg.debug("Failed to fetch KV cache usage", extra={"exception": e})
+        return None
+
+    def _fetch_torch_memory_stats(self) -> tuple[int, int, int]:
+        """Fetch torch CUDA memory stats. Returns (allocated, reserved, peak)."""
         import torch
 
         if torch.cuda.is_available():
-            return {
-                "allocated": torch.cuda.memory_allocated(),
-                "reserved": torch.cuda.memory_reserved(),
-                "peak": torch.cuda.max_memory_allocated(),
-                "kv_cache_bytes": 0,  # vLLM manages internally
-                "kv_blocks_used": 0,
-                "kv_blocks_total": 0,
-                "kv_block_size": 0,
-            }
-        return {
-            "allocated": 0,
-            "reserved": 0,
-            "peak": 0,
-            "kv_cache_bytes": 0,
-            "kv_blocks_used": 0,
-            "kv_blocks_total": 0,
-            "kv_block_size": 0,
+            return (
+                torch.cuda.memory_allocated(),
+                torch.cuda.memory_reserved(),
+                torch.cuda.max_memory_allocated(),
+            )
+        return (0, 0, 0)
+
+    def memory_stats(self) -> dict[str, int | float]:
+        """Return memory statistics."""
+        allocated, reserved, peak = self._fetch_torch_memory_stats()
+        device_stats = self._fetch_device_memory_stats()
+        kv_usage = self._fetch_kv_cache_usage()
+
+        stats: dict[str, int | float] = {
+            "allocated": allocated,
+            "reserved": reserved,
+            "peak": peak,
+            "model_memory": self._model_memory_bytes,
+            "kv_cache_bytes": self._kv_cache_bytes,
+            "kv_blocks_used": kv_usage[1] if kv_usage else 0,
+            "kv_blocks_total": self._kv_blocks_total,
+            "kv_block_size": self._kv_block_size,
+            "device_used": device_stats[0] if device_stats else 0,
+            "device_total": device_stats[1] if device_stats else 0,
+            "device_free": device_stats[2] if device_stats else 0,
+            "kv_cache_usage_perc": kv_usage[0] if kv_usage else 0.0,
         }
+        return stats
 
     def reset_peak_memory(self) -> None:
         """Reset peak memory tracking."""
@@ -485,36 +773,39 @@ class VLLMEngine:
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
-    def shutdown(self) -> None:
-        """Shutdown the vLLM engine and release resources.
+    def _shutdown_nvml(self) -> None:
+        """Shutdown pynvml if initialized."""
+        if self._nvml_handle is not None:
+            try:
+                import pynvml
 
-        vLLM's cleanup is notoriously incomplete. We do best-effort:
-        1. Destroy distributed process groups
-        2. Clear CUDA cache
-        3. Run garbage collection
-        """
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
+            self._nvml_handle = None
+
+    def shutdown(self) -> None:
+        """Shutdown the vLLM engine and release resources."""
         import gc
 
         import torch
 
-        # Try to destroy distributed process groups (fixes NCCL warning)
+        # Destroy distributed process groups (fixes NCCL warning)
         if torch.distributed.is_initialized():
             try:
                 torch.distributed.destroy_process_group()
             except Exception:
-                pass  # May already be destroyed
+                pass
 
-        # Try vLLM's model parallel cleanup
+        # vLLM model parallel cleanup
         try:
             from vllm.distributed import destroy_model_parallel
 
             destroy_model_parallel()
         except Exception:
-            pass  # May not be initialized
+            pass
 
-        # Clear CUDA cache
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
-        # Force garbage collection
         gc.collect()
+        self._shutdown_nvml()

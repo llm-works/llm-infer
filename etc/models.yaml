@@ -42,6 +42,21 @@ models:
       gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
   # Qwen3 instruct models - support /think /no_think tokens
+  qwen3-1.7b-gptq-int8:
+    system_prompt: null
+    max_model_len: 4096  # Reduced for 8GB GPU dev environment
+    think:
+      default: false
+      enable_suffix: " /think"
+      disable_suffix: " /no_think"
+      system_prompt: "You MUST wrap all your step-by-step reasoning inside <think></think> XML tags. After </think>, output ONLY the final answer with no explanation."
+      tags:
+        open: ["<think>", "<thinking>"]
+        close: ["</think>", "</thinking>"]
+    vllm:
+      enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
+      #gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
   qwen3-4b-instruct-2507-awq:
     system_prompt: null
     think:

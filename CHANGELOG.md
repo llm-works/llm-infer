@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Circular import in `llm_infer.serving.api` preventing use of streaming utilities
 
 ### Changed
+- Metrics API response structure reorganized: GPU stats split into `torch` and `device` sections,
+  KV cache fields renamed (`bytes` → `allocated_bytes`, added `usage_perc`)
 - Default logging level changed from debug to info
 - Model configuration moved from `llm_infer.cli.config.models` to `llm_infer.models`
 - Request handlers refactored to use Template Method pattern (common logic in base class)
@@ -30,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove `importlib.util` hack from `llm_infer.api` module
 
 ### Added
+- pynvml-based GPU stats for vLLM backend: device-level memory (used/total/free), model memory
+  estimation, and real-time KV cache usage from vLLM metrics API
+- `disable_log_stats` config option for vLLM to control stats collection for `get_metrics()` API
 - `max_cudagraph_capture_size` config option for vLLM to limit CUDA graph batch sizes (reduces startup from ~2min to ~2sec)
 - Generic `-o KEY=VALUE` CLI flag for `serve` command to override any config value at runtime
 - `llm_infer.text` package with streaming text formatters (usable without CLI):

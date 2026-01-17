@@ -543,11 +543,12 @@ class InferenceEngineProtocol(Protocol):
         """
         ...
 
-    def memory_stats(self) -> dict[str, int]:
+    def memory_stats(self) -> dict[str, int | float]:
         """Return GPU and KV cache memory statistics.
 
         Returns:
             Dict with GPU memory (bytes) and KV cache block stats.
+            Some fields (e.g., usage percentages) may be floats.
         """
         ...
 
