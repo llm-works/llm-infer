@@ -58,7 +58,11 @@ class StreamingGenerator(ABC):
 
     @abstractmethod
     def create_content_chunk(self, token: str) -> str:
-        """Create SSE event for a content token."""
+        """Create SSE event for a content token.
+
+        Returns SSE-formatted string, or empty string if content is buffered
+        (e.g., by a normalizer waiting for complete tags).
+        """
         pass
 
     @abstractmethod

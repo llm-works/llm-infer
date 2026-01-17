@@ -96,6 +96,23 @@ def _has_system_message(body: ChatCompletionRequest) -> bool:
     return any(msg.role == Role.SYSTEM for msg in body.messages)
 
 
+def _inject_think_suffix(messages: list[dict[str, str]], suffix: str) -> str | None:
+    """Inject think suffix into last user message, returning updated content.
+
+    If no user message exists (rare edge case), appends to last message anyway.
+    Returns the content of the modified message, or None if no suffix provided.
+    """
+    if not suffix:
+        return None
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i]["role"] == "user":
+            messages[i]["content"] += suffix
+            return messages[i]["content"]
+    # No user message - append to last message (e.g., prefill scenarios)
+    messages[-1]["content"] += suffix
+    return None
+
+
 def _build_messages_with_injections(
     body: ChatCompletionRequest, think_suffix: str, system_prompt: str | None
 ) -> tuple[str, list[dict[str, str]] | None]:
@@ -120,19 +137,14 @@ def _build_messages_with_injections(
         {"role": msg.role.value, "content": msg.content or ""} for msg in body.messages
     ]
 
-    # Inject model config system prompt only if request doesn't already have one.
-    # Request-provided system messages take precedence over model defaults.
+    # Inject model config system prompt only if request doesn't already have one
     if system_prompt and not _has_system_message(body):
         messages.insert(0, {"role": "system", "content": system_prompt})
 
-    # Inject think suffix into last user message and track it for prompt return
+    # Inject think suffix and get prompt for logging/display
     prompt = body.messages[-1].content or ""
-    if think_suffix:
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i]["role"] == "user":
-                messages[i]["content"] += think_suffix
-                prompt = messages[i]["content"]
-                break
+    if injected_prompt := _inject_think_suffix(messages, think_suffix):
+        prompt = injected_prompt
 
     return prompt, messages
 
