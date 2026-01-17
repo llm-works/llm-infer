@@ -55,7 +55,7 @@ def normalize_stop_sequences(stop: str | list[str] | None) -> list[str] | None:
     return stop
 
 
-def _resolve_think_mode(think: bool | None, model_config: ModelConfig | None) -> bool:
+def resolve_think_mode(think: bool | None, model_config: ModelConfig | None) -> bool:
     """Resolve effective think mode from request and model config default."""
     if think is not None:
         return think
@@ -68,7 +68,7 @@ def _get_think_suffix(think: bool | None, model_config: ModelConfig | None) -> s
     """Get the appropriate think suffix based on request and model config."""
     if model_config is None:
         return ""
-    effective_think = _resolve_think_mode(think, model_config)
+    effective_think = resolve_think_mode(think, model_config)
     think_config = model_config.think
     if effective_think and think_config.enable_suffix:
         return think_config.enable_suffix
@@ -84,7 +84,7 @@ def _get_system_prompt(
     if model_config is None:
         return None
     # Use think-specific system prompt when think mode is enabled (explicit or default)
-    effective_think = _resolve_think_mode(think, model_config)
+    effective_think = resolve_think_mode(think, model_config)
     if effective_think and model_config.think.system_prompt:
         return model_config.think.system_prompt
     # Fall back to model's default system prompt
