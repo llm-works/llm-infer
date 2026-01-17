@@ -110,7 +110,7 @@ def _inject_think_suffix(messages: list[dict[str, str]], suffix: str) -> str | N
             return messages[i]["content"]
     # No user message - append to last message (e.g., prefill scenarios)
     messages[-1]["content"] += suffix
-    return None
+    return messages[-1]["content"]
 
 
 def _build_messages_with_injections(

@@ -145,7 +145,7 @@ class QueryTool(Tool):
         """Get think flag value from args. Returns None if neither flag is set."""
         if self.args.think:
             return True
-        if getattr(self.args, "no_think", False):
+        if self.args.no_think:
             return False
         return None
 
