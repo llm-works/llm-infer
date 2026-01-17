@@ -727,8 +727,9 @@ class VLLMEngine:
                     if self._kv_blocks_total > 0:
                         blocks_used = int(metric.value * self._kv_blocks_total)
                     return metric.value, blocks_used
-        except Exception:
-            pass
+        except Exception as e:
+            if self._lg:
+                self._lg.debug("Failed to fetch KV cache usage", extra={"exception": e})
         return None
 
     def _fetch_torch_memory_stats(self) -> tuple[int, int, int]:

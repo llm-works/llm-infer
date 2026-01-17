@@ -93,6 +93,7 @@ class MetricsResponse:
     gpu_model_memory_bytes: int = 0
     # KV cache
     kv_cache_bytes: int = 0
+    kv_cache_usage_perc: float = 0.0  # vLLM real-time usage (0-1)
     kv_blocks_used: int = 0
     kv_blocks_total: int = 0
     kv_block_size: int = 0

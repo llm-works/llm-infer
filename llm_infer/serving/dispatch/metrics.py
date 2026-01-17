@@ -143,6 +143,7 @@ class MetricsBuilder:
             gpu_device_free_bytes=gpu.device_free_bytes,
             gpu_model_memory_bytes=gpu.model_memory_bytes,
             kv_cache_bytes=kv.bytes,
+            kv_cache_usage_perc=kv.usage_perc,
             kv_blocks_used=kv.blocks_used,
             kv_blocks_total=kv.blocks_total,
             kv_block_size=kv.block_size,
@@ -230,6 +231,7 @@ def format_metrics_for_api(response: MetricsResponse) -> dict[str, Any]:
         blocks_used=response.kv_blocks_used,
         blocks_total=response.kv_blocks_total,
         block_size=response.kv_block_size,
+        usage_perc=response.kv_cache_usage_perc,
     )
     builder._sequences = SequenceStats(
         active=response.active_sequences,
