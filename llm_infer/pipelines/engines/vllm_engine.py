@@ -90,6 +90,9 @@ class VLLMEngine:
         self._config = config
         self._lg = lg
 
+        # Initialize pynvml for device-level GPU stats
+        self._nvml_handle = self._init_nvml()
+
         # Track GPU memory before loading to estimate model size
         mem_before = self._get_device_memory_used()
 
@@ -106,6 +109,28 @@ class VLLMEngine:
         self._eos_token_id: int | None = None
         if hasattr(self._tokenizer, "eos_token_id"):
             self._eos_token_id = self._tokenizer.eos_token_id
+
+    def _init_nvml(self) -> Any | None:
+        """Initialize pynvml and return device handle, or None if unavailable."""
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            return handle
+        except ImportError:
+            if self._lg:
+                self._lg.warning(
+                    "pynvml not available, device-level GPU stats disabled"
+                )
+            return None
+        except Exception as e:
+            if self._lg:
+                self._lg.warning(
+                    "pynvml initialization failed, device-level GPU stats disabled",
+                    extra={"exception": e},
+                )
+            return None
 
     def _init_memory_estimation(self, mem_before: int | None) -> None:
         """Estimate model and KV cache memory from GPU usage delta."""
@@ -137,12 +162,12 @@ class VLLMEngine:
 
     def _get_device_memory_used(self) -> int | None:
         """Get current GPU memory usage via pynvml."""
+        if self._nvml_handle is None:
+            return None
         try:
             import pynvml
 
-            pynvml.nvmlInit()
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            info = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
             return int(info.used)
         except Exception:
             return None
@@ -189,7 +214,7 @@ class VLLMEngine:
                     return kv_bytes, blocks_total, block_size
         except Exception as e:
             if self._lg:
-                self._lg.debug("Failed to get KV cache info", extra={"error": str(e)})
+                self._lg.warning("Failed to get KV cache info", extra={"exception": e})
         return 0, 0, 0
 
     def _get_arch_from_hf_config(self, hf_config: Any) -> tuple[int, int, int] | None:
@@ -257,7 +282,7 @@ class VLLMEngine:
 
         except Exception as e:
             if self._lg:
-                self._lg.debug("KV cache calculation failed", extra={"error": str(e)})
+                self._lg.warning("KV cache calculation failed", extra={"exception": e})
         return 0
 
     def _compute_kv_cache_total(
@@ -637,12 +662,12 @@ class VLLMEngine:
 
     def _fetch_device_memory_stats(self) -> tuple[int, int, int] | None:
         """Fetch device memory stats via pynvml. Returns (used, total, free)."""
+        if self._nvml_handle is None:
+            return None
         try:
             import pynvml
 
-            pynvml.nvmlInit()
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            info = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
             return int(info.used), int(info.total), int(info.free)
         except Exception:
             return None
