@@ -55,14 +55,24 @@ def normalize_stop_sequences(stop: str | list[str] | None) -> list[str] | None:
     return stop
 
 
+def _resolve_think_mode(think: bool | None, model_config: ModelConfig | None) -> bool:
+    """Resolve effective think mode from request and model config default."""
+    if think is not None:
+        return think
+    if model_config is not None:
+        return model_config.think.default
+    return False
+
+
 def _get_think_suffix(think: bool | None, model_config: ModelConfig | None) -> str:
     """Get the appropriate think suffix based on request and model config."""
-    if think is None or model_config is None:
+    if model_config is None:
         return ""
+    effective_think = _resolve_think_mode(think, model_config)
     think_config = model_config.think
-    if think and think_config.enable_suffix:
+    if effective_think and think_config.enable_suffix:
         return think_config.enable_suffix
-    if not think and think_config.disable_suffix:
+    if not effective_think and think_config.disable_suffix:
         return think_config.disable_suffix
     return ""
 
@@ -73,8 +83,9 @@ def _get_system_prompt(
     """Get the appropriate system prompt based on request and model config."""
     if model_config is None:
         return None
-    # Use think-specific system prompt when think mode is enabled
-    if think and model_config.think.system_prompt:
+    # Use think-specific system prompt when think mode is enabled (explicit or default)
+    effective_think = _resolve_think_mode(think, model_config)
+    if effective_think and model_config.think.system_prompt:
         return model_config.think.system_prompt
     # Fall back to model's default system prompt
     return model_config.system_prompt
@@ -88,14 +99,21 @@ def _has_system_message(body: ChatCompletionRequest) -> bool:
 def _build_messages_with_injections(
     body: ChatCompletionRequest, think_suffix: str, system_prompt: str | None
 ) -> tuple[str, list[dict[str, str]] | None]:
-    """Build messages list, injecting system prompt and think suffix as needed."""
+    """Build messages list, injecting system prompt and think suffix as needed.
+
+    Returns:
+        Tuple of (prompt, messages) where prompt is the last user message content
+        (with think suffix if applied) for logging/display, and messages is the
+        full message list for template processing (or None for single-message case).
+    """
     # Single user message with no system prompt to inject: pass content directly
     if (
         len(body.messages) == 1
         and body.messages[0].role == Role.USER
         and not system_prompt
     ):
-        return (body.messages[0].content or "") + think_suffix, None
+        prompt = (body.messages[0].content or "") + think_suffix
+        return prompt, None
 
     # Build messages list for template
     messages = [
@@ -107,14 +125,16 @@ def _build_messages_with_injections(
     if system_prompt and not _has_system_message(body):
         messages.insert(0, {"role": "system", "content": system_prompt})
 
-    # Inject think suffix into last user message
+    # Inject think suffix into last user message and track it for prompt return
+    prompt = body.messages[-1].content or ""
     if think_suffix:
         for i in range(len(messages) - 1, -1, -1):
             if messages[i]["role"] == "user":
                 messages[i]["content"] += think_suffix
+                prompt = messages[i]["content"]
                 break
 
-    return body.messages[-1].content or "", messages
+    return prompt, messages
 
 
 def chat_request_to_internal(

@@ -30,6 +30,7 @@ from llm_infer.text.think import ThinkTagNormalizer
 
 from ..errors import raise_for_error_status
 from .mappers import (
+    _resolve_think_mode,
     chat_request_to_internal,
     completion_request_to_internal,
     determine_finish_reason,
@@ -50,13 +51,16 @@ def _build_completion_usage(response: Any) -> ChatCompletionUsage:
 
 
 def _normalize_response(
-    text: str, think_enabled: bool | None, model_config: ModelConfig | None
+    text: str, think: bool | None, model_config: ModelConfig | None
 ) -> str:
     """Normalize think tags in response text if think mode is active."""
-    if not think_enabled or not model_config or not text:
+    if not model_config or not text:
         return text
-    think = model_config.think
-    normalizer = ThinkTagNormalizer(think.tags_open, think.tags_close)
+    effective_think = _resolve_think_mode(think, model_config)
+    if not effective_think:
+        return text
+    think_config = model_config.think
+    normalizer = ThinkTagNormalizer(think_config.tags_open, think_config.tags_close)
     return normalizer.process(text) + normalizer.flush()
 
 
@@ -157,13 +161,16 @@ def _register_model_routes(router: APIRouter, model_name: str) -> None:
 
 
 def _create_normalizer(
-    think_enabled: bool | None, model_config: ModelConfig | None
+    think: bool | None, model_config: ModelConfig | None
 ) -> ThinkTagNormalizer | None:
     """Create tag normalizer if think mode is active."""
-    if not think_enabled or not model_config:
+    if not model_config:
         return None
-    think = model_config.think
-    return ThinkTagNormalizer(think.tags_open, think.tags_close)
+    effective_think = _resolve_think_mode(think, model_config)
+    if not effective_think:
+        return None
+    think_config = model_config.think
+    return ThinkTagNormalizer(think_config.tags_open, think_config.tags_close)
 
 
 def _handle_chat_streaming(

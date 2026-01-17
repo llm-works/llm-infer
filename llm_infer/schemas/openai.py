@@ -75,8 +75,9 @@ class ChatCompletionRequest(BaseModel):
     # llm-infer extension: Think mode control
     think: bool | None = Field(
         None,
-        description="Enable/disable think mode. Server injects model-appropriate suffix "
-        "and normalizes output tags to <think></think> (llm-infer extension)",
+        description="Enable/disable think mode. When None, uses model config default. "
+        "Server injects model-appropriate suffix and normalizes output tags to "
+        "canonical form from model config (llm-infer extension)",
     )
 
     @model_validator(mode="after")
