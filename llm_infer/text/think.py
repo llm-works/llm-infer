@@ -1,11 +1,81 @@
 """Thinking block formatter for streaming output.
 
 Formats <think>/<thinking> blocks with styling for terminal or other output.
+Also provides server-side tag normalization.
 """
 
 # ANSI escape codes for think block formatting
 ANSI_THINK_START = "\x1b[3;38;5;245m"  # Italic + grey (256-color: 245)
 ANSI_THINK_END = "\x1b[0m"  # Reset all formatting
+
+
+class ThinkTagNormalizer:
+    """Normalizes think tags to canonical format for streaming output.
+
+    Replaces any variant tags (e.g., <thinking>) with the canonical tag
+    (first in the list). Handles streaming by buffering incomplete tags.
+
+    Example:
+        # Config: tags_open=["<think>", "<thinking>"], tags_close=["</think>", "</thinking>"]
+        normalizer = ThinkTagNormalizer(["<think>", "<thinking>"], ["</think>", "</thinking>"])
+        # Input: "<thinking>hello</thinking>" -> Output: "<think>hello</think>"
+    """
+
+    def __init__(self, open_tags: list[str], close_tags: list[str]) -> None:
+        """Initialize normalizer with tags from model config.
+
+        The first tag in each list is canonical; others are normalized to it.
+
+        Args:
+            open_tags: Opening tags from model config (first is canonical).
+            close_tags: Closing tags from model config (first is canonical).
+        """
+        self.open_tags = open_tags
+        self.close_tags = close_tags
+        self.canonical_open = open_tags[0] if open_tags else "<think>"
+        self.canonical_close = close_tags[0] if close_tags else "</think>"
+        self.max_tag_len = max(
+            max((len(t) for t in self.open_tags), default=0),
+            max((len(t) for t in self.close_tags), default=0),
+        )
+        self._buffer = ""
+
+    def _normalize(self, text: str) -> str:
+        """Replace variant tags with canonical tags."""
+        for tag in self.open_tags[1:]:  # Skip first (canonical)
+            text = text.replace(tag, self.canonical_open)
+        for tag in self.close_tags[1:]:  # Skip first (canonical)
+            text = text.replace(tag, self.canonical_close)
+        return text
+
+    def process(self, text: str) -> str:
+        """Process text chunk, normalizing think tags.
+
+        Args:
+            text: Text chunk to process (may be partial).
+
+        Returns:
+            Text with variant tags replaced by canonical tags.
+            Incomplete tags are buffered for the next call.
+        """
+        self._buffer += text
+
+        # Keep potential partial tag at end in buffer
+        safe_len = max(0, len(self._buffer) - self.max_tag_len)
+        if safe_len == 0:
+            return ""
+
+        output = self._buffer[:safe_len]
+        self._buffer = self._buffer[safe_len:]
+        return self._normalize(output)
+
+    def flush(self) -> str:
+        """Flush remaining buffer at end of stream."""
+        if not self._buffer:
+            return ""
+        output = self._buffer
+        self._buffer = ""
+        return self._normalize(output)
 
 
 class ThinkFormatter:

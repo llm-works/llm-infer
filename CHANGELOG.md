@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Circular import in `llm_infer.serving.api` preventing use of streaming utilities
 
 ### Changed
+- Server-side think mode handling: server injects model-specific suffixes and normalizes output tags
+- Server-side system prompt injection from model config (default and think-specific)
+- QueryTool simplified to be model-agnostic (passes `think` flag to API, no model config dependency)
 - Metrics API response structure reorganized: GPU stats split into `torch` and `device` sections,
   KV cache fields renamed (`bytes` → `allocated_bytes`, added `usage_perc`)
 - Default logging level changed from debug to info
@@ -32,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove `importlib.util` hack from `llm_infer.api` module
 
 ### Added
+- `think` field in `ChatCompletionRequest` for API-level think mode control (llm-infer extension)
+- `ThinkTagNormalizer` class for streaming-safe normalization of think tags to canonical form
 - pynvml-based GPU stats for vLLM backend: device-level memory (used/total/free), model memory
   estimation, and real-time KV cache usage from vLLM metrics API
 - `disable_log_stats` config option for vLLM to control stats collection for `get_metrics()` API
