@@ -110,27 +110,45 @@ class VLLMEngine:
         if hasattr(self._tokenizer, "eos_token_id"):
             self._eos_token_id = self._tokenizer.eos_token_id
 
+    def _get_physical_device_index(self) -> int:
+        """Map torch logical device to pynvml physical device index.
+
+        Handles CUDA_VISIBLE_DEVICES remapping.
+        """
+        import os
+
+        import torch
+
+        if not torch.cuda.is_available():
+            return 0
+        logical_idx = torch.cuda.current_device()
+        cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if not cuda_visible:
+            return logical_idx
+        visible_devices = [int(d.strip()) for d in cuda_visible.split(",")]
+        if logical_idx < len(visible_devices):
+            return visible_devices[logical_idx]
+        return 0
+
     def _init_nvml(self) -> Any | None:
         """Initialize pynvml and return device handle, or None if unavailable."""
         try:
             import pynvml
 
             pynvml.nvmlInit()
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            return handle
+            return pynvml.nvmlDeviceGetHandleByIndex(self._get_physical_device_index())
         except ImportError:
             if self._lg:
                 self._lg.warning(
                     "pynvml not available, device-level GPU stats disabled"
                 )
-            return None
         except Exception as e:
             if self._lg:
                 self._lg.warning(
-                    "pynvml initialization failed, device-level GPU stats disabled",
+                    "pynvml init failed, device-level GPU stats disabled",
                     extra={"exception": e},
                 )
-            return None
+        return None
 
     def _init_memory_estimation(self, mem_before: int | None) -> None:
         """Estimate model and KV cache memory from GPU usage delta."""
@@ -262,23 +280,44 @@ class VLLMEngine:
             )
         return None
 
+    def _get_kv_cache_dtype_size(self, cache_config: Any) -> int:
+        """Get KV cache element size in bytes from cache config."""
+        dtype_sizes = {
+            "float16": 2,
+            "bfloat16": 2,
+            "float32": 4,
+            "fp8": 1,
+            "fp8_e4m3": 1,
+            "fp8_e5m2": 1,
+        }
+        # vLLM uses cache_dtype attribute
+        cache_dtype = getattr(cache_config, "cache_dtype", None)
+        if cache_dtype and cache_dtype != "auto":
+            return dtype_sizes.get(str(cache_dtype).lower(), 2)
+        return 2  # Default to float16
+
     def _calculate_kv_cache_bytes(self, cache_config: Any, model_config: Any) -> int:
         """Calculate KV cache size in bytes from vLLM configs."""
         try:
             block_size = cache_config.block_size
             num_blocks = cache_config.num_gpu_blocks
+            dtype_size = self._get_kv_cache_dtype_size(cache_config)
 
             # Try HuggingFace config first (most reliable)
             hf_config = getattr(model_config, "hf_config", None)
             if hf_config:
                 arch = self._get_arch_from_hf_config(hf_config)
                 if arch:
-                    return self._compute_kv_cache_total(*arch, block_size, num_blocks)
+                    return self._compute_kv_cache_total(
+                        *arch, block_size, num_blocks, dtype_size
+                    )
 
             # Fallback to vLLM model config methods
             arch = self._get_arch_from_vllm_config(model_config)
             if arch:
-                return self._compute_kv_cache_total(*arch, block_size, num_blocks)
+                return self._compute_kv_cache_total(
+                    *arch, block_size, num_blocks, dtype_size
+                )
 
         except Exception as e:
             if self._lg:
@@ -292,10 +331,10 @@ class VLLMEngine:
         head_dim: int,
         block_size: int,
         num_blocks: int,
+        dtype_size: int = 2,
     ) -> int:
         """Compute KV cache total bytes from architecture params."""
         # KV cache per block = 2 * num_layers * num_heads * head_dim * block_size * dtype_size
-        dtype_size = 2  # float16
         kv_per_block = 2 * num_layers * num_heads * head_dim * block_size * dtype_size
         total = num_blocks * kv_per_block
 
@@ -308,6 +347,7 @@ class VLLMEngine:
                     "head_dim": head_dim,
                     "blocks": num_blocks,
                     "block_size": block_size,
+                    "dtype_size": dtype_size,
                     "total_gb": round(total / 1e9, 2),
                 },
             )
@@ -687,33 +727,38 @@ class VLLMEngine:
             pass
         return None
 
+    def _fetch_torch_memory_stats(self) -> tuple[int, int, int]:
+        """Fetch torch CUDA memory stats. Returns (allocated, reserved, peak)."""
+        import torch
+
+        if torch.cuda.is_available():
+            return (
+                torch.cuda.memory_allocated(),
+                torch.cuda.memory_reserved(),
+                torch.cuda.max_memory_allocated(),
+            )
+        return (0, 0, 0)
+
     def memory_stats(self) -> dict[str, int | float]:
         """Return memory statistics."""
+        allocated, reserved, peak = self._fetch_torch_memory_stats()
+        device_stats = self._fetch_device_memory_stats()
+        kv_usage = self._fetch_kv_cache_usage()
+
         stats: dict[str, int | float] = {
-            "allocated": 0,
-            "reserved": 0,
-            "peak": 0,
+            "allocated": allocated,
+            "reserved": reserved,
+            "peak": peak,
             "model_memory": self._model_memory_bytes,
             "kv_cache_bytes": self._kv_cache_bytes,
-            "kv_blocks_used": 0,
+            "kv_blocks_used": kv_usage[1] if kv_usage else 0,
             "kv_blocks_total": self._kv_blocks_total,
             "kv_block_size": self._kv_block_size,
-            "device_used": 0,
-            "device_total": 0,
-            "device_free": 0,
-            "kv_cache_usage_perc": 0.0,
+            "device_used": device_stats[0] if device_stats else 0,
+            "device_total": device_stats[1] if device_stats else 0,
+            "device_free": device_stats[2] if device_stats else 0,
+            "kv_cache_usage_perc": kv_usage[0] if kv_usage else 0.0,
         }
-
-        device_stats = self._fetch_device_memory_stats()
-        if device_stats:
-            stats["device_used"], stats["device_total"], stats["device_free"] = (
-                device_stats
-            )
-
-        kv_usage = self._fetch_kv_cache_usage()
-        if kv_usage:
-            stats["kv_cache_usage_perc"], stats["kv_blocks_used"] = kv_usage
-
         return stats
 
     def reset_peak_memory(self) -> None:
@@ -723,36 +768,39 @@ class VLLMEngine:
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
-    def shutdown(self) -> None:
-        """Shutdown the vLLM engine and release resources.
+    def _shutdown_nvml(self) -> None:
+        """Shutdown pynvml if initialized."""
+        if self._nvml_handle is not None:
+            try:
+                import pynvml
 
-        vLLM's cleanup is notoriously incomplete. We do best-effort:
-        1. Destroy distributed process groups
-        2. Clear CUDA cache
-        3. Run garbage collection
-        """
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
+            self._nvml_handle = None
+
+    def shutdown(self) -> None:
+        """Shutdown the vLLM engine and release resources."""
         import gc
 
         import torch
 
-        # Try to destroy distributed process groups (fixes NCCL warning)
+        # Destroy distributed process groups (fixes NCCL warning)
         if torch.distributed.is_initialized():
             try:
                 torch.distributed.destroy_process_group()
             except Exception:
-                pass  # May already be destroyed
+                pass
 
-        # Try vLLM's model parallel cleanup
+        # vLLM model parallel cleanup
         try:
             from vllm.distributed import destroy_model_parallel
 
             destroy_model_parallel()
         except Exception:
-            pass  # May not be initialized
+            pass
 
-        # Clear CUDA cache
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-
-        # Force garbage collection
         gc.collect()
+        self._shutdown_nvml()

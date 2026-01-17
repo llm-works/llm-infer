@@ -97,7 +97,7 @@ class VLLMConfig:
     # Performance tuning
     enforce_eager: bool = False  # Disable CUDA graph for debugging
     disable_custom_all_reduce: bool = False
-    disable_log_stats: bool = False  # Enable stats for get_metrics() API
+    disable_log_stats: bool = False  # False=stats enabled (for get_metrics() API)
     max_cudagraph_capture_size: int | None = (
         None  # Limit batch sizes for CUDA graph capture (lower = faster startup)
     )
