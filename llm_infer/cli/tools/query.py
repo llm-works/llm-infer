@@ -70,12 +70,12 @@ class QueryTool(Tool):
         think_group.add_argument(
             "--think",
             action="store_true",
-            help="Enable thinking mode (server handles model-specific behavior)",
+            help="Enable thinking mode (extended reasoning with <think> blocks)",
         )
         think_group.add_argument(
             "--no-think",
             action="store_true",
-            help="Disable thinking mode (server handles model-specific behavior)",
+            help="Disable thinking mode",
         )
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:

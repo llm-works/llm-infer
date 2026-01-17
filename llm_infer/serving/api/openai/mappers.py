@@ -102,7 +102,8 @@ def _build_messages_with_injections(
         {"role": msg.role.value, "content": msg.content or ""} for msg in body.messages
     ]
 
-    # Inject system prompt if not already present
+    # Inject model config system prompt only if request doesn't already have one.
+    # Request-provided system messages take precedence over model defaults.
     if system_prompt and not _has_system_message(body):
         messages.insert(0, {"role": "system", "content": system_prompt})
 

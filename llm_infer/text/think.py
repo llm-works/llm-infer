@@ -34,9 +34,14 @@ class ThinkTagNormalizer:
         self.close_tags = close_tags
         self.canonical_open = open_tags[0] if open_tags else "<think>"
         self.canonical_close = close_tags[0] if close_tags else "</think>"
-        self.max_tag_len = max(
+        # Buffer size based on longest variant tag (to catch complete tags before split)
+        self._variant_max_len = max(
             max((len(t) for t in self.open_tags), default=0),
             max((len(t) for t in self.close_tags), default=0),
+        )
+        # After normalization, buffer based on canonical tag length
+        self._canonical_max_len = max(
+            len(self.canonical_open), len(self.canonical_close)
         )
         self._buffer = ""
 
@@ -58,16 +63,27 @@ class ThinkTagNormalizer:
             Text with variant tags replaced by canonical tags.
             Incomplete tags are buffered for the next call.
         """
+        # Fast path: no tags to normalize
+        if self._variant_max_len == 0:
+            return text
+
         self._buffer += text
 
-        # Keep potential partial tag at end in buffer
-        safe_len = max(0, len(self._buffer) - self.max_tag_len)
+        # Buffer enough to catch longest variant tag, then normalize
+        if len(self._buffer) <= self._variant_max_len:
+            return ""
+
+        # Normalize complete tags in buffer before splitting
+        self._buffer = self._normalize(self._buffer)
+
+        # After normalization, keep canonical tag length at end for partial tag safety
+        safe_len = max(0, len(self._buffer) - self._canonical_max_len)
         if safe_len == 0:
             return ""
 
         output = self._buffer[:safe_len]
         self._buffer = self._buffer[safe_len:]
-        return self._normalize(output)
+        return output
 
     def flush(self) -> str:
         """Flush remaining buffer at end of stream."""
