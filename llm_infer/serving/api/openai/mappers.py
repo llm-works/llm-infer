@@ -1,5 +1,9 @@
 """Map OpenAI request parameters to internal request format."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from llm_infer.schemas.openai import (
     ChatCompletionRequest,
     ChatMessage,
@@ -9,6 +13,9 @@ from llm_infer.schemas.openai import (
 )
 
 from ...dispatch.types import Request as InternalRequest
+
+if TYPE_CHECKING:
+    from llm_infer.models.config import ModelConfig
 
 
 def format_messages_as_prompt(messages: list[ChatMessage]) -> str:
@@ -48,25 +55,111 @@ def normalize_stop_sequences(stop: str | list[str] | None) -> list[str] | None:
     return stop
 
 
+def resolve_think_mode(think: bool | None, model_config: ModelConfig | None) -> bool:
+    """Resolve effective think mode from request and model config default."""
+    if think is not None:
+        return think
+    if model_config is not None:
+        return model_config.think.default
+    return False
+
+
+def _get_think_suffix(think: bool | None, model_config: ModelConfig | None) -> str:
+    """Get the appropriate think suffix based on request and model config."""
+    if model_config is None:
+        return ""
+    effective_think = resolve_think_mode(think, model_config)
+    think_config = model_config.think
+    if effective_think and think_config.enable_suffix:
+        return think_config.enable_suffix
+    if not effective_think and think_config.disable_suffix:
+        return think_config.disable_suffix
+    return ""
+
+
+def _get_system_prompt(
+    think: bool | None, model_config: ModelConfig | None
+) -> str | None:
+    """Get the appropriate system prompt based on request and model config."""
+    if model_config is None:
+        return None
+    # Use think-specific system prompt when think mode is enabled (explicit or default)
+    effective_think = resolve_think_mode(think, model_config)
+    if effective_think and model_config.think.system_prompt:
+        return model_config.think.system_prompt
+    # Fall back to model's default system prompt
+    return model_config.system_prompt
+
+
+def _has_system_message(body: ChatCompletionRequest) -> bool:
+    """Check if request already has a system message."""
+    return any(msg.role == Role.SYSTEM for msg in body.messages)
+
+
+def _inject_think_suffix(messages: list[dict[str, str]], suffix: str) -> str | None:
+    """Inject think suffix into last user message, returning updated content.
+
+    If no user message exists (rare edge case), appends to last message anyway.
+    Returns the content of the modified message, or None if no suffix provided.
+    """
+    if not suffix:
+        return None
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i]["role"] == "user":
+            messages[i]["content"] += suffix
+            return messages[i]["content"]
+    # No user message - append to last message (e.g., prefill scenarios)
+    messages[-1]["content"] += suffix
+    return messages[-1]["content"]
+
+
+def _build_messages_with_injections(
+    body: ChatCompletionRequest, think_suffix: str, system_prompt: str | None
+) -> tuple[str, list[dict[str, str]] | None]:
+    """Build messages list, injecting system prompt and think suffix as needed.
+
+    Returns:
+        Tuple of (prompt, messages) where prompt is the last user message content
+        (with think suffix if applied) for logging/display, and messages is the
+        full message list for template processing (or None for single-message case).
+    """
+    # Single user message with no system prompt to inject: pass content directly
+    if (
+        len(body.messages) == 1
+        and body.messages[0].role == Role.USER
+        and not system_prompt
+    ):
+        prompt = (body.messages[0].content or "") + think_suffix
+        return prompt, None
+
+    # Build messages list for template
+    messages = [
+        {"role": msg.role.value, "content": msg.content or ""} for msg in body.messages
+    ]
+
+    # Inject model config system prompt only if request doesn't already have one
+    if system_prompt and not _has_system_message(body):
+        messages.insert(0, {"role": "system", "content": system_prompt})
+
+    # Inject think suffix and get prompt for logging/display
+    prompt = body.messages[-1].content or ""
+    if injected_prompt := _inject_think_suffix(messages, think_suffix):
+        prompt = injected_prompt
+
+    return prompt, messages
+
+
 def chat_request_to_internal(
     body: ChatCompletionRequest,
     request_id: str,
+    model_config: ModelConfig | None = None,
 ) -> InternalRequest:
     """Convert OpenAI chat completion request to internal request format."""
-    # For single user message, pass content directly - the tokenizer's encode_chat
-    # will wrap it with proper chat template (adding role markers).
-    # For multi-turn or system messages, pass full messages list.
-    messages: list[dict[str, str]] | None = None
-    if len(body.messages) == 1 and body.messages[0].role == Role.USER:
-        prompt = body.messages[0].content or ""
-    else:
-        # Multi-turn or system messages - pass full messages list for template
-        messages = [
-            {"role": msg.role.value, "content": msg.content or ""}
-            for msg in body.messages
-        ]
-        # Use last user message as prompt fallback (for logging/display)
-        prompt = body.messages[-1].content or ""
+    think_suffix = _get_think_suffix(body.think, model_config)
+    system_prompt = _get_system_prompt(body.think, model_config)
+    prompt, messages = _build_messages_with_injections(
+        body, think_suffix, system_prompt
+    )
 
     return InternalRequest(
         id=request_id,
@@ -80,7 +173,7 @@ def chat_request_to_internal(
         use_chat_template=None,  # Let engine auto-detect based on model type
         stop_sequences=normalize_stop_sequences(body.stop),
         messages=messages,
-        adapter_id=body.adapter_id,  # LoRA adapter selection
+        adapter_id=body.adapter_id,
     )
 
 

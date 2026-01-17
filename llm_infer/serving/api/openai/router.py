@@ -1,5 +1,7 @@
 """FastAPI router for OpenAI-compatible endpoints."""
 
+from __future__ import annotations
+
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -24,17 +26,19 @@ from llm_infer.schemas.openai import (
     ModelList,
     Role,
 )
+from llm_infer.text.think import ThinkTagNormalizer
 
 from ..errors import raise_for_error_status
 from .mappers import (
     chat_request_to_internal,
     completion_request_to_internal,
     determine_finish_reason,
+    resolve_think_mode,
 )
 from .streaming_generators import ChatStreamingGenerator, CompletionStreamingGenerator
 
 if TYPE_CHECKING:
-    pass
+    from llm_infer.models.config import ModelConfig
 
 
 def _build_completion_usage(response: Any) -> ChatCompletionUsage:
@@ -46,16 +50,45 @@ def _build_completion_usage(response: Any) -> ChatCompletionUsage:
     )
 
 
+def _create_normalizer(
+    think: bool | None, model_config: ModelConfig | None
+) -> ThinkTagNormalizer | None:
+    """Create tag normalizer if think mode is active."""
+    if not model_config:
+        return None
+    effective_think = resolve_think_mode(think, model_config)
+    if not effective_think:
+        return None
+    think_config = model_config.think
+    return ThinkTagNormalizer(think_config.tags_open, think_config.tags_close)
+
+
+def _normalize_response(
+    text: str, think: bool | None, model_config: ModelConfig | None
+) -> str:
+    """Normalize think tags in response text if think mode is active."""
+    if not text:
+        return text
+    normalizer = _create_normalizer(think, model_config)
+    if not normalizer:
+        return text
+    return normalizer.process(text) + normalizer.flush()
+
+
 async def _handle_chat_non_streaming(
     request_id: str,
     body: ChatCompletionRequest,
     model_name: str,
     ipc: Any,
+    model_config: ModelConfig | None = None,
 ) -> ChatCompletionResponse:
     """Handle non-streaming chat completion request."""
-    internal_request = chat_request_to_internal(body, request_id)
+    internal_request = chat_request_to_internal(body, request_id, model_config)
     response = await ipc.submit(request_id, internal_request)
     raise_for_error_status(response)
+
+    # Normalize think tags if think mode is active
+    result = _normalize_response(response.result or "", body.think, model_config)
 
     max_tokens_reached = (
         response.completion_tokens is not None
@@ -73,7 +106,7 @@ async def _handle_chat_non_streaming(
         choices=[
             ChatCompletionChoice(
                 index=0,
-                message=ChatMessage(role=Role.ASSISTANT, content=response.result or ""),
+                message=ChatMessage(role=Role.ASSISTANT, content=result),
                 finish_reason=finish_reason,
             )
         ],
@@ -138,7 +171,26 @@ def _register_model_routes(router: APIRouter, model_name: str) -> None:
         return _create_model_info(model_name)
 
 
-def _register_completion_routes(router: APIRouter, model_name: str) -> None:
+def _handle_chat_streaming(
+    request_id: str,
+    body: ChatCompletionRequest,
+    model_name: str,
+    ipc: Any,
+    model_config: ModelConfig | None,
+) -> StreamingResponse:
+    """Handle streaming chat completion request."""
+    internal_request = chat_request_to_internal(body, request_id, model_config)
+    normalizer = _create_normalizer(body.think, model_config)
+    generator = ChatStreamingGenerator(request_id, model_name, ipc, normalizer)
+    return StreamingResponse(
+        generator.stream(internal_request),
+        media_type="text/event-stream",
+    )
+
+
+def _register_completion_routes(
+    router: APIRouter, model_name: str, model_config: ModelConfig | None = None
+) -> None:
     """Register completion endpoints."""
 
     @router.post("/chat/completions", response_model=None)
@@ -148,13 +200,12 @@ def _register_completion_routes(router: APIRouter, model_name: str) -> None:
         ipc = request.app.state.ipc_channel
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
-            internal_request = chat_request_to_internal(body, request_id)
-            generator = ChatStreamingGenerator(request_id, model_name, ipc)
-            return StreamingResponse(
-                generator.stream(internal_request),
-                media_type="text/event-stream",
+            return _handle_chat_streaming(
+                request_id, body, model_name, ipc, model_config
             )
-        return await _handle_chat_non_streaming(request_id, body, model_name, ipc)
+        return await _handle_chat_non_streaming(
+            request_id, body, model_name, ipc, model_config
+        )
 
     @router.post("/completions", response_model=None)
     async def completions(
@@ -214,10 +265,18 @@ def _register_embedding_routes(router: APIRouter, model_name: str) -> None:
         return await _handle_embedding_request(body, ipc, model_name)
 
 
-def create_openai_router(model_name: str) -> APIRouter:
-    """Create OpenAI-compatible API router."""
+def create_openai_router(
+    model_name: str, model_config: ModelConfig | None = None
+) -> APIRouter:
+    """Create OpenAI-compatible API router.
+
+    Args:
+        model_name: Name of the loaded model.
+        model_config: Optional model config for server-side handling of system
+            prompts and think mode.
+    """
     router = APIRouter(tags=["OpenAI"])
     _register_model_routes(router, model_name)
-    _register_completion_routes(router, model_name)
+    _register_completion_routes(router, model_name, model_config)
     _register_embedding_routes(router, model_name)
     return router

@@ -9,7 +9,12 @@ import yaml
 
 @dataclass
 class ThinkConfig:
-    """Configuration for thinking mode behavior."""
+    """Configuration for thinking mode behavior.
+
+    The first tag in tags_open/tags_close is canonical - server normalizes
+    all variant tags to the first one. E.g., if tags_open=["<think>", "<thinking>"],
+    any "<thinking>" in model output is replaced with "<think>".
+    """
 
     default: bool = False
     enable_suffix: str | None = None

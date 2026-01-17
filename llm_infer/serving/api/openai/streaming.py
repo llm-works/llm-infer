@@ -2,7 +2,6 @@
 
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
-from typing import TYPE_CHECKING
 
 from llm_infer.schemas.openai import (
     ChatCompletionChunk,
@@ -13,9 +12,6 @@ from llm_infer.schemas.openai import (
     FinishReason,
     Role,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 def format_sse_event(data: str) -> str:

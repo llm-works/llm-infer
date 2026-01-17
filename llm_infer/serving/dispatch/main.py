@@ -364,11 +364,14 @@ class BootSequence:
         cfg = self._config.api
         health_handler = create_health_handler(self._ready)
 
+        # Get model config for server-side handling of system prompts and think mode
+        model_config = self._config.models.get(model_name)
+
         routes_builder = (
             self._build_server_builder()
             .routes.with_route("/health", health_handler)
             .with_router(create_routes(model_name))
-            .with_router(create_openai_router(model_name), prefix="/v1")
+            .with_router(create_openai_router(model_name, model_config), prefix="/v1")
         )
         routes_builder = self._add_lora_routes(routes_builder)
 

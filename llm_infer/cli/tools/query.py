@@ -10,7 +10,6 @@ from typing import Any
 from appinfra.app.tools import Tool, ToolConfig
 
 from ...text import LatexFormatter, ThinkFormatter, Utf8StreamBuffer
-from ..config.models import ModelConfig, ModelsConfig, get_selected_model_name
 
 
 class QueryTool(Tool):
@@ -21,31 +20,6 @@ class QueryTool(Tool):
             name="query", aliases=["q"], help_text="Query the running inference server"
         )
         super().__init__(parent, config)
-        self._models_config: ModelsConfig | None = None
-        self._model_config: ModelConfig | None = None
-
-    def _get_models_config(self) -> ModelsConfig:
-        """Get models config from app (lazy loaded after app setup)."""
-        if self._models_config is None:
-            models_data = (
-                dict(self.app.config).get("models", {}) if self.app.config else {}
-            )
-            self._models_config = ModelsConfig.from_dict(models_data)
-        return self._models_config
-
-    def _get_model_config(self) -> ModelConfig:
-        """Get config for the current model (lazy loaded)."""
-        if self._model_config is None:
-            models_config = self._get_models_config()
-            selection = models_config.get_selection("generate")
-            model_name = get_selected_model_name(selection.path)
-            if model_name:
-                self._model_config = models_config.get(model_name)
-            elif selection.default:
-                self._model_config = models_config.get(selection.default)
-            else:
-                self._model_config = models_config.defaults
-        return self._model_config
 
     def _add_connection_args(self, parser: argparse.ArgumentParser) -> None:
         """Add server connection arguments."""
@@ -96,12 +70,12 @@ class QueryTool(Tool):
         think_group.add_argument(
             "--think",
             action="store_true",
-            help="Enable thinking mode (model-specific suffix)",
+            help="Enable thinking mode (extended reasoning with <think> blocks)",
         )
         think_group.add_argument(
             "--no-think",
             action="store_true",
-            help="Disable thinking mode (model-specific suffix)",
+            help="Disable thinking mode",
         )
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
@@ -164,46 +138,26 @@ class QueryTool(Tool):
         return None
 
     def _get_system_prompt(self) -> str | None:
-        """Get system prompt from args or model config. Returns None if not set."""
-        if self.args.system:
-            return str(self.args.system)
+        """Get system prompt from CLI args. Server handles model-based prompts."""
+        return str(self.args.system) if self.args.system else None
 
-        model_cfg = self._get_model_config()
-
-        # Use think-specific system prompt when --think is active
-        if self.args.think and model_cfg.think.system_prompt:
-            return model_cfg.think.system_prompt
-
-        # Fall back to model's default system prompt
-        return model_cfg.system_prompt
-
-    def _apply_think_suffix(self, prompt: str) -> str:
-        """Apply think mode suffix to prompt based on flags and model config.
-
-        Returns prompt with appropriate suffix appended, or unchanged if no action.
-        """
-        model_cfg = self._get_model_config()
-        think_cfg = model_cfg.think
-
-        if self.args.think and think_cfg.enable_suffix:
-            return prompt + think_cfg.enable_suffix
-        elif getattr(self.args, "no_think", False) and think_cfg.disable_suffix:
-            return prompt + think_cfg.disable_suffix
-
-        return prompt
+    def _get_think_flag(self) -> bool | None:
+        """Get think flag value from args. Returns None if neither flag is set."""
+        if self.args.think:
+            return True
+        if self.args.no_think:
+            return False
+        return None
 
     def _build_streaming_payload(self, prompt: str) -> dict:
         """Build streaming chat completions payload."""
-        # Apply think mode suffix to prompt
-        prompt = self._apply_think_suffix(prompt)
-
         messages = []
         system_prompt = self._get_system_prompt()
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        return {
+        payload: dict[str, Any] = {
             "model": "default",
             "messages": messages,
             "max_tokens": self.args.max_tokens,
@@ -213,18 +167,20 @@ class QueryTool(Tool):
             "stream": True,
         }
 
+        # Add think flag if set (server handles suffix injection and tag normalization)
+        think = self._get_think_flag()
+        if think is not None:
+            payload["think"] = think
+
+        return payload
+
     def _setup_stream_formatters(
         self,
     ) -> tuple[ThinkFormatter | None, LatexFormatter | None]:
         """Set up formatters for stream processing."""
         if self.args.raw:
             return None, None
-        model_cfg = self._get_model_config()
-        think = ThinkFormatter(
-            open_tags=model_cfg.think.tags_open,
-            close_tags=model_cfg.think.tags_close,
-        )
-        return think, LatexFormatter()
+        return ThinkFormatter(), LatexFormatter()
 
     def _process_sse_chunk(
         self,

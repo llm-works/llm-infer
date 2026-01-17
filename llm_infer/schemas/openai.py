@@ -72,6 +72,14 @@ class ChatCompletionRequest(BaseModel):
         description="Name of LoRA adapter to use for this request (llm-infer extension)",
     )
 
+    # llm-infer extension: Think mode control
+    think: bool | None = Field(
+        None,
+        description="Enable/disable think mode. When None, uses model config default. "
+        "Server injects model-appropriate suffix and normalizes output tags to "
+        "canonical form from model config (llm-infer extension)",
+    )
+
     @model_validator(mode="after")
     def validate_unsupported(self) -> "ChatCompletionRequest":
         """Reject requests with unsupported features that would silently fail."""

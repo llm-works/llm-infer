@@ -1,5 +1,7 @@
 """Streaming response generators using Template Method pattern."""
 
+from __future__ import annotations
+
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
@@ -15,6 +17,8 @@ from .streaming import (
 )
 
 if TYPE_CHECKING:
+    from llm_infer.text.think import ThinkTagNormalizer
+
     from ...dispatch.types import Request as InternalRequest
 
 
@@ -54,7 +58,11 @@ class StreamingGenerator(ABC):
 
     @abstractmethod
     def create_content_chunk(self, token: str) -> str:
-        """Create SSE event for a content token."""
+        """Create SSE event for a content token.
+
+        Returns SSE-formatted string, or empty string if content is buffered
+        (e.g., by a normalizer waiting for complete tags).
+        """
         pass
 
     @abstractmethod
@@ -62,7 +70,7 @@ class StreamingGenerator(ABC):
         """Create SSE event for the final chunk with finish reason."""
         pass
 
-    async def stream(self, internal_request: "InternalRequest") -> AsyncIterator[str]:
+    async def stream(self, internal_request: InternalRequest) -> AsyncIterator[str]:
         """Template method: execute the streaming algorithm."""
         # Optional header chunk
         header = self.create_header_chunk()
@@ -76,7 +84,9 @@ class StreamingGenerator(ABC):
                 finish_reason = _map_finish_reason(chunk.finish_reason)
                 break
             if chunk.token:
-                yield self.create_content_chunk(chunk.token)
+                content = self.create_content_chunk(chunk.token)
+                if content:  # Skip empty chunks (e.g., normalizer buffering)
+                    yield content
 
         # Final chunk with finish_reason
         yield self.create_final_chunk(finish_reason)
@@ -85,6 +95,16 @@ class StreamingGenerator(ABC):
 
 class ChatStreamingGenerator(StreamingGenerator):
     """Streaming generator for chat completions."""
+
+    def __init__(
+        self,
+        request_id: str,
+        model: str,
+        ipc: Any,
+        normalizer: ThinkTagNormalizer | None = None,
+    ):
+        super().__init__(request_id, model, ipc)
+        self._normalizer = normalizer
 
     def create_header_chunk(self) -> str:
         """Create role announcement chunk."""
@@ -98,6 +118,10 @@ class ChatStreamingGenerator(StreamingGenerator):
 
     def create_content_chunk(self, token: str) -> str:
         """Create content chunk for chat."""
+        if self._normalizer:
+            token = self._normalizer.process(token)
+            if not token:  # Buffered, nothing to emit yet
+                return ""
         chunk = create_chat_chunk(
             request_id=self.request_id,
             model=self.model,
@@ -108,10 +132,16 @@ class ChatStreamingGenerator(StreamingGenerator):
 
     def create_final_chunk(self, finish_reason: FinishReason) -> str:
         """Create final chunk for chat."""
+        # Flush normalizer buffer if active
+        flushed = ""
+        if self._normalizer:
+            flushed = self._normalizer.flush()
+
         chunk = create_chat_chunk(
             request_id=self.request_id,
             model=self.model,
             created=self.created,
+            content=flushed if flushed else None,
             finish_reason=finish_reason,
         )
         return format_sse_event(chunk.model_dump_json())
