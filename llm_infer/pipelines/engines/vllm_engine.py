@@ -122,7 +122,7 @@ class VLLMEngine:
 
         if not torch.cuda.is_available():
             return 0
-        logical_idx = torch.cuda.current_device()
+        logical_idx: int = torch.cuda.current_device()
         cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
         if not cuda_visible:
             return logical_idx
