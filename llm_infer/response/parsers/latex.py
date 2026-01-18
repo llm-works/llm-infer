@@ -10,10 +10,11 @@ from ..latex import LatexConverter
 
 
 class LatexTransformer:
-    """Transforms LaTeX math notation to Unicode in stream events.
+    """Transforms LaTeX math notation to Unicode for streaming text.
 
-    Composes with LatexConverter to process TEXT events and convert LaTeX
-    commands to Unicode characters. Other event types pass through unchanged.
+    Takes raw string tokens and emits TEXT events with LaTeX commands
+    converted to Unicode characters. Designed for use in a parser chain
+    where it receives text from an upstream parser.
 
     Example:
         transformer = LatexTransformer()

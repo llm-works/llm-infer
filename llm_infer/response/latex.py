@@ -96,9 +96,13 @@ class LatexConverter:
         self.buffer: str = ""
 
     def _apply_replacements(self, text: str) -> str:
-        """Apply simple command replacements."""
-        for latex, unicode_char in LATEX_REPLACEMENTS.items():
-            text = text.replace(latex, unicode_char)
+        """Apply simple command replacements.
+
+        Replacements are applied in descending key length order to avoid
+        prefix collisions (e.g., \\to must not match before \\rightarrow).
+        """
+        for latex in sorted(LATEX_REPLACEMENTS.keys(), key=len, reverse=True):
+            text = text.replace(latex, LATEX_REPLACEMENTS[latex])
         return text
 
     def _process_frac(self, text: str) -> str:

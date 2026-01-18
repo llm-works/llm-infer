@@ -106,7 +106,7 @@ class TerminalResolver(BaseResolver):
     def on_code_end(self, event: StreamEvent, code: str, language: str) -> None:
         """Handle CODE_END event - write closing fence."""
         super().on_code_end(event, code, language)
-        self._write("\n```", apply_latex=False)
+        self._write("\n```\n", apply_latex=False)
 
     def on_finish(self) -> None:
         """Finalize output."""
@@ -123,7 +123,7 @@ class TerminalResolver(BaseResolver):
 
         # Ensure code block is closed if stream ended mid-code
         if self.in_code_context():
-            self._write("\n```", apply_latex=False)
+            self._write("\n```\n", apply_latex=False)
 
     def reset(self) -> None:
         """Reset resolver state."""

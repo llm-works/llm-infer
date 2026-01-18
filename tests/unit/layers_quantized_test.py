@@ -129,6 +129,17 @@ class TestQuantizedLinearBackendSetter:
         with pytest.raises(RuntimeError, match="Backend not set"):
             _ = layer.backend
 
+    @pytest.mark.skipif(
+        not hasattr(torch, "float8_e4m3fn"),
+        reason="FP8 not supported in this PyTorch version",
+    )
+    def test_backend_format_mismatch_raises(self, lg) -> None:
+        """Test setting backend with mismatched format raises ValueError."""
+        layer = AWQLinear(in_features=128, out_features=256)
+        fp8_backend = PyTorchFP8Backend(lg)
+        with pytest.raises(ValueError, match="Backend format mismatch"):
+            layer.backend = fp8_backend
+
 
 class TestQuantizedLinearValidation:
     """Test QuantizedLinear validation."""

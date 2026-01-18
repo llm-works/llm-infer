@@ -47,11 +47,11 @@ class TestBaseResolverDispatch:
         resolver.handle(StreamEvent(EventType.CODE_CONTENT, "line2"))
         assert resolver._code_buffer == "line1line2"
 
-    def test_unknown_event_type(self) -> None:
-        """Test unknown event types don't raise errors."""
+    def test_handle_does_not_raise(self) -> None:
+        """Test handle method processes events without raising."""
         resolver = BaseResolver()
-        # This shouldn't raise even if we had an unknown type
-        # (In practice all types are handled, but on_default exists for safety)
+        # Verify handle completes without error for known event types
+        # (on_default exists as a fallback for any future unhandled types)
         event = StreamEvent(EventType.TEXT, "test")
         resolver.handle(event)  # Should not raise
 

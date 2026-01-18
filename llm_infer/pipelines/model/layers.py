@@ -36,6 +36,9 @@ class QuantizedLinear(nn.Module):
     weight: Tensor
     weight_scale_inv: Tensor
 
+    # Backend (can be set after construction)
+    _backend: QuantizedLinearBackend | None
+
     def __init__(
         self,
         in_features: int,
@@ -66,7 +69,9 @@ class QuantizedLinear(nn.Module):
         self.block_size = block_size
 
         # Store backend (can be set later via backend property)
-        self._backend = backend
+        self._backend = None
+        if backend is not None:
+            self.backend = backend  # Use setter for validation
 
         # Register format-specific buffers
         if format == QuantFormat.AWQ:
@@ -138,7 +143,16 @@ class QuantizedLinear(nn.Module):
 
     @backend.setter
     def backend(self, value: QuantizedLinearBackend) -> None:
-        """Set the backend."""
+        """Set the backend.
+
+        Raises:
+            ValueError: If backend's format doesn't match layer's format.
+        """
+        if value.format != self.format:
+            raise ValueError(
+                f"Backend format mismatch: backend supports {value.format.name}, "
+                f"but layer uses {self.format.name}"
+            )
         self._backend = value
 
     def _get_weights(self) -> AWQWeights | FP8Weights:
