@@ -117,13 +117,13 @@ class TerminalResolver(BaseResolver):
                 self._output.write(remaining)
                 self._output.flush()
 
-        # Ensure styling is reset if stream ended mid-think
-        if self.in_think_context():
-            self._write(self._think_style_end, apply_latex=False)
-
-        # Ensure code block is closed if stream ended mid-code
+        # Close contexts in reverse order (innermost first)
+        # Code block must close before think styling resets
         if self.in_code_context():
             self._write("\n```\n", apply_latex=False)
+
+        if self.in_think_context():
+            self._write(self._think_style_end, apply_latex=False)
 
     def reset(self) -> None:
         """Reset resolver state."""
