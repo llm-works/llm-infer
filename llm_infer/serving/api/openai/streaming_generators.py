@@ -17,7 +17,7 @@ from .streaming import (
 )
 
 if TYPE_CHECKING:
-    from llm_infer.text.think import ThinkTagNormalizer
+    from llm_infer.response.parsers.think import ThinkTagNormalizer
 
     from ...dispatch.types import Request as InternalRequest
 

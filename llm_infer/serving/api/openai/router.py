@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from llm_infer.response.parsers.think import ThinkTagNormalizer, extract_thinking
 from llm_infer.schemas.openai import (
     ChatCompletionChoice,
     ChatCompletionRequest,
@@ -22,11 +23,11 @@ from llm_infer.schemas.openai import (
     EmbeddingRequest,
     EmbeddingResponse,
     EmbeddingUsage,
+    FinishReason,
     ModelInfo,
     ModelList,
     Role,
 )
-from llm_infer.text.think import ThinkTagNormalizer
 
 from ..errors import raise_for_error_status
 from .mappers import (
@@ -75,6 +76,63 @@ def _normalize_response(
     return normalizer.process(text) + normalizer.flush()
 
 
+def _get_think_tags(
+    model_config: ModelConfig | None,
+) -> tuple[list[str], list[str]]:
+    """Get think tags from model config or return defaults."""
+    if model_config and model_config.think:
+        return model_config.think.tags_open, model_config.think.tags_close
+    return ["<think>", "<thinking>"], ["</think>", "</thinking>"]
+
+
+def _extract_and_separate_thinking(
+    text: str, think: bool | None, model_config: ModelConfig | None
+) -> tuple[str | None, str]:
+    """Extract thinking content and separate from main content.
+
+    Returns (thinking, content) where thinking is None if think mode is inactive
+    or no think blocks were found.
+    """
+    if not text:
+        return None, text
+
+    # Check if think mode is active
+    effective_think = resolve_think_mode(think, model_config)
+    if not effective_think:
+        return None, text
+
+    # First normalize tags, then extract
+    normalized = _normalize_response(text, think, model_config)
+    open_tags, close_tags = _get_think_tags(model_config)
+    return extract_thinking(normalized, open_tags, close_tags)
+
+
+def _build_chat_response(
+    request_id: str,
+    model_name: str,
+    content: str,
+    thinking: str | None,
+    finish_reason: FinishReason,
+    response: Any,
+) -> ChatCompletionResponse:
+    """Build chat completion response object."""
+    return ChatCompletionResponse(
+        id=request_id,
+        created=int(time.time()),
+        model=model_name,
+        choices=[
+            ChatCompletionChoice(
+                index=0,
+                message=ChatMessage(
+                    role=Role.ASSISTANT, content=content, thinking=thinking
+                ),
+                finish_reason=finish_reason,
+            )
+        ],
+        usage=_build_completion_usage(response),
+    )
+
+
 async def _handle_chat_non_streaming(
     request_id: str,
     body: ChatCompletionRequest,
@@ -87,8 +145,9 @@ async def _handle_chat_non_streaming(
     response = await ipc.submit(request_id, internal_request)
     raise_for_error_status(response)
 
-    # Normalize think tags if think mode is active
-    result = _normalize_response(response.result or "", body.think, model_config)
+    thinking, content = _extract_and_separate_thinking(
+        response.result or "", body.think, model_config
+    )
 
     max_tokens_reached = (
         response.completion_tokens is not None
@@ -99,18 +158,8 @@ async def _handle_chat_non_streaming(
         is_eos=not max_tokens_reached, max_tokens_reached=max_tokens_reached
     )
 
-    return ChatCompletionResponse(
-        id=request_id,
-        created=int(time.time()),
-        model=model_name,
-        choices=[
-            ChatCompletionChoice(
-                index=0,
-                message=ChatMessage(role=Role.ASSISTANT, content=result),
-                finish_reason=finish_reason,
-            )
-        ],
-        usage=_build_completion_usage(response),
+    return _build_chat_response(
+        request_id, model_name, content, thinking, finish_reason, response
     )
 
 

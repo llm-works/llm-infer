@@ -9,7 +9,8 @@ from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
 
-from ...text import LatexFormatter, ThinkFormatter, Utf8StreamBuffer
+from ...response import ResponseProcessor, TerminalResolver
+from ...response.utf8 import Utf8StreamBuffer
 
 
 class QueryTool(Tool):
@@ -174,20 +175,21 @@ class QueryTool(Tool):
 
         return payload
 
-    def _setup_stream_formatters(
-        self,
-    ) -> tuple[ThinkFormatter | None, LatexFormatter | None]:
-        """Set up formatters for stream processing."""
+    def _create_processor(self) -> ResponseProcessor | None:
+        """Create response processor for stream processing.
+
+        Returns None if raw mode is enabled (no processing).
+        """
         if self.args.raw:
-            return None, None
-        return ThinkFormatter(), LatexFormatter()
+            return None
+        resolver = TerminalResolver(convert_latex=True)
+        return ResponseProcessor(resolver=resolver)
 
     def _process_sse_chunk(
         self,
         data: bytes,
         utf8_buffer: Utf8StreamBuffer,
-        think_fmt: ThinkFormatter | None,
-        latex_fmt: LatexFormatter | None,
+        processor: ResponseProcessor | None,
     ) -> None:
         """Process a single SSE chunk and write to stdout."""
         try:
@@ -196,29 +198,26 @@ class QueryTool(Tool):
             text = delta.get("content", "")
             if text:
                 text = utf8_buffer.process(text)
-                if think_fmt and latex_fmt:
-                    text = think_fmt.process(text)
-                    text = latex_fmt.process(text)
-                if text:
+                if processor:
+                    processor.feed(text)
+                elif text:
                     sys.stdout.write(text)
                     sys.stdout.flush()
         except json.JSONDecodeError:
             pass
 
-    def _flush_stream_formatters(
+    def _flush_stream(
         self,
         utf8_buffer: Utf8StreamBuffer,
-        think_fmt: ThinkFormatter | None,
-        latex_fmt: LatexFormatter | None,
+        processor: ResponseProcessor | None,
     ) -> None:
         """Flush remaining buffered content to stdout."""
         remaining = utf8_buffer.flush()
-        if think_fmt and latex_fmt:
-            remaining = think_fmt.process(remaining)
-            remaining += think_fmt.flush()
-            remaining = latex_fmt.process(remaining)
-            remaining += latex_fmt.flush()
-        if remaining:
+        if processor:
+            if remaining:
+                processor.feed(remaining)
+            processor.finish()
+        elif remaining:
             sys.stdout.write(remaining)
 
     def _process_sse_stream(self, resp: Any) -> None:
@@ -226,7 +225,7 @@ class QueryTool(Tool):
         print()  # Start on new line
 
         utf8_buffer = Utf8StreamBuffer()
-        think_fmt, latex_fmt = self._setup_stream_formatters()
+        processor = self._create_processor()
 
         for line in resp:
             line = line.strip()
@@ -235,9 +234,9 @@ class QueryTool(Tool):
             data = line[6:]
             if data == b"[DONE]":
                 break
-            self._process_sse_chunk(data, utf8_buffer, think_fmt, latex_fmt)
+            self._process_sse_chunk(data, utf8_buffer, processor)
 
-        self._flush_stream_formatters(utf8_buffer, think_fmt, latex_fmt)
+        self._flush_stream(utf8_buffer, processor)
         print()  # End with newline
 
     def _stream_request(self, prompt: str) -> int:
@@ -271,6 +270,41 @@ class QueryTool(Tool):
             self.lg.error(f"streaming request failed: {e}")
         return 1
 
+    def _build_chat_payload(self, prompt: str) -> dict:
+        """Build non-streaming chat completions payload."""
+        payload = self._build_streaming_payload(prompt)
+        payload["stream"] = False
+        return payload
+
+    def _json_request(self, prompt: str) -> int:
+        """Send non-streaming JSON request via chat completions API."""
+        url = f"http://{self.args.host}:{self.args.port}/v1/chat/completions"
+        payload = self._build_chat_payload(prompt)
+
+        data = self._send_request(url, payload)
+        if data is None:
+            return 1
+
+        print(json.dumps(data, indent=2))
+        return 0
+
+    def _legacy_request(self, prompt: str) -> int:
+        """Send legacy non-streaming request to /generate endpoint."""
+        url = f"http://{self.args.host}:{self.args.port}/generate"
+        data = self._send_request(url, self._build_payload(prompt))
+        if data is None:
+            return 1
+
+        self.lg.debug(
+            "response received",
+            extra={
+                "prompt_tokens": data.get("prompt_tokens", 0),
+                "completion_tokens": data.get("completion_tokens", 0),
+            },
+        )
+        print(f"\n{data['text']}")
+        return 0
+
     def run(self, **kwargs: Any) -> int:
         if self.args.health:
             return self._check_health()
@@ -279,28 +313,11 @@ class QueryTool(Tool):
         if not prompt:
             return 1
 
-        # Use streaming by default (unless --no-stream or --json)
-        if not self.args.no_stream and not self.args.json:
-            return self._stream_request(prompt)
-
-        # Non-streaming path
-        url = f"http://{self.args.host}:{self.args.port}/generate"
-        data = self._send_request(url, self._build_payload(prompt))
-        if data is None:
-            return 1
-
         if self.args.json:
-            print(json.dumps(data, indent=2))
-        else:
-            self.lg.debug(
-                "response received",
-                extra={
-                    "prompt_tokens": data.get("prompt_tokens", 0),
-                    "completion_tokens": data.get("completion_tokens", 0),
-                },
-            )
-            print(f"\n{data['text']}")
-        return 0
+            return self._json_request(prompt)
+        if not self.args.no_stream:
+            return self._stream_request(prompt)
+        return self._legacy_request(prompt)
 
     def _check_health(self) -> int:
         """Check server health."""

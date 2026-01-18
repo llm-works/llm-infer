@@ -42,9 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `disable_log_stats` config option for vLLM to control stats collection for `get_metrics()` API
 - `max_cudagraph_capture_size` config option for vLLM to limit CUDA graph batch sizes (reduces startup from ~2min to ~2sec)
 - Generic `-o KEY=VALUE` CLI flag for `serve` command to override any config value at runtime
-- `llm_infer.text` package with streaming text formatters (usable without CLI):
-  - `ThinkFormatter` for styling `<think>`/`<thinking>` blocks
-  - `LatexFormatter` for converting LaTeX math to Unicode
+- `llm_infer.response` package with streaming response processing framework:
+  - `ResponseProcessor` for event-based stream processing
+  - `ThinkTagParser` for parsing `<think>`/`<thinking>` blocks into events
+  - `LatexConverter` for converting LaTeX math to Unicode
   - `Utf8StreamBuffer` for handling incomplete UTF-8 sequences
 - `llm_infer.models` package for model configuration and path resolution (usable without CLI)
 - `ModelResolver` class for unified model path resolution with priority chain

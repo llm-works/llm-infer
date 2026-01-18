@@ -34,6 +34,12 @@ class ChatMessage(BaseModel):
     role: Role
     content: str
     name: str | None = None
+    # llm-infer extension: separated thinking content
+    thinking: str | None = Field(
+        None,
+        description="Thinking/reasoning content extracted from <think> blocks "
+        "(llm-infer extension, only present in assistant messages when think mode is active)",
+    )
 
 
 # =============================================================================
@@ -127,6 +133,8 @@ class ChatCompletionChunkDelta(BaseModel):
 
     role: Role | None = None
     content: str | None = None
+    # llm-infer extension: separated thinking content
+    thinking: str | None = None
 
 
 class ChatCompletionChunkChoice(BaseModel):

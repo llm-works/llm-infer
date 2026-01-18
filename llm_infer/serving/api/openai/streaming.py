@@ -29,11 +29,12 @@ def create_chat_chunk(
     model: str,
     created: int,
     content: str | None = None,
+    thinking: str | None = None,
     role: Role | None = None,
     finish_reason: FinishReason | None = None,
 ) -> ChatCompletionChunk:
     """Create a chat completion chunk for streaming."""
-    delta = ChatCompletionChunkDelta(role=role, content=content)
+    delta = ChatCompletionChunkDelta(role=role, content=content, thinking=thinking)
     return ChatCompletionChunk(
         id=request_id,
         created=created,
