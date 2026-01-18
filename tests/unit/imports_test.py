@@ -49,10 +49,9 @@ class TestBackendsImports:
 
     def test_import_linear_backends(self) -> None:
         """Test linear backends imports."""
-        from llm_infer.backends.linear import get_backend, get_linear_backend
+        from llm_infer.backends.linear import BackendRegistry
 
-        assert callable(get_backend)
-        assert callable(get_linear_backend)
+        assert BackendRegistry is not None
 
     def test_import_formats(self) -> None:
         """Test formats module imports."""

@@ -9,12 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import yaml
-
-if TYPE_CHECKING:
-    from appinfra.log import Logger
+from appinfra.log import Logger
 
 
 def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
@@ -88,9 +85,9 @@ class AdapterManager:
 
     CONFIG_FILENAME = "config.yaml"
 
-    def __init__(self, base_path: Path | str | None, lg: Logger | None = None) -> None:
-        self._base_path = Path(base_path).expanduser() if base_path else None
+    def __init__(self, lg: Logger, base_path: Path | str | None) -> None:
         self._lg = lg
+        self._base_path = Path(base_path).expanduser() if base_path else None
         self._adapters: dict[str, LoadedAdapter] = {}
 
     @property
@@ -102,11 +99,10 @@ class AdapterManager:
         if not self._base_path or not self._base_path.exists():
             return False
         if not self._base_path.is_dir():
-            if self._lg:
-                self._lg.warning(
-                    "adapter base_path is not a directory",
-                    extra={"path": str(self._base_path)},
-                )
+            self._lg.warning(
+                "adapter base_path is not a directory",
+                extra={"path": str(self._base_path)},
+            )
             return False
         return True
 
@@ -128,17 +124,15 @@ class AdapterManager:
             if adapter and adapter.enabled:
                 self._adapters[adapter.adapter_id] = adapter
                 count += 1
-                if self._lg:
-                    self._lg.debug(
-                        "adapter loaded",
-                        extra={
-                            "adapter_id": adapter.adapter_id,
-                            "path": str(adapter.path),
-                        },
-                    )
+                self._lg.debug(
+                    "adapter loaded",
+                    extra={
+                        "adapter_id": adapter.adapter_id,
+                        "path": str(adapter.path),
+                    },
+                )
 
-        if self._lg:
-            self._lg.info("adapter scan complete", extra={"enabled_count": count})
+        self._lg.info("adapter scan complete", extra={"enabled_count": count})
         return count
 
     def _load_adapter(self, path: Path) -> LoadedAdapter | None:
@@ -152,19 +146,17 @@ class AdapterManager:
             with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
         except Exception as e:
-            if self._lg:
-                self._lg.warning(
-                    "failed to read adapter config",
-                    extra={"path": str(config_path), "error": str(e)},
-                )
+            self._lg.warning(
+                "failed to read adapter config",
+                extra={"path": str(config_path), "exception": e},
+            )
             return None
 
         if not isinstance(config, dict):
-            if self._lg:
-                self._lg.warning(
-                    "adapter config must be a mapping",
-                    extra={"path": str(config_path), "type": type(config).__name__},
-                )
+            self._lg.warning(
+                "adapter config must be a mapping",
+                extra={"path": str(config_path), "type": type(config).__name__},
+            )
             return None
 
         return LoadedAdapter(
@@ -210,11 +202,10 @@ class AdapterManager:
         # Validate adapter_id to prevent path traversal
         path = validate_adapter_id(adapter_id, self._base_path)
         if path is None:
-            if self._lg:
-                self._lg.warning(
-                    "rejected adapter_id with invalid characters",
-                    extra={"adapter_id": adapter_id},
-                )
+            self._lg.warning(
+                "rejected adapter_id with invalid characters",
+                extra={"adapter_id": adapter_id},
+            )
             return None
 
         if not path.exists() or not path.is_dir():
@@ -225,12 +216,10 @@ class AdapterManager:
         adapter = self._load_adapter(path)
         if adapter and adapter.enabled:
             self._adapters[adapter_id] = adapter
-            if self._lg:
-                self._lg.debug("adapter refreshed", extra={"adapter_id": adapter_id})
+            self._lg.debug("adapter refreshed", extra={"adapter_id": adapter_id})
             return adapter
         else:
             # Disabled or invalid - remove from loaded set
             self._adapters.pop(adapter_id, None)
-            if self._lg:
-                self._lg.debug("adapter unloaded", extra={"adapter_id": adapter_id})
+            self._lg.debug("adapter unloaded", extra={"adapter_id": adapter_id})
             return None

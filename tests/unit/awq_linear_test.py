@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import torch
+from appinfra.log import create_lg
 
 from llm_infer.backends.linear.formats import QuantFormat
 from llm_infer.backends.linear.kernels.awq_pytorch import PyTorchAWQBackend
@@ -11,17 +12,23 @@ from llm_infer.pipelines.model.layers import AWQLinear
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture
+def lg():
+    """Create a logger for tests."""
+    return create_lg("test", "debug")
+
+
 class TestPyTorchAWQBackendUnpack:
     """Test INT4 unpacking in PyTorch backend."""
 
-    def test_unpack_single_value(self) -> None:
+    def test_unpack_single_value(self, lg) -> None:
         """Test unpacking a single INT32 with AWQ GEMM interleaved packing.
 
         AWQ GEMM format uses interleaved packing order: [0, 2, 4, 6, 1, 3, 5, 7]
         This means to store weights [0, 1, 2, 3, 4, 5, 6, 7], the packed nibbles are:
         [0, 2, 4, 6, 1, 3, 5, 7] -> 0x75316420
         """
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
 
         # AWQ GEMM packed representation of weights [0, 1, 2, 3, 4, 5, 6, 7]
         # Nibbles in bit order: [0, 2, 4, 6, 1, 3, 5, 7]
@@ -34,9 +41,9 @@ class TestPyTorchAWQBackendUnpack:
         expected = torch.tensor([[0, 1, 2, 3, 4, 5, 6, 7]], dtype=torch.int8)
         assert torch.equal(unpacked, expected)
 
-    def test_unpack_max_values(self) -> None:
+    def test_unpack_max_values(self, lg) -> None:
         """Test unpacking INT32 with max INT4 values (15)."""
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
 
         # All 0xF = 15 (use numpy to handle signed int32 correctly)
         packed = torch.from_numpy(np.array([[np.int32(-1)]], dtype=np.int32))
@@ -47,9 +54,9 @@ class TestPyTorchAWQBackendUnpack:
         expected = torch.tensor([[15, 15, 15, 15, 15, 15, 15, 15]], dtype=torch.int8)
         assert torch.equal(unpacked, expected)
 
-    def test_unpack_preserves_batch_dims(self) -> None:
+    def test_unpack_preserves_batch_dims(self, lg) -> None:
         """Test that unpacking preserves leading dimensions."""
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
 
         # Shape: (2, 3, 4) -> should become (2, 3, 32)
         packed = torch.zeros(2, 3, 4, dtype=torch.int32)
@@ -62,9 +69,9 @@ class TestPyTorchAWQBackendUnpack:
 class TestPyTorchAWQBackendDequantize:
     """Test dequantization in PyTorch backend."""
 
-    def test_dequantize_identity(self) -> None:
+    def test_dequantize_identity(self, lg) -> None:
         """Test dequantization with identity scale and zero zeros."""
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
 
         in_features, out_features = 128, 128
         group_size = 128
@@ -87,9 +94,9 @@ class TestPyTorchAWQBackendDequantize:
         # All values should be 2.0 (since scale=1, zero=0)
         assert torch.allclose(weight, torch.full_like(weight, 2.0))
 
-    def test_dequantize_with_scale(self) -> None:
+    def test_dequantize_with_scale(self, lg) -> None:
         """Test dequantization with non-unity scale."""
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
 
         in_features, out_features = 128, 128
         group_size = 128
@@ -111,9 +118,9 @@ class TestPyTorchAWQBackendDequantize:
         assert weight.shape == (out_features, in_features)
         assert torch.allclose(weight, torch.full_like(weight, 2.0))
 
-    def test_dequantize_with_zeros(self) -> None:
+    def test_dequantize_with_zeros(self, lg) -> None:
         """Test dequantization with non-zero zero points."""
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
 
         in_features, out_features = 128, 128
         group_size = 128
@@ -176,9 +183,9 @@ class TestQuantizedLinearInit:
 class TestQuantizedLinearForward:
     """Test forward pass with PyTorch backend."""
 
-    def test_forward_shape(self) -> None:
+    def test_forward_shape(self, lg) -> None:
         """Test that forward pass produces correct output shape."""
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
         layer = AWQLinear(128, 256, group_size=128, backend=backend)
 
         x = torch.randn(2, 10, 128, dtype=torch.float16)
@@ -187,9 +194,9 @@ class TestQuantizedLinearForward:
         assert y.shape == (2, 10, 256)
         assert y.dtype == torch.float16
 
-    def test_forward_deterministic(self) -> None:
+    def test_forward_deterministic(self, lg) -> None:
         """Test that forward pass is deterministic."""
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
         layer = AWQLinear(128, 256, group_size=128, backend=backend)
 
         x = torch.randn(2, 10, 128, dtype=torch.float16)

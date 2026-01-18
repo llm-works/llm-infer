@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from appinfra.log import create_lg
 
 from llm_infer.backends.linear.formats import QuantFormat
 from llm_infer.backends.linear.formats.fp8 import FP8Weights
@@ -10,19 +11,25 @@ from llm_infer.backends.linear.kernels.fp8_pytorch import PyTorchFP8Backend
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture
+def lg():
+    """Create a logger for tests."""
+    return create_lg("test", "debug")
+
+
 class TestPyTorchFP8BackendAvailability:
     """Test backend availability."""
 
-    def test_is_available(self) -> None:
+    def test_is_available(self, lg) -> None:
         """Test that backend is available when PyTorch has FP8 support."""
-        backend = PyTorchFP8Backend()
+        backend = PyTorchFP8Backend(lg)
         # Should be True for PyTorch >= 2.1 with CUDA
         expected = hasattr(torch, "float8_e4m3fn")
         assert backend.is_available() == expected
 
-    def test_name_and_format(self) -> None:
+    def test_name_and_format(self, lg) -> None:
         """Test backend name and format."""
-        backend = PyTorchFP8Backend()
+        backend = PyTorchFP8Backend(lg)
         assert backend.name == "pytorch"
         assert backend.format == QuantFormat.FP8
 
@@ -34,9 +41,9 @@ class TestPyTorchFP8BackendAvailability:
 class TestPyTorchFP8BackendDequantize:
     """Test FP8 dequantization."""
 
-    def test_dequantize_shape(self) -> None:
+    def test_dequantize_shape(self, lg) -> None:
         """Test that dequantize produces correct shape."""
-        backend = PyTorchFP8Backend()
+        backend = PyTorchFP8Backend(lg)
 
         out_features, in_features = 256, 128
         block_size = 128
@@ -55,9 +62,9 @@ class TestPyTorchFP8BackendDequantize:
         assert dequant.shape == (out_features, in_features)
         assert dequant.dtype == torch.float16
 
-    def test_dequantize_applies_scale(self) -> None:
+    def test_dequantize_applies_scale(self, lg) -> None:
         """Test that dequantization applies scale correctly."""
-        backend = PyTorchFP8Backend()
+        backend = PyTorchFP8Backend(lg)
 
         out_features, in_features = 128, 128
         block_size = 128
@@ -88,9 +95,9 @@ class TestPyTorchFP8BackendDequantize:
 class TestPyTorchFP8BackendForward:
     """Test FP8 forward pass."""
 
-    def test_forward_shape(self) -> None:
+    def test_forward_shape(self, lg) -> None:
         """Test that forward produces correct output shape."""
-        backend = PyTorchFP8Backend()
+        backend = PyTorchFP8Backend(lg)
 
         out_features, in_features = 256, 128
         block_size = 128
@@ -110,9 +117,9 @@ class TestPyTorchFP8BackendForward:
         assert y.shape == (2, 10, out_features)
         assert y.dtype == torch.float16
 
-    def test_forward_deterministic(self) -> None:
+    def test_forward_deterministic(self, lg) -> None:
         """Test that forward is deterministic."""
-        backend = PyTorchFP8Backend()
+        backend = PyTorchFP8Backend(lg)
 
         out_features, in_features = 128, 128
         block_size = 128

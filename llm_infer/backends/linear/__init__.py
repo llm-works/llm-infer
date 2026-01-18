@@ -4,13 +4,15 @@ This module provides a unified interface for quantized linear operations
 supporting multiple formats (AWQ, FP8) with priority-based backend selection.
 
 Quick start:
-    >>> from llm_infer.backends.linear import get_backend, QuantFormat
-    >>> backend = get_backend(QuantFormat.AWQ)  # Auto-selects best available
+    >>> from appinfra.log import create_lg
+    >>> from llm_infer.backends.linear import BackendRegistry, QuantFormat
+    >>> lg = create_lg(__name__, "info")
+    >>> registry = BackendRegistry(lg)
+    >>> backend = registry.get(QuantFormat.AWQ)  # Auto-selects best available
     >>> output = backend.forward(x, awq_weights)
 
-Backward compatibility:
-    >>> from llm_infer.backends.linear import get_linear_backend
-    >>> backend = get_linear_backend("marlin")  # AWQ-specific, legacy API
+Get specific backend:
+    >>> backend = registry.get(QuantFormat.AWQ, preference="marlin")
 """
 
 from __future__ import annotations
@@ -18,13 +20,8 @@ from __future__ import annotations
 # Core types and protocols
 from .formats import AWQWeights, FP8Weights, QuantFormat, QuantizedLinearBackend
 
-# Registry functions
-from .registry import (
-    get_available_backends,
-    get_backend,
-    get_linear_backend,
-    register_backend,
-)
+# Registry class
+from .registry import BackendRegistry
 
 __all__ = [
     # Format types
@@ -32,9 +29,6 @@ __all__ = [
     "QuantizedLinearBackend",
     "AWQWeights",
     "FP8Weights",
-    # Registry functions
-    "get_backend",
-    "get_linear_backend",  # Backward compatibility
-    "get_available_backends",
-    "register_backend",
+    # Registry
+    "BackendRegistry",
 ]

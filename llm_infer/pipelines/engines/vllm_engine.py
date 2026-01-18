@@ -11,9 +11,12 @@ will raise ImportError with a helpful message.
 from __future__ import annotations
 
 import math
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
+
+from appinfra.log import Logger
 
 from ...serving.dispatch.config import VLLMConfig
 
@@ -45,9 +48,10 @@ def _check_vllm_available() -> None:
 
 @dataclass
 class VLLMStreamingResult:
-    """Streaming result wrapper for vLLM output.
+    """Streaming result wrapper for pre-generated vLLM output.
 
-    Implements the StreamingResultProtocol expected by handlers.
+    Used for non-streaming generation that needs to conform to the
+    StreamingResultProtocol interface.
     """
 
     _tokens: list[str] = field(default_factory=list)
@@ -67,6 +71,137 @@ class VLLMStreamingResult:
         return token
 
 
+class VLLMStreamingIterator:
+    """True streaming iterator using vLLM's step-by-step generation.
+
+    Uses the underlying LLMEngine's add_request/step API to yield tokens
+    as they are generated, enabling real-time streaming output.
+
+    Supports context manager protocol for reliable cleanup:
+        with engine.generate_stream(...) as stream:
+            for token in stream:
+                print(token)
+        # Request is automatically aborted if not fully consumed
+
+    Note: Also implements __del__ for cleanup when not used as context manager,
+    but context manager usage is preferred for deterministic cleanup.
+    """
+
+    def __init__(
+        self,
+        lg: Logger,
+        llm_engine: Any,
+        request_id: str,
+        prompt: str,
+        sampling_params: Any,
+        tokenizer: Any,
+        lora_request: Any = None,
+    ) -> None:
+        self._lg = lg
+        self._llm_engine = llm_engine
+        self._request_id = request_id
+        self._prompt = prompt
+        self._sampling_params = sampling_params
+        self._tokenizer = tokenizer
+        self._lora_request = lora_request
+
+        # State tracking
+        self._started = False
+        self._finished = False
+        self._prev_text = ""
+
+        # Final stats (populated when generation completes)
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
+        self.finish_reason: str | None = None
+
+    def _start_generation(self) -> None:
+        """Add request to the engine's scheduler."""
+        self._llm_engine.add_request(
+            request_id=self._request_id,
+            prompt=self._prompt,
+            params=self._sampling_params,
+            lora_request=self._lora_request,
+        )
+        self.prompt_tokens = len(self._tokenizer.encode(self._prompt))
+        self._started = True
+
+    def _process_output(self, output: Any) -> str | None:
+        """Process a RequestOutput and return new text delta, or None if done."""
+        if not output.outputs:
+            return None
+
+        completion = output.outputs[0]
+        current_text = completion.text or ""
+
+        # Calculate delta (new text since last step)
+        delta = current_text[len(self._prev_text) :]
+        self._prev_text = current_text
+
+        # Check if finished
+        if output.finished:
+            self._finished = True
+            self.finish_reason = completion.finish_reason
+            self.completion_tokens = len(
+                self._tokenizer.encode(current_text, add_special_tokens=False)
+            )
+
+        return delta if delta else None
+
+    def __iter__(self) -> Iterator[str]:
+        return self
+
+    def __enter__(self) -> Self:
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit context manager, ensuring cleanup."""
+        self._abort_request()
+
+    def _abort_request(self) -> None:
+        """Abort the request in the engine's scheduler (best-effort cleanup)."""
+        if self._started and not self._finished:
+            try:
+                self._llm_engine.abort_request(self._request_id)
+            except Exception as e:
+                self._lg.warning(
+                    "failed to abort request",
+                    extra={"request_id": self._request_id, "exception": e},
+                )
+
+    def __del__(self) -> None:
+        """Clean up request on garbage collection."""
+        self._abort_request()
+
+    def __next__(self) -> str:
+        if self._finished:
+            raise StopIteration
+
+        try:
+            if not self._started:
+                self._start_generation()
+
+            # Step until we get output for our request or generation completes
+            while not self._finished:
+                outputs = self._llm_engine.step()
+
+                for output in outputs:
+                    if output.request_id == self._request_id:
+                        delta = self._process_output(output)
+                        if delta:
+                            return delta
+                        if self._finished:
+                            raise StopIteration
+
+            raise StopIteration
+        except StopIteration:
+            raise
+        except Exception:
+            self._abort_request()
+            raise
+
+
 class VLLMEngine:
     """vLLM-backed inference engine implementing InferenceEngineProtocol.
 
@@ -78,17 +213,17 @@ class VLLMEngine:
     synchronous interface compatible with existing handlers.
     """
 
-    def __init__(self, config: VLLMConfig, lg: Any = None):
+    def __init__(self, lg: Logger, config: VLLMConfig):
         """Initialize vLLM engine.
 
         Args:
-            config: vLLM configuration
-            lg: Optional logger
+            lg: Logger instance.
+            config: vLLM configuration.
         """
         _check_vllm_available()
 
-        self._config = config
         self._lg = lg
+        self._config = config
 
         # Initialize pynvml for device-level GPU stats
         self._nvml_handle = self._init_nvml()
@@ -142,16 +277,12 @@ class VLLMEngine:
             pynvml.nvmlInit()
             return pynvml.nvmlDeviceGetHandleByIndex(self._get_physical_device_index())
         except ImportError:
-            if self._lg:
-                self._lg.warning(
-                    "pynvml not available, device-level GPU stats disabled"
-                )
+            self._lg.warning("pynvml not available, device-level GPU stats disabled")
         except Exception as e:
-            if self._lg:
-                self._lg.warning(
-                    "pynvml init failed, device-level GPU stats disabled",
-                    extra={"exception": e},
-                )
+            self._lg.warning(
+                "pynvml init failed, device-level GPU stats disabled",
+                extra={"exception": e},
+            )
         return None
 
     def _init_memory_estimation(self, mem_before: int | None) -> None:
@@ -171,16 +302,15 @@ class VLLMEngine:
         if self._kv_cache_bytes > 0 and self._model_memory_bytes > self._kv_cache_bytes:
             self._model_memory_bytes -= self._kv_cache_bytes
 
-        if self._lg:
-            self._lg.debug(
-                "memory estimation complete",
-                extra={
-                    "mem_before": mem_before,
-                    "mem_after": mem_after,
-                    "model_memory": self._model_memory_bytes,
-                    "kv_cache": self._kv_cache_bytes,
-                },
-            )
+        self._lg.debug(
+            "memory estimation complete",
+            extra={
+                "mem_before": mem_before,
+                "mem_after": mem_after,
+                "model_memory": self._model_memory_bytes,
+                "kv_cache": self._kv_cache_bytes,
+            },
+        )
 
     def _get_device_memory_used(self) -> int | None:
         """Get current GPU memory usage via pynvml."""
@@ -235,8 +365,7 @@ class VLLMEngine:
                     )
                     return kv_bytes, blocks_total, block_size
         except Exception as e:
-            if self._lg:
-                self._lg.warning("Failed to get KV cache info", extra={"exception": e})
+            self._lg.warning("failed to get KV cache info", extra={"exception": e})
         return 0, 0, 0
 
     def _get_arch_from_hf_config(self, hf_config: Any) -> tuple[int, int, int] | None:
@@ -324,8 +453,7 @@ class VLLMEngine:
                 )
 
         except Exception as e:
-            if self._lg:
-                self._lg.warning("KV cache calculation failed", extra={"exception": e})
+            self._lg.warning("KV cache calculation failed", extra={"exception": e})
         return 0
 
     def _compute_kv_cache_total(
@@ -342,19 +470,18 @@ class VLLMEngine:
         kv_per_block = 2 * num_layers * num_heads * head_dim * block_size * dtype_size
         total = num_blocks * kv_per_block
 
-        if self._lg:
-            self._lg.debug(
-                "KV cache calculated",
-                extra={
-                    "layers": num_layers,
-                    "heads": num_heads,
-                    "head_dim": head_dim,
-                    "blocks": num_blocks,
-                    "block_size": block_size,
-                    "dtype_size": dtype_size,
-                    "total_gb": round(total / 1e9, 2),
-                },
-            )
+        self._lg.debug(
+            "KV cache calculated",
+            extra={
+                "layers": num_layers,
+                "heads": num_heads,
+                "head_dim": head_dim,
+                "blocks": num_blocks,
+                "block_size": block_size,
+                "dtype_size": dtype_size,
+                "total_gb": round(total / 1e9, 2),
+            },
+        )
         return total
 
     @property
@@ -365,20 +492,20 @@ class VLLMEngine:
         return Path(self._config.model_path).name
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], lg: Any = None) -> VLLMEngine:
+    def from_config(cls, lg: Logger, config: dict[str, Any]) -> VLLMEngine:
         """Create engine from inference config dictionary.
 
         Args:
-            config: Full inference config dict with 'model' and 'vllm' sections
-            lg: Optional logger
+            lg: Logger instance.
+            config: Full inference config dict with 'model' and 'vllm' sections.
 
         Returns:
-            Initialized VLLMEngine
+            Initialized VLLMEngine.
         """
         model_path = config.get("model", {}).get("path", "")
         vllm_data = config.get("vllm", {}) or {}
         vllm_config = VLLMConfig.from_dict(vllm_data, model_path)
-        return cls(vllm_config, lg)
+        return cls(lg, vllm_config)
 
     @property
     def eos_token_id(self) -> int | None:
@@ -532,8 +659,17 @@ class VLLMEngine:
         context: RequestContext | None = None,
         messages: list[dict[str, str]] | None = None,
         lora_request: LoRARequest | None = None,
-    ) -> VLLMStreamingResult:
-        """Generate text with streaming (sync wrapper)."""
+    ) -> VLLMStreamingIterator:
+        """Generate text with true token-by-token streaming.
+
+        Uses vLLM's underlying LLMEngine add_request/step API to yield
+        tokens as they are generated, enabling real-time streaming.
+
+        Returns:
+            VLLMStreamingIterator that yields token strings and has
+            prompt_tokens, completion_tokens, finish_reason attributes
+            after iteration completes.
+        """
         final_prompt = self._prepare_prompt(prompt, messages, use_chat_template)
         sampling_params = self._create_sampling_params(
             max_tokens=max_tokens,
@@ -543,13 +679,19 @@ class VLLMEngine:
             repetition_penalty=repetition_penalty,
             stop_sequences=stop_sequences,
         )
-        outputs = self._engine.generate(
-            prompts=[final_prompt],
+
+        # Generate unique request ID for this streaming request
+        request_id = f"stream-{uuid.uuid4().hex[:16]}"
+
+        return VLLMStreamingIterator(
+            lg=self._lg,
+            llm_engine=self._engine.llm_engine,
+            request_id=request_id,
+            prompt=final_prompt,
             sampling_params=sampling_params,
+            tokenizer=self._tokenizer,
             lora_request=lora_request,
-            use_tqdm=False,
         )
-        return self._build_streaming_result(outputs, final_prompt)
 
     def _prepare_prompt(
         self,
@@ -727,9 +869,8 @@ class VLLMEngine:
                     if self._kv_blocks_total > 0:
                         blocks_used = int(metric.value * self._kv_blocks_total)
                     return metric.value, blocks_used
-        except Exception as e:
-            if self._lg:
-                self._lg.debug("Failed to fetch KV cache usage", extra={"exception": e})
+        except Exception:
+            self._lg.trace("KV cache metrics unavailable")
         return None
 
     def _fetch_torch_memory_stats(self) -> tuple[int, int, int]:

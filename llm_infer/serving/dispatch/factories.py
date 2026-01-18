@@ -95,7 +95,7 @@ class VLLMEngineFactory(EngineFactory):
 
         self._validate_model_path(config)
         vllm_cfg = replace(config.engines.vllm, model_path=str(config.models.path))
-        return VLLMEngine(vllm_cfg, lg)
+        return VLLMEngine(lg, vllm_cfg)
 
     def warmup_enabled(self, config: InferenceConfig) -> bool:
         return config.engines.vllm.warmup

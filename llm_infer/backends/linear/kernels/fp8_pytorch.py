@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F  # noqa: N812
+from appinfra.log import Logger
 from torch import Tensor
 
 from ..formats.base import QuantFormat
@@ -28,6 +29,11 @@ class PyTorchFP8Backend:
 
     name: str = "pytorch"
     format: QuantFormat = QuantFormat.FP8
+
+    def __init__(self, lg: Logger) -> None:
+        """Initialize PyTorch FP8 backend."""
+        self._lg = lg
+        self._lg.debug("initialized PyTorch FP8 backend")
 
     def is_available(self) -> bool:
         """Available if PyTorch supports FP8 dtype."""

@@ -105,7 +105,7 @@ class ServeTool(Tool):
         # Use resolver for selection file parsing (lightweight, no heavy imports)
         if selection.get("path"):
             resolver = ModelResolver(
-                locations=[]
+                lg=self.lg, locations=[]
             )  # Locations not needed for selection file
             sel_name, sel_path = resolver.load_selection_file(selection["path"])
             if sel_path:
@@ -200,7 +200,7 @@ class ServeTool(Tool):
         Uses ModelResolver for unified resolution logic.
         """
         locations = self._get_model_locations()
-        resolver = ModelResolver(locations, lg=self.lg)
+        resolver = ModelResolver(lg=self.lg, locations=locations)
 
         # Get selection config based on task type (--embed flag)
         task = "embed" if self.args.embed else "generate"

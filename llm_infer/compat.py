@@ -10,14 +10,11 @@ from __future__ import annotations
 import importlib.metadata
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import appinfra.time
 import yaml
-
-if TYPE_CHECKING:
-    from logging import Logger
-
+from appinfra.log import Logger
 
 # Known model types that work with LlamaArchitecture (default)
 # These are not explicitly in ARCHITECTURES but are known to work
@@ -27,29 +24,27 @@ DEFAULT_ARCHITECTURE_TYPES = ["llama", "qwen", "qwen2"]
 _architectures_cache: dict[str, type] | None = None
 
 
-def _get_architectures(lg: Logger | None = None) -> dict[str, type]:
+def _get_architectures(lg: Logger) -> dict[str, type]:
     """Get ARCHITECTURES registry with deferred import and caching.
 
     The import is deferred because it pulls in torch (~4s).
 
     Args:
-        lg: Optional logger for debug output.
+        lg: Logger instance.
     """
     global _architectures_cache
     if _architectures_cache is not None:
         return _architectures_cache
 
-    if lg:
-        lg.debug("importing model architectures...")
+    lg.debug("importing model architectures...")
     start = appinfra.time.start()
 
     from .pipelines.model.architecture import ARCHITECTURES
 
-    if lg:
-        lg.debug(
-            "model architectures imported",
-            extra={"after": appinfra.time.since_str(start)},
-        )
+    lg.debug(
+        "model architectures imported",
+        extra={"after": appinfra.time.since_str(start)},
+    )
 
     _architectures_cache = ARCHITECTURES
     return _architectures_cache
@@ -130,7 +125,7 @@ def get_version() -> str:
         return "unknown"
 
 
-def get_supported_model_types(lg: Logger | None = None) -> list[str]:
+def get_supported_model_types(lg: Logger) -> list[str]:
     """Get list of supported model types.
 
     Combines:
@@ -138,7 +133,7 @@ def get_supported_model_types(lg: Logger | None = None) -> list[str]:
     - Known types that work with LlamaArchitecture (default)
 
     Args:
-        lg: Optional logger for debug output.
+        lg: Logger instance.
 
     Returns:
         Sorted list of model type strings.
@@ -149,7 +144,7 @@ def get_supported_model_types(lg: Logger | None = None) -> list[str]:
 
 
 def generate_compat_spec(
-    lg: Logger | None = None, template_path: Path | None = None
+    lg: Logger, template_path: Path | None = None
 ) -> dict[str, Any]:
     """Generate the complete compatibility specification.
 
@@ -159,7 +154,7 @@ def generate_compat_spec(
     - architecture.model_types: from ARCHITECTURES + defaults
 
     Args:
-        lg: Optional logger for debug output.
+        lg: Logger instance.
         template_path: Path to template file. If None, uses default.
 
     Returns:
@@ -190,7 +185,7 @@ def _load_spec_file(
         return None, f"YAML parse error: {e}"
 
 
-def _validate_spec(spec: dict, lg: Logger | None) -> list[str]:
+def _validate_spec(lg: Logger, spec: dict) -> list[str]:
     """Validate spec contents. Returns list of issues."""
     issues: list[str] = []
 
@@ -215,14 +210,14 @@ def _validate_spec(spec: dict, lg: Logger | None) -> list[str]:
 
 
 def check_spec_accuracy(
-    lg: Logger | None = None,
+    lg: Logger,
     spec_file: str | Path | None = None,
     template_path: Path | None = None,
 ) -> tuple[bool, list[str]]:
     """Verify that a spec file accurately reflects implementation.
 
     Args:
-        lg: Optional logger for debug output.
+        lg: Logger instance.
         spec_file: Path to spec file to check. If None, checks template.
         template_path: Path to template file. If None, uses default.
 
@@ -232,5 +227,5 @@ def check_spec_accuracy(
     spec, error = _load_spec_file(spec_file, template_path)
     if error or spec is None:
         return False, [error or "Failed to load spec"]
-    issues = _validate_spec(spec, lg)
+    issues = _validate_spec(lg, spec)
     return len(issues) == 0, issues

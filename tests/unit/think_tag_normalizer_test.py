@@ -2,7 +2,7 @@
 
 import pytest
 
-from llm_infer.text.think import ThinkTagNormalizer
+from llm_infer.response.parsers.think import ThinkTagNormalizer
 
 # pytest convention: module-level marker applies to all tests in file
 pytestmark = pytest.mark.unit

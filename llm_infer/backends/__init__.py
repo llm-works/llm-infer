@@ -8,9 +8,9 @@ This module provides pluggable backends at three levels:
 Higher levels override lower levels in the hierarchy.
 """
 
-from .linear import QuantizedLinearBackend, get_linear_backend
+from .linear import BackendRegistry, QuantizedLinearBackend
 
 __all__ = [
-    "get_linear_backend",
+    "BackendRegistry",
     "QuantizedLinearBackend",
 ]

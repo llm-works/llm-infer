@@ -13,7 +13,7 @@ selection:
     default: bge-small-en-v1.5
   generate:
     path: !path ../.models/selected.yaml  # Optional: ops-controlled selection file
-    default: qwen3-4b-instruct-2507-awq  # Fallback model name
+    default: qwen3-1.7b-gptq-int8  # Fallback model name
 
 models:
   # Embedding models
