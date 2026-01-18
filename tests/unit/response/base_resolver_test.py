@@ -68,12 +68,13 @@ class TestBaseResolverBuffers:
         assert resolver._code_language == ""
 
     def test_reset_clears_buffers(self) -> None:
-        """Test reset clears all buffers."""
+        """Test reset clears all buffers and context stack."""
         resolver = BaseResolver()
         resolver._text_buffer = "text"
         resolver._think_buffer = "think"
         resolver._code_buffer = "code"
         resolver._code_language = "python"
+        resolver._context_stack = [EventType.THINK_START]
 
         resolver.reset()
 
@@ -81,6 +82,7 @@ class TestBaseResolverBuffers:
         assert resolver._think_buffer == ""
         assert resolver._code_buffer == ""
         assert resolver._code_language == ""
+        assert resolver._context_stack == []
 
 
 class TestBaseResolverSubclassing:
@@ -107,9 +109,9 @@ class TestBaseResolverSubclassing:
         executed: list[tuple[str, str]] = []
 
         class CodeExecutingResolver(BaseResolver):
-            def on_code_end(self, event: StreamEvent) -> None:
-                executed.append((self._code_language, self._code_buffer))
-                super().on_code_end(event)
+            def on_code_end(self, event: StreamEvent, code: str, language: str) -> None:
+                executed.append((language, code))
+                super().on_code_end(event, code, language)
 
         resolver = CodeExecutingResolver()
         resolver.handle(
@@ -121,14 +123,14 @@ class TestBaseResolverSubclassing:
         assert len(executed) == 1
         assert executed[0] == ("python", "print('hi')")
 
-    def test_override_finish(self) -> None:
-        """Test overriding finish for finalization."""
+    def test_override_on_finish(self) -> None:
+        """Test overriding on_finish hook for finalization."""
         finished = []
 
         class CustomResolver(BaseResolver):
-            def finish(self) -> None:
+            def on_finish(self) -> None:
                 finished.append(True)
-                super().finish()
+                super().on_finish()
 
         resolver = CustomResolver()
         resolver.finish()
@@ -172,3 +174,111 @@ class TestBaseResolverFullFlow:
 
         assert resolver._text_buffer == "beforeafter"
         assert resolver._think_buffer == "thinking"
+
+
+class TestBaseResolverContextTracking:
+    """Test context tracking for nested structures."""
+
+    def test_initial_context_empty(self) -> None:
+        """Test context stack is initially empty."""
+        resolver = BaseResolver()
+        assert resolver._context_stack == []
+        assert not resolver.in_think_context()
+        assert not resolver.in_code_context()
+        assert resolver.context_depth() == 0
+        assert resolver.current_context() is None
+
+    def test_think_context_tracking(self) -> None:
+        """Test think block context is tracked."""
+        resolver = BaseResolver()
+
+        resolver.handle(StreamEvent(EventType.THINK_START))
+        assert resolver.in_think_context()
+        assert not resolver.in_code_context()
+        assert resolver.context_depth() == 1
+        assert resolver.current_context() == EventType.THINK_START
+
+        resolver.handle(StreamEvent(EventType.THINK_CONTENT, "content"))
+        assert resolver.in_think_context()
+
+        resolver.handle(StreamEvent(EventType.THINK_END))
+        assert not resolver.in_think_context()
+        assert resolver.context_depth() == 0
+        assert resolver.current_context() is None
+
+    def test_code_context_tracking(self) -> None:
+        """Test code block context is tracked."""
+        resolver = BaseResolver()
+
+        resolver.handle(StreamEvent(EventType.CODE_START, metadata={"language": "py"}))
+        assert resolver.in_code_context()
+        assert not resolver.in_think_context()
+        assert resolver.context_depth() == 1
+        assert resolver.current_context() == EventType.CODE_START
+
+        resolver.handle(StreamEvent(EventType.CODE_CONTENT, "code"))
+        assert resolver.in_code_context()
+
+        resolver.handle(StreamEvent(EventType.CODE_END))
+        assert not resolver.in_code_context()
+        assert resolver.context_depth() == 0
+
+    def test_nested_code_in_think_context(self) -> None:
+        """Test nested code block inside think block."""
+        resolver = BaseResolver()
+
+        # Enter think block
+        resolver.handle(StreamEvent(EventType.THINK_START))
+        assert resolver.in_think_context()
+        assert resolver.context_depth() == 1
+
+        # Enter code block inside think
+        resolver.handle(StreamEvent(EventType.CODE_START, metadata={"language": "py"}))
+        assert resolver.in_think_context()  # Still in think
+        assert resolver.in_code_context()  # Also in code
+        assert resolver.context_depth() == 2
+        assert resolver.current_context() == EventType.CODE_START  # Innermost
+
+        # Exit code block
+        resolver.handle(StreamEvent(EventType.CODE_END))
+        assert resolver.in_think_context()
+        assert not resolver.in_code_context()
+        assert resolver.context_depth() == 1
+
+        # Exit think block
+        resolver.handle(StreamEvent(EventType.THINK_END))
+        assert not resolver.in_think_context()
+        assert resolver.context_depth() == 0
+
+    def test_end_hook_receives_content(self) -> None:
+        """Test that end hooks receive accumulated content."""
+        received_think: list[str] = []
+        received_code: list[tuple[str, str]] = []
+
+        class TrackingResolver(BaseResolver):
+            def on_think_end(self, event: StreamEvent, content: str) -> None:
+                received_think.append(content)
+                super().on_think_end(event, content)
+
+            def on_code_end(self, event: StreamEvent, code: str, language: str) -> None:
+                received_code.append((code, language))
+                super().on_code_end(event, code, language)
+
+        resolver = TrackingResolver()
+
+        # Think block
+        resolver.handle(StreamEvent(EventType.THINK_START))
+        resolver.handle(StreamEvent(EventType.THINK_CONTENT, "thinking "))
+        resolver.handle(StreamEvent(EventType.THINK_CONTENT, "content"))
+        resolver.handle(StreamEvent(EventType.THINK_END))
+
+        assert received_think == ["thinking content"]
+
+        # Code block
+        resolver.handle(
+            StreamEvent(EventType.CODE_START, metadata={"language": "python"})
+        )
+        resolver.handle(StreamEvent(EventType.CODE_CONTENT, "print(1)"))
+        resolver.handle(StreamEvent(EventType.CODE_END))
+
+        assert received_code == [("print(1)", "python")]

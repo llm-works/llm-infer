@@ -51,7 +51,6 @@ class TerminalResolver(BaseResolver):
         self._output = output or sys.stdout
         self._think_style_start = think_style_start
         self._think_style_end = think_style_end
-        self._in_think = False
         self._convert_latex = convert_latex
         self._latex_formatter: LatexConverter | None = None
         if convert_latex:
@@ -78,7 +77,6 @@ class TerminalResolver(BaseResolver):
     def on_think_start(self, event: StreamEvent) -> None:
         """Handle THINK_START event - start italic grey styling."""
         super().on_think_start(event)
-        self._in_think = True
         self._write(self._think_style_start, apply_latex=False)
 
     def on_think_content(self, event: StreamEvent) -> None:
@@ -87,10 +85,9 @@ class TerminalResolver(BaseResolver):
         if event.content:
             self._write(event.content)
 
-    def on_think_end(self, event: StreamEvent) -> None:
+    def on_think_end(self, event: StreamEvent, content: str) -> None:
         """Handle THINK_END event - reset styling."""
-        super().on_think_end(event)
-        self._in_think = False
+        super().on_think_end(event, content)
         self._write(self._think_style_end, apply_latex=False)
 
     def on_code_start(self, event: StreamEvent) -> None:
@@ -106,12 +103,12 @@ class TerminalResolver(BaseResolver):
             # Don't convert LaTeX in code blocks
             self._write(event.content, apply_latex=False)
 
-    def on_code_end(self, event: StreamEvent) -> None:
+    def on_code_end(self, event: StreamEvent, code: str, language: str) -> None:
         """Handle CODE_END event - write closing fence."""
-        super().on_code_end(event)
+        super().on_code_end(event, code, language)
         self._write("\n```", apply_latex=False)
 
-    def finish(self) -> None:
+    def on_finish(self) -> None:
         """Finalize output."""
         # Flush LaTeX formatter if present
         if self._latex_formatter:
@@ -121,14 +118,12 @@ class TerminalResolver(BaseResolver):
                 self._output.flush()
 
         # Ensure styling is reset if stream ended mid-think
-        if self._in_think:
+        if self.in_think_context():
             self._write(self._think_style_end, apply_latex=False)
-            self._in_think = False
 
     def reset(self) -> None:
         """Reset resolver state."""
         super().reset()
-        self._in_think = False
         if self._latex_formatter:
             # Reset by clearing internal buffer
             self._latex_formatter.buffer = ""
