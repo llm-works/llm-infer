@@ -248,6 +248,13 @@ class ThinkStreamSeparator:
     either `thinking` or `content` fields based on whether we're inside
     a think block.
 
+    Note: This class intentionally duplicates tag-finding logic from ThinkTagParser
+    rather than sharing it. The two classes have different APIs and use cases:
+    - ThinkTagParser emits StreamEvent objects for event-driven processing
+    - ThinkStreamSeparator returns (thinking, content) tuples for field routing
+
+    Keeping them independent avoids coupling and makes each class self-contained.
+
     Example:
         separator = ThinkStreamSeparator()
         for token in stream:

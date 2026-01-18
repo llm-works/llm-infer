@@ -14,6 +14,9 @@ from appinfra.app.tools import Tool, ToolConfig
 from ...response import ResponseProcessor, TerminalResolver
 from ...response.utf8 import Utf8StreamBuffer
 
+# Small buffer for low-latency token streaming (prioritize responsiveness over throughput)
+_SOCKET_RECV_SIZE = 256
+
 
 class QueryTool(Tool):
     """Send a query to the running inference server."""
@@ -223,7 +226,12 @@ class QueryTool(Tool):
             sys.stdout.write(remaining)
 
     def _get_raw_socket(self, resp: http.client.HTTPResponse) -> Any:
-        """Extract raw socket from HTTPResponse for unbuffered reads."""
+        """Extract raw socket from HTTPResponse for unbuffered reads.
+
+        Accesses internal attributes to bypass HTTPResponse buffering,
+        enabling true token-by-token streaming. The hasattr fallback handles
+        variations across Python versions and socket wrapper implementations.
+        """
         raw = resp.fp.raw  # type: ignore[union-attr]
         return raw._sock if hasattr(raw, "_sock") else raw
 
@@ -232,7 +240,7 @@ class QueryTool(Tool):
         buffer = b""
         while True:
             try:
-                chunk = sock.recv(256)
+                chunk = sock.recv(_SOCKET_RECV_SIZE)
             except OSError as e:
                 self.lg.debug("socket read ended", extra={"exception": e})
                 break

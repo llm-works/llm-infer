@@ -115,6 +115,44 @@ class TestResponseProcessorFinish:
 
         assert finished == [True]
 
+    def test_finish_closes_unclosed_think_block(self) -> None:
+        """Test finish resets ANSI styling for unclosed think block."""
+        output = StringIO()
+        resolver = TerminalResolver(output=output)
+        processor = ResponseProcessor(resolver=resolver)
+
+        # Feed unclosed think block
+        processor.feed("<think>thinking content")
+        processor.finish()
+
+        result = output.getvalue()
+        # Should contain the think content and reset ANSI codes
+        assert "thinking content" in result
+        # ANSI reset code should be present (from on_finish cleanup)
+        assert "\x1b[0m" in result
+
+    def test_finish_closes_unclosed_code_block(self) -> None:
+        """Test finish emits closing fence for unclosed code block."""
+        from llm_infer.response import CodeBlockParser
+        from llm_infer.response.parsers.base import BaseParser
+
+        output = StringIO()
+        resolver = TerminalResolver(output=output)
+        # Use CodeBlockParser to parse code fences
+        parser = BaseParser([CodeBlockParser()])
+        processor = ResponseProcessor(parser=parser, resolver=resolver)
+
+        # Feed unclosed code block
+        processor.feed("```python\nprint('hello')")
+        processor.finish()
+
+        result = output.getvalue()
+        # Should contain opening fence, content, and closing fence
+        assert "```python" in result
+        assert "print('hello')" in result
+        # Closing fence should be added by on_finish cleanup
+        assert result.count("```") >= 2  # At least open and close
+
 
 class TestResponseProcessorReset:
     """Test reset method."""
