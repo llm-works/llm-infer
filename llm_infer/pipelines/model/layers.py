@@ -8,7 +8,6 @@ import torch
 from torch import Tensor, nn
 
 from ...backends.linear.formats import AWQWeights, FP8Weights, QuantFormat
-from ...backends.linear.registry import get_backend
 
 if TYPE_CHECKING:
     from ...backends.linear.formats.base import QuantizedLinearBackend
@@ -128,9 +127,11 @@ class QuantizedLinear(nn.Module):
 
     @property
     def backend(self) -> QuantizedLinearBackend:
-        """Get the backend, initializing if needed."""
+        """Get the backend."""
         if self._backend is None:
-            self._backend = get_backend(self.format)
+            raise RuntimeError(
+                "Backend not set. Pass backend= to QuantizedLinear constructor."
+            )
         return self._backend
 
     @backend.setter
@@ -221,6 +222,7 @@ def Fp8Linear(  # noqa: N802
     in_features: int,
     out_features: int,
     block_size: int = 128,
+    backend: QuantizedLinearBackend | None = None,
 ) -> QuantizedLinear:
     """Create an FP8 quantized linear layer.
 
@@ -231,6 +233,7 @@ def Fp8Linear(  # noqa: N802
         in_features: Input feature dimension
         out_features: Output feature dimension
         block_size: Quantization block size (typically 128)
+        backend: Backend for matmul (required)
 
     Returns:
         QuantizedLinear configured for FP8 format
@@ -240,6 +243,7 @@ def Fp8Linear(  # noqa: N802
         out_features=out_features,
         format=QuantFormat.FP8,
         block_size=block_size,
+        backend=backend,
     )
 
 

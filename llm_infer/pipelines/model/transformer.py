@@ -43,7 +43,7 @@ import torch.nn.functional as F  # noqa: N812
 from safetensors import safe_open
 from torch import Tensor, nn
 
-from ...backends.linear.registry import get_linear_backend
+from ...backends.linear.formats.base import QuantizedLinearBackend
 from ...primitives.attention import (
     apply_rope,
     get_attention_backend,
@@ -91,7 +91,7 @@ class TransformerModel(nn.Module):
         dtype: torch.dtype = torch.float16,
         on_progress: Callable[[str, int, int], None] | None = None,
         attention_backend: AttentionBackend | None = None,
-        linear_backend: str = "pytorch",
+        linear_backend: QuantizedLinearBackend | None = None,
     ):
         """Initialize the transformer model.
 
@@ -111,7 +111,7 @@ class TransformerModel(nn.Module):
                 - "stream": Weight streaming (0 to num_tensors)
             attention_backend: Attention backend to use. If None, uses
                 auto-detected backend (FlashInfer if available, else Naive).
-            linear_backend: Linear backend for quantized matmul ("pytorch" or "marlin").
+            linear_backend: Backend for quantized linear layers (AWQ/FP8).
 
         Raises:
             ValueError: If no safetensors files found at weights_path
@@ -121,15 +121,12 @@ class TransformerModel(nn.Module):
         self.arch = arch
         self.device = device
         self.dtype = dtype
-        self.linear_backend_name = linear_backend
 
         # Attention backend (auto-detect if not provided)
         self.attention_backend = attention_backend or get_attention_backend()
 
-        # Linear backend for AWQ layers (only used if quant_method is AWQ)
-        self._linear_backend = None
-        if config.quant_method == "awq":
-            self._linear_backend = get_linear_backend(linear_backend)
+        # Linear backend for quantized layers
+        self._linear_backend = linear_backend
 
         # Initialize layers with progress reporting
         self._init_layers(on_progress=on_progress)
@@ -153,6 +150,7 @@ class TransformerModel(nn.Module):
                 in_features,
                 out_features,
                 self.config.quant_group_size,
+                backend=self._linear_backend,
             )
         if self.config.quant_method == "awq":
             return AWQLinear(

@@ -10,15 +10,12 @@ Requires:
 
 from __future__ import annotations
 
-import logging
-
 import torch
+from appinfra.log import Logger
 from torch import Tensor
 
 from ..formats.base import QuantFormat
 from ..formats.fp8 import FP8Weights
-
-logger = logging.getLogger(__name__)
 
 # Check for vLLM CUTLASS ops availability at import time
 _VLLM_CUTLASS_AVAILABLE = False
@@ -53,6 +50,10 @@ class CutlassFP8Backend:
     name: str = "cutlass"
     format: QuantFormat = QuantFormat.FP8
 
+    def __init__(self, lg: Logger) -> None:
+        """Initialize CUTLASS FP8 backend."""
+        self._lg = lg
+
     def is_available(self) -> bool:
         """Check if CUTLASS FP8 backend is available.
 
@@ -62,19 +63,21 @@ class CutlassFP8Backend:
         - Compute capability >= 8.9 (Ada/Hopper)
         """
         if not _VLLM_CUTLASS_AVAILABLE:
-            logger.debug(f"vLLM CUTLASS ops not available: {_VLLM_CUTLASS_ERROR}")
+            self._lg.debug(
+                "vLLM CUTLASS ops not available", extra={"error": _VLLM_CUTLASS_ERROR}
+            )
             return False
 
         if not torch.cuda.is_available():
-            logger.debug("CUDA not available")
+            self._lg.debug("CUDA not available")
             return False
 
         # Check compute capability (8.9 = Ada, 9.0 = Hopper)
         capability = torch.cuda.get_device_capability()
         if capability < (8, 9):
-            logger.debug(
-                f"Compute capability {capability[0]}.{capability[1]} < 8.9, "
-                "native FP8 requires Ada or newer"
+            self._lg.debug(
+                "native FP8 requires Ada or newer",
+                extra={"capability": f"{capability[0]}.{capability[1]}"},
             )
             return False
 

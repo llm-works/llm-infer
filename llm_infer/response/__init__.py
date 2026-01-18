@@ -40,13 +40,17 @@ For custom behavior, subclass BaseResolver and override specific handlers:
 
     from llm_infer.response import ResponseProcessor, BaseResolver, StreamEvent
 
-    class CodeExecutingResolver(BaseResolver):
+    class CodeCollectingResolver(BaseResolver):
+        def __init__(self) -> None:
+            super().__init__()
+            self.python_snippets: list[str] = []
+
         def on_code_end(self, event: StreamEvent, code: str, language: str) -> None:
             if language == "python":
-                exec(code)
+                self.python_snippets.append(code)
             super().on_code_end(event, code, language)
 
-    processor = ResponseProcessor(resolver=CodeExecutingResolver())
+    processor = ResponseProcessor(resolver=CodeCollectingResolver())
 """
 
 # Events

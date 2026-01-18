@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
+from ..backends.linear import BackendRegistry, QuantFormat
 from ..primitives.attention import get_attention_backend
 from ..primitives.guards import GenerationGuard, RepetitionGuard
 from ..primitives.kv_cache import BlockPool
@@ -90,6 +91,20 @@ class InferenceEngine:
             on_progress("tokenizer", 1, 1)
         return tokenizer
 
+    def _resolve_linear_backend(self) -> Any:
+        """Resolve linear backend based on model quantization method."""
+        quant_method = self.config.model.quant_method
+        if quant_method == "awq":
+            fmt = QuantFormat.AWQ
+        elif quant_method == "fp8":
+            fmt = QuantFormat.FP8
+        else:
+            return None
+
+        preference = self.config.linear_backend
+        pref = None if preference == "auto" else preference
+        return BackendRegistry(self.lg).get(fmt, pref)
+
     def _init_model(
         self,
         arch: Any,
@@ -109,7 +124,7 @@ class InferenceEngine:
             dtype=self.dtype,
             on_progress=weights_progress,
             attention_backend=self.attention_backend,
-            linear_backend=self.config.linear_backend,
+            linear_backend=self._resolve_linear_backend(),
         )
         if self.config.torch_compile:
             model = torch.compile(model, mode="reduce-overhead")  # type: ignore[assignment]

@@ -10,17 +10,15 @@ Requires:
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Any
 
 import torch
+from appinfra.log import Logger
 from torch import Tensor
 
 from ..formats.awq import AWQWeights
 from ..formats.base import QuantFormat
-
-logger = logging.getLogger(__name__)
 
 # Check for vLLM Marlin ops availability at import time
 _VLLM_MARLIN_AVAILABLE = False
@@ -81,8 +79,9 @@ class MarlinAWQBackend:
     name: str = "marlin"
     format: QuantFormat = QuantFormat.AWQ
 
-    def __init__(self) -> None:
+    def __init__(self, lg: Logger) -> None:
         """Initialize Marlin backend."""
+        self._lg = lg
         # Cache repacked weights by tensor data_ptr
         # This ensures we only repack once per layer
         self._cache: dict[int, _MarlinWeights] = {}
@@ -96,19 +95,21 @@ class MarlinAWQBackend:
         - Compute capability >= 8.0
         """
         if not _VLLM_MARLIN_AVAILABLE:
-            logger.debug(f"vLLM Marlin ops not available: {_VLLM_MARLIN_ERROR}")
+            self._lg.debug(
+                "vLLM Marlin ops not available", extra={"error": _VLLM_MARLIN_ERROR}
+            )
             return False
 
         if not torch.cuda.is_available():
-            logger.debug("CUDA not available")
+            self._lg.debug("CUDA not available")
             return False
 
         # Check compute capability
         capability = torch.cuda.get_device_capability()
         if capability[0] < 8:
-            logger.debug(
-                f"Compute capability {capability[0]}.{capability[1]} < 8.0, "
-                "Marlin requires Ampere or newer"
+            self._lg.debug(
+                "Marlin requires Ampere or newer",
+                extra={"capability": f"{capability[0]}.{capability[1]}"},
             )
             return False
 
@@ -167,9 +168,12 @@ class MarlinAWQBackend:
         in_features = weights.in_features
         out_features = weights.out_features
 
-        logger.debug(
-            f"Repacking weights to Marlin format: "
-            f"{in_features}x{out_features}, group_size={weights.group_size}"
+        self._lg.debug(
+            "repacking weights to Marlin format",
+            extra={
+                "shape": f"{in_features}x{out_features}",
+                "group_size": weights.group_size,
+            },
         )
 
         cached = self._repack_weights_to_marlin(

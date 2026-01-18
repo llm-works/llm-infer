@@ -9,10 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
+from appinfra.log import Logger
 
 if TYPE_CHECKING:
-    from logging import Logger
-
     from .config import ModelsConfig, SelectionConfig
 
 
@@ -26,15 +25,15 @@ class ModelResolver:
     4. Default model name from config
     """
 
-    def __init__(self, locations: list[Path], lg: Logger | None = None) -> None:
+    def __init__(self, lg: Logger, locations: list[Path]) -> None:
         """Initialize resolver with search locations.
 
         Args:
+            lg: Logger instance.
             locations: Directories to search for models, in priority order.
-            lg: Optional logger for debug/error output.
         """
+        self._lg = lg
         self.locations = locations
-        self.lg = lg
 
     def find_by_name(self, name: str) -> Path | None:
         """Find model by name in configured locations.
@@ -76,15 +75,13 @@ class ModelResolver:
             model_path = data.get("path")
             return model_name, Path(model_path) if model_path else None
         except FileNotFoundError:
-            if self.lg:
-                self.lg.debug("selection file not found", extra={"path": str(path)})
+            self._lg.debug("selection file not found", extra={"path": str(path)})
             return None, None
         except Exception as e:
-            if self.lg:
-                self.lg.warning(
-                    "failed to load selection file",
-                    extra={"path": str(path), "error": str(e)},
-                )
+            self._lg.warning(
+                "failed to load selection file",
+                extra={"path": str(path), "exception": e},
+            )
             return None, None
 
     def resolve(
@@ -109,17 +106,13 @@ class ModelResolver:
             path = self._resolve_from_selection(selection)
             if path:
                 return path
-        if self.lg:
-            self.lg.error("no model specified")
+        self._lg.error("no model specified")
         return None
 
     def _resolve_direct_path(self, model_path: Path) -> Path | None:
         """Validate and return direct model path."""
         if not model_path.exists():
-            if self.lg:
-                self.lg.error(
-                    "model path does not exist", extra={"path": str(model_path)}
-                )
+            self._lg.error("model path does not exist", extra={"path": str(model_path)})
             return None
         return model_path
 
@@ -128,14 +121,13 @@ class ModelResolver:
         path = self.find_by_name(model_name)
         if path:
             return path
-        if self.lg:
-            self.lg.error(
-                "model not found",
-                extra={
-                    "model": model_name,
-                    "locations": [str(p) for p in self.locations],
-                },
-            )
+        self._lg.error(
+            "model not found",
+            extra={
+                "model": model_name,
+                "locations": [str(p) for p in self.locations],
+            },
+        )
         return None
 
     def _resolve_from_selection(self, selection: SelectionConfig) -> Path | None:
@@ -156,37 +148,33 @@ class ModelResolver:
 
     def _try_selection_path(self, sel_path: Path, selection_file: str) -> Path | None:
         """Try to use direct path from selection file."""
-        if self.lg:
-            self.lg.debug(
-                "using selection file path",
-                extra={"path": str(sel_path), "file": selection_file},
-            )
+        self._lg.debug(
+            "using selection file path",
+            extra={"path": str(sel_path), "file": selection_file},
+        )
         if not sel_path.exists():
-            if self.lg:
-                self.lg.error(
-                    "selection model_path does not exist", extra={"path": str(sel_path)}
-                )
+            self._lg.error(
+                "selection model_path does not exist", extra={"path": str(sel_path)}
+            )
             return None
         return sel_path
 
     def _try_selection_name(self, sel_name: str, selection_file: str) -> Path | None:
         """Try to find model by name from selection file."""
-        if self.lg:
-            self.lg.debug(
-                "using selection file name",
-                extra={"name": sel_name, "file": selection_file},
-            )
+        self._lg.debug(
+            "using selection file name",
+            extra={"name": sel_name, "file": selection_file},
+        )
         path = self.find_by_name(sel_name)
         if path:
             return path
-        if self.lg:
-            self.lg.error(
-                "selection model not found",
-                extra={
-                    "model": sel_name,
-                    "locations": [str(p) for p in self.locations],
-                },
-            )
+        self._lg.error(
+            "selection model not found",
+            extra={
+                "model": sel_name,
+                "locations": [str(p) for p in self.locations],
+            },
+        )
         return None
 
     def _try_default_model(self, default_name: str) -> Path | None:
@@ -194,25 +182,24 @@ class ModelResolver:
         path = self.find_by_name(default_name)
         if path:
             return path
-        if self.lg:
-            self.lg.error(
-                "default model not found",
-                extra={
-                    "model": default_name,
-                    "locations": [str(p) for p in self.locations],
-                },
-            )
+        self._lg.error(
+            "default model not found",
+            extra={
+                "model": default_name,
+                "locations": [str(p) for p in self.locations],
+            },
+        )
         return None
 
 
-def create_resolver(config: ModelsConfig, lg: Logger | None = None) -> ModelResolver:
+def create_resolver(lg: Logger, config: ModelsConfig) -> ModelResolver:
     """Create a ModelResolver from ModelsConfig.
 
     Args:
+        lg: Logger instance.
         config: Models configuration with locations.
-        lg: Optional logger.
 
     Returns:
         Configured ModelResolver.
     """
-    return ModelResolver(config.locations, lg)
+    return ModelResolver(lg, config.locations)

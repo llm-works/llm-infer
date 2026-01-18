@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F  # noqa: N812
+from appinfra.log import Logger
 from torch import Tensor
 
 from ..formats.awq import AWQWeights
@@ -31,6 +32,10 @@ class PyTorchAWQBackend:
 
     name: str = "pytorch"
     format: QuantFormat = QuantFormat.AWQ
+
+    def __init__(self, lg: Logger) -> None:
+        """Initialize PyTorch AWQ backend."""
+        self._lg = lg
 
     def is_available(self) -> bool:
         """Always available - uses only PyTorch."""

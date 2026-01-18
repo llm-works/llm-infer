@@ -240,7 +240,7 @@ class BootSequence:
             self._handler.set_lora_base_path(lora_cfg.base_path)
 
             # Initialize adapter manager and scan for adapters
-            self._adapter_manager = AdapterManager(lora_cfg.base_path, self._lg)
+            self._adapter_manager = AdapterManager(self._lg, lora_cfg.base_path)
             count = self._adapter_manager.scan()
             self._handler.set_adapter_manager(self._adapter_manager)
             self._lg.info(
@@ -279,11 +279,11 @@ class BootSequence:
         """Phase 6: Run main request loop until shutdown."""
         assert self._handler is not None, "create_handler() must be called first"
         run_engine_loop(
+            self._lg,
             self._handler,
             self._request_q,
             self._response_q,
             self._shutdown,
-            lg=self._lg,
         )
 
     # -----------------------------------------------------------------------
@@ -325,7 +325,7 @@ class BootSequence:
             try:
                 self._engine.shutdown()
             except Exception as e:
-                self._lg.warning("engine shutdown error", extra={"error": str(e)})
+                self._lg.warning("engine shutdown error", extra={"exception": e})
 
         if self._server and self._server.is_running:
             self._lg.debug("stopping server...")

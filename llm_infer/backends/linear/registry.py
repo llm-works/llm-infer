@@ -1,172 +1,165 @@
-"""Backend registry with priority-based auto-selection.
+"""Backend resolution with priority-based auto-selection.
 
-This module provides a registry for quantized linear backends, allowing:
-- Registration of backends with priorities
+This module provides a BackendRegistry class to resolve quantized linear backends:
 - Auto-selection of best available backend per format
 - Manual backend selection by name
 - Graceful fallback when preferred backend unavailable
+
+No global state - create a BackendRegistry instance where needed.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING
+import importlib
+from typing import Any
+
+from appinfra.log import Logger
 
 from .formats.base import QuantFormat, QuantizedLinearBackend
 
-if TYPE_CHECKING:
-    pass
+# Backend candidates per format: (module, class_name, name, priority)
+# Sorted by priority descending (highest first)
+_AWQ_BACKENDS = [
+    ("awq_marlin", "MarlinAWQBackend", "marlin", 100),
+    ("awq_pytorch", "PyTorchAWQBackend", "pytorch", 0),
+]
 
-logger = logging.getLogger(__name__)
+_FP8_BACKENDS = [
+    ("fp8_cutlass", "CutlassFP8Backend", "cutlass", 100),
+    ("fp8_pytorch", "PyTorchFP8Backend", "pytorch", 0),
+]
 
-# Registry: format -> [(backend_class, priority)]
-# Higher priority backends are preferred when available
-_BACKEND_REGISTRY: dict[QuantFormat, list[tuple[type, int]]] = {
-    QuantFormat.AWQ: [],
-    QuantFormat.FP8: [],
+_BACKENDS_BY_FORMAT: dict[QuantFormat, list[tuple[str, str, str, int]]] = {
+    QuantFormat.AWQ: _AWQ_BACKENDS,
+    QuantFormat.FP8: _FP8_BACKENDS,
 }
 
 
-def register_backend(
-    format: QuantFormat,
-    backend_cls: type,
-    priority: int = 0,
-) -> None:
-    """Register a backend for a quantization format.
+class BackendRegistry:
+    """Registry for resolving quantized linear backends.
 
-    Args:
-        format: Quantization format this backend supports
-        backend_cls: Backend class (must implement QuantizedLinearBackend protocol)
-        priority: Selection priority (higher = preferred). Use:
-            0: Fallback (always available, e.g., PyTorch)
-            100: Optimized (hardware-specific, e.g., Marlin/CUTLASS)
+    Backends are resolved on demand by trying imports in priority order.
+
+    Example:
+        >>> registry = BackendRegistry(lg)
+        >>> backend = registry.get(QuantFormat.AWQ)
+        >>> backend = registry.get(QuantFormat.AWQ, preference="pytorch")
     """
-    if format not in _BACKEND_REGISTRY:
-        _BACKEND_REGISTRY[format] = []
 
-    _BACKEND_REGISTRY[format].append((backend_cls, priority))
-    # Keep sorted by priority descending (highest first)
-    _BACKEND_REGISTRY[format].sort(key=lambda x: x[1], reverse=True)
+    def __init__(self, lg: Logger) -> None:
+        """Initialize the registry.
 
-    logger.debug(
-        f"Registered backend {backend_cls.__name__} for {format.name} "
-        f"with priority {priority}"
-    )
+        Args:
+            lg: Logger instance for debug/warning messages.
+        """
+        self._lg = lg
 
+    def _try_import(self, module_name: str, class_name: str) -> type[Any] | None:
+        """Try to import a backend class. Returns None if import fails."""
+        try:
+            module = importlib.import_module(f".kernels.{module_name}", __package__)
+            return getattr(module, class_name)  # type: ignore[no-any-return]
+        except ImportError:
+            return None
 
-def _try_preferred_backend(
-    backends: list, preference: str, format: QuantFormat
-) -> QuantizedLinearBackend | None:
-    """Try to find the preferred backend. Returns None if not available."""
-    for backend_cls, _ in backends:
-        backend: QuantizedLinearBackend = backend_cls()
-        if backend.name == preference and backend.is_available():
-            logger.debug(f"Using preferred backend: {backend.name}")
-            return backend
-    logger.warning(
-        f"Preferred backend '{preference}' not available for {format.name}, falling back to auto-selection"
-    )
-    return None
-
-
-def get_backend(
-    format: QuantFormat, preference: str | None = None
-) -> QuantizedLinearBackend:
-    """Get the best available backend for a quantization format."""
-    if format not in _BACKEND_REGISTRY or not _BACKEND_REGISTRY[format]:
-        raise ValueError(f"No backends registered for format {format.name}")
-
-    backends = _BACKEND_REGISTRY[format]
-    if preference:
-        preferred = _try_preferred_backend(backends, preference, format)
-        if preferred:
-            return preferred
-
-    for backend_cls, priority in backends:
-        candidate: QuantizedLinearBackend = backend_cls()
-        if candidate.is_available():
-            logger.debug(
-                f"Auto-selected backend {candidate.name} (priority {priority}) for {format.name}"
+    def _try_preferred(
+        self,
+        candidates: list[tuple[str, str, str, int]],
+        preference: str,
+        format: QuantFormat,
+    ) -> QuantizedLinearBackend | None:
+        """Try to get the preferred backend. Returns None if not available."""
+        for module_name, class_name, name, _ in candidates:
+            if name != preference:
+                continue
+            backend_cls = self._try_import(module_name, class_name)
+            if backend_cls:
+                backend: QuantizedLinearBackend = backend_cls(self._lg)
+                if backend.is_available():
+                    self._lg.debug("using preferred backend", extra={"backend": name})
+                    return backend
+            self._lg.warning(
+                "preferred backend not available, falling back",
+                extra={"preference": preference, "format": format.name},
             )
-            return candidate
+            break
+        return None
 
-    raise RuntimeError(
-        f"No backends available for format {format.name}. Registered: {[cls.__name__ for cls, _ in backends]}"
-    )
+    def _try_auto_select(
+        self, candidates: list[tuple[str, str, str, int]], format: QuantFormat
+    ) -> QuantizedLinearBackend | None:
+        """Try backends in priority order, return first available."""
+        for module_name, class_name, name, priority in candidates:
+            backend_cls = self._try_import(module_name, class_name)
+            if backend_cls is None:
+                continue
+            backend: QuantizedLinearBackend = backend_cls(self._lg)
+            if backend.is_available():
+                self._lg.debug(
+                    "auto-selected backend",
+                    extra={
+                        "backend": name,
+                        "priority": priority,
+                        "format": format.name,
+                    },
+                )
+                return backend
+        return None
 
+    def get(
+        self, format: QuantFormat, preference: str | None = None
+    ) -> QuantizedLinearBackend:
+        """Get the best available backend for a quantization format.
 
-def get_available_backends(format: QuantFormat) -> list[str]:
-    """Get names of all available backends for a format.
+        Args:
+            format: Quantization format to get backend for.
+            preference: Optional backend name preference (e.g., "marlin", "pytorch").
 
-    Args:
-        format: Quantization format to check
+        Returns:
+            Backend instance implementing QuantizedLinearBackend protocol.
 
-    Returns:
-        List of available backend names, sorted by priority (best first)
-    """
-    if format not in _BACKEND_REGISTRY:
-        return []
+        Raises:
+            ValueError: If format is not supported.
+            RuntimeError: If no backends are available for the format.
+        """
+        candidates = _BACKENDS_BY_FORMAT.get(format)
+        if candidates is None:
+            raise ValueError(f"No backends defined for format {format.name}")
 
-    available = []
-    for backend_cls, _ in _BACKEND_REGISTRY[format]:
-        backend = backend_cls()
-        if backend.is_available():
-            available.append(backend.name)
+        if preference:
+            backend = self._try_preferred(candidates, preference, format)
+            if backend:
+                return backend
 
-    return available
+        backend = self._try_auto_select(candidates, format)
+        if backend:
+            return backend
 
+        raise RuntimeError(
+            f"No backends available for format {format.name}. "
+            f"Tried: {[name for _, _, name, _ in candidates]}"
+        )
 
-def _auto_register_backends() -> None:
-    """Auto-register all known backends with appropriate priorities.
+    def list_available(self, format: QuantFormat) -> list[str]:
+        """Get names of all available backends for a format.
 
-    Called at module import time to populate the registry.
-    """
-    # AWQ kernels
-    try:
-        from .kernels.awq_pytorch import PyTorchAWQBackend
+        Args:
+            format: Quantization format to check.
 
-        register_backend(QuantFormat.AWQ, PyTorchAWQBackend, priority=0)
-    except ImportError:
-        pass
+        Returns:
+            List of available backend names, sorted by priority (best first).
+        """
+        candidates = _BACKENDS_BY_FORMAT.get(format)
+        if candidates is None:
+            return []
 
-    try:
-        from .kernels.awq_marlin import MarlinAWQBackend
+        available = []
+        for module_name, class_name, name, _ in candidates:
+            backend_cls = self._try_import(module_name, class_name)
+            if backend_cls is None:
+                continue
+            backend: QuantizedLinearBackend = backend_cls(self._lg)
+            if backend.is_available():
+                available.append(name)
 
-        register_backend(QuantFormat.AWQ, MarlinAWQBackend, priority=100)
-    except ImportError:
-        pass
-
-    # FP8 kernels
-    try:
-        from .kernels.fp8_pytorch import PyTorchFP8Backend
-
-        register_backend(QuantFormat.FP8, PyTorchFP8Backend, priority=0)
-    except ImportError:
-        pass
-
-    try:
-        from .kernels.fp8_cutlass import CutlassFP8Backend
-
-        register_backend(QuantFormat.FP8, CutlassFP8Backend, priority=100)
-    except ImportError:
-        pass
-
-
-# Auto-register on import
-_auto_register_backends()
-
-
-# Backward compatibility alias for existing code
-def get_linear_backend(backend_name: str = "auto") -> QuantizedLinearBackend:
-    """Get an AWQ linear backend (backward compatibility).
-
-    This is a compatibility shim for existing code that uses get_linear_backend().
-
-    Args:
-        backend_name: Backend name ("pytorch", "marlin", or "auto")
-
-    Returns:
-        AWQ backend instance
-    """
-    preference = None if backend_name == "auto" else backend_name
-    return get_backend(QuantFormat.AWQ, preference=preference)
+        return available

@@ -2,9 +2,11 @@
 
 import pytest
 import torch
+from appinfra.log import create_lg
 
 from llm_infer.backends.linear.formats import QuantFormat
 from llm_infer.backends.linear.kernels.awq_pytorch import PyTorchAWQBackend
+from llm_infer.backends.linear.kernels.fp8_pytorch import PyTorchFP8Backend
 from llm_infer.pipelines.model.layers import (
     AWQLinear,
     Fp8Linear,
@@ -14,23 +16,45 @@ from llm_infer.pipelines.model.layers import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture
+def lg():
+    """Create a logger for tests."""
+    return create_lg("test", "debug")
+
+
+@pytest.fixture
+def awq_backend(lg):
+    """Create an AWQ backend for tests."""
+    return PyTorchAWQBackend(lg)
+
+
+@pytest.fixture
+def fp8_backend(lg):
+    """Create an FP8 backend for tests."""
+    return PyTorchFP8Backend(lg)
+
+
 class TestAWQLinearFactory:
     """Test AWQLinear factory function."""
 
-    def test_creates_awq_format(self) -> None:
+    def test_creates_awq_format(self, awq_backend) -> None:
         """Test AWQLinear creates QuantizedLinear with AWQ format."""
-        layer = AWQLinear(in_features=128, out_features=256)
+        layer = AWQLinear(in_features=128, out_features=256, backend=awq_backend)
         assert isinstance(layer, QuantizedLinear)
         assert layer.format == QuantFormat.AWQ
 
-    def test_passes_group_size(self) -> None:
+    def test_passes_group_size(self, awq_backend) -> None:
         """Test AWQLinear passes group_size."""
-        layer = AWQLinear(in_features=256, out_features=256, group_size=64)
+        layer = AWQLinear(
+            in_features=256, out_features=256, group_size=64, backend=awq_backend
+        )
         assert layer.group_size == 64
 
-    def test_passes_bias(self) -> None:
+    def test_passes_bias(self, awq_backend) -> None:
         """Test AWQLinear passes bias parameter."""
-        layer = AWQLinear(in_features=128, out_features=256, bias=True)
+        layer = AWQLinear(
+            in_features=128, out_features=256, bias=True, backend=awq_backend
+        )
         assert layer.bias is not None
 
 
@@ -41,24 +65,28 @@ class TestAWQLinearFactory:
 class TestFp8LinearFactory:
     """Test Fp8Linear factory function."""
 
-    def test_creates_fp8_format(self) -> None:
+    def test_creates_fp8_format(self, fp8_backend) -> None:
         """Test Fp8Linear creates QuantizedLinear with FP8 format."""
-        layer = Fp8Linear(in_features=128, out_features=256)
+        layer = Fp8Linear(in_features=128, out_features=256, backend=fp8_backend)
         assert isinstance(layer, QuantizedLinear)
         assert layer.format == QuantFormat.FP8
 
-    def test_passes_block_size(self) -> None:
+    def test_passes_block_size(self, fp8_backend) -> None:
         """Test Fp8Linear passes block_size."""
-        layer = Fp8Linear(in_features=256, out_features=256, block_size=64)
+        layer = Fp8Linear(
+            in_features=256, out_features=256, block_size=64, backend=fp8_backend
+        )
         assert layer.block_size == 64
 
 
 class TestQuantizedLinearExtraRepr:
     """Test QuantizedLinear extra_repr method."""
 
-    def test_awq_extra_repr(self) -> None:
+    def test_awq_extra_repr(self, awq_backend) -> None:
         """Test AWQ format extra_repr."""
-        layer = AWQLinear(in_features=128, out_features=256, group_size=128)
+        layer = AWQLinear(
+            in_features=128, out_features=256, group_size=128, backend=awq_backend
+        )
         repr_str = layer.extra_repr()
 
         assert "in_features=128" in repr_str
@@ -71,9 +99,11 @@ class TestQuantizedLinearExtraRepr:
         not hasattr(torch, "float8_e4m3fn"),
         reason="FP8 not supported in this PyTorch version",
     )
-    def test_fp8_extra_repr(self) -> None:
+    def test_fp8_extra_repr(self, fp8_backend) -> None:
         """Test FP8 format extra_repr."""
-        layer = Fp8Linear(in_features=128, out_features=256, block_size=128)
+        layer = Fp8Linear(
+            in_features=128, out_features=256, block_size=128, backend=fp8_backend
+        )
         repr_str = layer.extra_repr()
 
         assert "in_features=128" in repr_str
@@ -85,20 +115,19 @@ class TestQuantizedLinearExtraRepr:
 class TestQuantizedLinearBackendSetter:
     """Test QuantizedLinear backend setter."""
 
-    def test_set_backend(self) -> None:
+    def test_set_backend(self, lg) -> None:
         """Test setting backend via property."""
         layer = AWQLinear(in_features=128, out_features=256)
-        backend = PyTorchAWQBackend()
+        backend = PyTorchAWQBackend(lg)
         layer.backend = backend
         assert layer._backend is backend
 
-    def test_lazy_backend_init(self) -> None:
-        """Test backend is lazily initialized."""
+    def test_backend_required(self) -> None:
+        """Test that accessing backend without setting it raises error."""
         layer = AWQLinear(in_features=128, out_features=256)
         assert layer._backend is None
-        # Accessing backend property should initialize it
-        _ = layer.backend
-        assert layer._backend is not None
+        with pytest.raises(RuntimeError, match="Backend not set"):
+            _ = layer.backend
 
 
 class TestQuantizedLinearValidation:
