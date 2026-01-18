@@ -19,9 +19,9 @@ class BaseResolver:
     Example:
         class MyResolver(BaseResolver):
             def on_code_end(self, event: StreamEvent, code: str, language: str) -> None:
-                if not self.in_think_context():
-                    # Only execute code outside of think blocks
-                    exec(code)
+                if language == "python" and not self.in_think_context():
+                    # Log code blocks found outside of think blocks
+                    print(f"Found Python code: {len(code)} chars")
                 super().on_code_end(event, code, language)
 
         resolver = MyResolver()

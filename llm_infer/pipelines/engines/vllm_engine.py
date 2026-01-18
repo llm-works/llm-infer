@@ -146,6 +146,10 @@ class VLLMStreamingIterator:
             except Exception:
                 pass  # Best-effort cleanup
 
+    def __del__(self) -> None:
+        """Clean up request on garbage collection."""
+        self._abort_request()
+
     def __next__(self) -> str:
         if self._finished:
             raise StopIteration
