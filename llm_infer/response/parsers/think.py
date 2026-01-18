@@ -130,12 +130,25 @@ class ThinkTagParser:
         if not self._buffer:
             return
 
-        if self._in_think:
-            yield StreamEvent(EventType.THINK_CONTENT, self._buffer)
-            yield StreamEvent(EventType.THINK_END)
-        else:
-            yield StreamEvent(EventType.TEXT, self._buffer)
-        self._buffer = ""
+        # Process any complete tags remaining in buffer before final flush
+        while self._buffer:
+            buffer_before = self._buffer
+            if self._in_think:
+                yield from self._process_in_think()
+            else:
+                yield from self._process_outside_think()
+            # If no progress, emit remaining buffer and break
+            if self._buffer == buffer_before:
+                break
+
+        # Emit any remaining content that couldn't be processed
+        if self._buffer:
+            if self._in_think:
+                yield StreamEvent(EventType.THINK_CONTENT, self._buffer)
+                yield StreamEvent(EventType.THINK_END)
+            else:
+                yield StreamEvent(EventType.TEXT, self._buffer)
+            self._buffer = ""
 
     def reset(self) -> None:
         """Reset parser state for reuse."""

@@ -1,10 +1,12 @@
 """Query tool - send queries to a running inference server."""
 
 import argparse
+import http.client
 import json
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
@@ -220,6 +222,29 @@ class QueryTool(Tool):
         elif remaining:
             sys.stdout.write(remaining)
 
+    def _read_sse_lines(self, resp: Any) -> Iterator[bytes]:
+        """Read SSE lines with minimal buffering for real-time streaming.
+
+        Uses raw socket access to bypass HTTPResponse buffering.
+        """
+        # Access raw socket to bypass BufferedReader buffering
+        raw = getattr(getattr(resp, "fp", None), "raw", None)
+        buffer = b""
+        while True:
+            # Read from raw socket if available, otherwise fall back to read(1)
+            if raw is not None:
+                chunk = raw.read(4096)
+            else:
+                chunk = resp.read(1)
+            if not chunk:
+                if buffer:
+                    yield buffer
+                break
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                yield line
+
     def _process_sse_stream(self, resp: Any) -> None:
         """Process SSE stream and print tokens to stdout."""
         print()  # Start on new line
@@ -227,7 +252,7 @@ class QueryTool(Tool):
         utf8_buffer = Utf8StreamBuffer()
         processor = self._create_processor()
 
-        for line in resp:
+        for line in self._read_sse_lines(resp):
             line = line.strip()
             if not line or not line.startswith(b"data: "):
                 continue
@@ -239,35 +264,83 @@ class QueryTool(Tool):
         self._flush_stream(utf8_buffer, processor)
         print()  # End with newline
 
+    def _get_raw_socket(self, resp: http.client.HTTPResponse) -> Any:
+        """Extract raw socket from HTTPResponse for unbuffered reads."""
+        raw = resp.fp.raw  # type: ignore[union-attr]
+        return raw._sock if hasattr(raw, "_sock") else raw
+
+    def _read_socket_lines(self, sock: Any) -> Iterator[bytes]:
+        """Read lines from socket with minimal buffering."""
+        buffer = b""
+        while True:
+            try:
+                chunk = sock.recv(256)
+            except Exception:
+                break
+            if not chunk:
+                break
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                yield line
+
+    def _process_sse_stream_unbuffered(self, resp: http.client.HTTPResponse) -> None:
+        """Process SSE stream with unbuffered socket reads."""
+        print()  # Start on new line
+
+        utf8_buffer = Utf8StreamBuffer()
+        processor = self._create_processor()
+        sock = self._get_raw_socket(resp)
+
+        for line in self._read_socket_lines(sock):
+            line = line.strip()
+            if not line or not line.startswith(b"data: "):
+                continue
+            data = line[6:]
+            if data == b"[DONE]":
+                break
+            self._process_sse_chunk(data, utf8_buffer, processor)
+
+        self._flush_stream(utf8_buffer, processor)
+        print()  # End with newline
+
+    def _open_streaming_connection(
+        self, payload: dict
+    ) -> tuple[http.client.HTTPConnection, http.client.HTTPResponse]:
+        """Open HTTP connection and send streaming request."""
+        conn = http.client.HTTPConnection(self.args.host, self.args.port, timeout=120)
+        conn.request(
+            "POST",
+            "/v1/chat/completions",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        return conn, conn.getresponse()
+
     def _stream_request(self, prompt: str) -> int:
         """Send streaming request and print tokens as they arrive."""
-        url = f"http://{self.args.host}:{self.args.port}/v1/chat/completions"
         payload = self._build_streaming_payload(prompt)
-        self.lg.debug("sending streaming request", extra={"url": url})
+        self.lg.debug("sending streaming request", extra={"host": self.args.host})
 
+        conn = None
         try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                self._process_sse_stream(resp)
+            conn, resp = self._open_streaming_connection(payload)
+            if resp.status != 200:
+                body = resp.read().decode("utf-8", errors="replace")
+                self.lg.error(f"server error {resp.status}: {body}")
+                return 1
+            self._process_sse_stream_unbuffered(resp)
             return 0
-        except urllib.error.URLError as e:
-            if "Connection refused" in str(e):
-                self.lg.error(
-                    f"cannot connect to server at {self.args.host}:{self.args.port}"
-                )
-                self.lg.info("is the server running? start with: inference serve")
-            else:
-                self.lg.error(f"request failed: {e}")
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            self.lg.error(f"server error {e.code}: {body}")
+        except ConnectionRefusedError:
+            self.lg.error(
+                f"cannot connect to server at {self.args.host}:{self.args.port}"
+            )
+            self.lg.info("is the server running? start with: inference serve")
         except Exception as e:
             self.lg.error(f"streaming request failed: {e}")
+        finally:
+            if conn:
+                conn.close()
         return 1
 
     def _build_chat_payload(self, prompt: str) -> dict:
