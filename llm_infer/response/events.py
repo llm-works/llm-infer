@@ -29,6 +29,12 @@ class StreamEvent:
         type: The type of event.
         content: Text content associated with the event.
         metadata: Additional event-specific data (e.g., {"language": "python"}).
+
+    Note:
+        Events are immutable (frozen) but NOT hashable due to the mutable
+        metadata dict. This is intentional - events are meant for streaming
+        pipelines, not as dict keys or set members. Use (type, content) tuple
+        if you need a hashable representation.
     """
 
     type: EventType

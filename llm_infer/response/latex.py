@@ -214,3 +214,7 @@ class LatexConverter:
         result = self._convert(self.buffer)
         self.buffer = ""
         return result
+
+    def reset(self) -> None:
+        """Reset converter state for reuse."""
+        self.buffer = ""

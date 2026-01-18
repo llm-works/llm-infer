@@ -138,26 +138,40 @@ class VLLMStreamingIterator:
     def __iter__(self) -> Iterator[str]:
         return self
 
+    def _abort_request(self) -> None:
+        """Abort the request in the engine's scheduler (best-effort cleanup)."""
+        if self._started and not self._finished:
+            try:
+                self._llm_engine.abort_request(self._request_id)
+            except Exception:
+                pass  # Best-effort cleanup
+
     def __next__(self) -> str:
         if self._finished:
             raise StopIteration
 
-        if not self._started:
-            self._start_generation()
+        try:
+            if not self._started:
+                self._start_generation()
 
-        # Step until we get output for our request or generation completes
-        while not self._finished:
-            outputs = self._llm_engine.step()
+            # Step until we get output for our request or generation completes
+            while not self._finished:
+                outputs = self._llm_engine.step()
 
-            for output in outputs:
-                if output.request_id == self._request_id:
-                    delta = self._process_output(output)
-                    if delta:
-                        return delta
-                    if self._finished:
-                        raise StopIteration
+                for output in outputs:
+                    if output.request_id == self._request_id:
+                        delta = self._process_output(output)
+                        if delta:
+                            return delta
+                        if self._finished:
+                            raise StopIteration
 
-        raise StopIteration
+            raise StopIteration
+        except StopIteration:
+            raise
+        except Exception:
+            self._abort_request()
+            raise
 
 
 class VLLMEngine:

@@ -125,5 +125,4 @@ class TerminalResolver(BaseResolver):
         """Reset resolver state."""
         super().reset()
         if self._latex_formatter:
-            # Reset by clearing internal buffer
-            self._latex_formatter.buffer = ""
+            self._latex_formatter.reset()

@@ -7,6 +7,7 @@ import re
 from collections.abc import Iterator
 
 from ..events import EventType, StreamEvent
+from ..latex import LATEX_REPLACEMENTS
 
 
 class LatexTransformer:
@@ -22,86 +23,13 @@ class LatexTransformer:
                 print(event.content)  # LaTeX converted to Unicode
     """
 
-    # Simple command replacements (from llm_infer.response.latex)
-    REPLACEMENTS: dict[str, str] = {
-        "\\times": "\u00d7",
-        "\\div": "\u00f7",
-        "\\pm": "\u00b1",
-        "\\mp": "\u2213",
-        "\\leq": "\u2264",
-        "\\geq": "\u2265",
-        "\\neq": "\u2260",
-        "\\approx": "\u2248",
-        "\\equiv": "\u2261",
-        "\\infty": "\u221e",
-        "\\pi": "\u03c0",
-        "\\sum": "\u03a3",
-        "\\prod": "\u03a0",
-        "\\int": "\u222b",
-        "\\partial": "\u2202",
-        "\\nabla": "\u2207",
-        "\\cdot": "\u00b7",
-        "\\ldots": "\u2026",
-        "\\cdots": "\u22ef",
-        "\\to": "\u2192",
-        "\\rightarrow": "\u2192",
-        "\\leftarrow": "\u2190",
-        "\\Rightarrow": "\u21d2",
-        "\\Leftarrow": "\u21d0",
-        "\\iff": "\u21d4",
-        "\\forall": "\u2200",
-        "\\exists": "\u2203",
-        "\\in": "\u2208",
-        "\\notin": "\u2209",
-        "\\subset": "\u2282",
-        "\\supset": "\u2283",
-        "\\cup": "\u222a",
-        "\\cap": "\u2229",
-        "\\emptyset": "\u2205",
-        "\\neg": "\u00ac",
-        "\\land": "\u2227",
-        "\\lor": "\u2228",
-        "\\alpha": "\u03b1",
-        "\\beta": "\u03b2",
-        "\\gamma": "\u03b3",
-        "\\delta": "\u03b4",
-        "\\epsilon": "\u03b5",
-        "\\zeta": "\u03b6",
-        "\\eta": "\u03b7",
-        "\\theta": "\u03b8",
-        "\\lambda": "\u03bb",
-        "\\mu": "\u03bc",
-        "\\nu": "\u03bd",
-        "\\xi": "\u03be",
-        "\\rho": "\u03c1",
-        "\\sigma": "\u03c3",
-        "\\tau": "\u03c4",
-        "\\phi": "\u03c6",
-        "\\chi": "\u03c7",
-        "\\psi": "\u03c8",
-        "\\omega": "\u03c9",
-        "\\Delta": "\u0394",
-        "\\Gamma": "\u0393",
-        "\\Theta": "\u0398",
-        "\\Lambda": "\u039b",
-        "\\Sigma": "\u03a3",
-        "\\Phi": "\u03a6",
-        "\\Psi": "\u03a8",
-        "\\Omega": "\u03a9",
-        "\\quad": " ",
-        "\\qquad": "  ",
-        "\\,": " ",
-        "\\;": " ",
-        "\\!": "",
-    }
-
     def __init__(self) -> None:
         """Initialize the LaTeX transformer."""
         self._buffer: str = ""
 
     def _apply_replacements(self, text: str) -> str:
         """Apply simple command replacements."""
-        for latex, unicode_char in self.REPLACEMENTS.items():
+        for latex, unicode_char in LATEX_REPLACEMENTS.items():
             text = text.replace(latex, unicode_char)
         return text
 
@@ -141,7 +69,7 @@ class LatexTransformer:
         self, suffix: str, last_bs: int, text_len: int
     ) -> int | None:
         """Check if suffix matches a known command."""
-        for cmd in sorted(self.REPLACEMENTS.keys(), key=len, reverse=True):
+        for cmd in sorted(LATEX_REPLACEMENTS.keys(), key=len, reverse=True):
             if suffix.startswith(cmd):
                 after_cmd = suffix[len(cmd) :]
                 return (

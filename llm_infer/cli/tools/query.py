@@ -222,48 +222,6 @@ class QueryTool(Tool):
         elif remaining:
             sys.stdout.write(remaining)
 
-    def _read_sse_lines(self, resp: Any) -> Iterator[bytes]:
-        """Read SSE lines with minimal buffering for real-time streaming.
-
-        Uses raw socket access to bypass HTTPResponse buffering.
-        """
-        # Access raw socket to bypass BufferedReader buffering
-        raw = getattr(getattr(resp, "fp", None), "raw", None)
-        buffer = b""
-        while True:
-            # Read from raw socket if available, otherwise fall back to read(1)
-            if raw is not None:
-                chunk = raw.read(4096)
-            else:
-                chunk = resp.read(1)
-            if not chunk:
-                if buffer:
-                    yield buffer
-                break
-            buffer += chunk
-            while b"\n" in buffer:
-                line, buffer = buffer.split(b"\n", 1)
-                yield line
-
-    def _process_sse_stream(self, resp: Any) -> None:
-        """Process SSE stream and print tokens to stdout."""
-        print()  # Start on new line
-
-        utf8_buffer = Utf8StreamBuffer()
-        processor = self._create_processor()
-
-        for line in self._read_sse_lines(resp):
-            line = line.strip()
-            if not line or not line.startswith(b"data: "):
-                continue
-            data = line[6:]
-            if data == b"[DONE]":
-                break
-            self._process_sse_chunk(data, utf8_buffer, processor)
-
-        self._flush_stream(utf8_buffer, processor)
-        print()  # End with newline
-
     def _get_raw_socket(self, resp: http.client.HTTPResponse) -> Any:
         """Extract raw socket from HTTPResponse for unbuffered reads."""
         raw = resp.fp.raw  # type: ignore[union-attr]
@@ -275,7 +233,8 @@ class QueryTool(Tool):
         while True:
             try:
                 chunk = sock.recv(256)
-            except Exception:
+            except OSError as e:
+                self.lg.debug("socket read ended", extra={"exception": e})
                 break
             if not chunk:
                 break
