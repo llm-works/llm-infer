@@ -14,9 +14,6 @@ from appinfra.app.tools import Tool, ToolConfig
 from ...response import ResponseProcessor, TerminalResolver
 from ...response.utf8 import Utf8StreamBuffer
 
-# Small buffer for low-latency token streaming (prioritize responsiveness over throughput)
-_SOCKET_RECV_SIZE = 256
-
 
 class QueryTool(Tool):
     """Send a query to the running inference server."""
@@ -225,45 +222,22 @@ class QueryTool(Tool):
         elif remaining:
             sys.stdout.write(remaining)
 
-    def _get_raw_socket(self, resp: http.client.HTTPResponse) -> Any:
-        """Extract raw socket from HTTPResponse for unbuffered reads.
-
-        Accesses internal attributes to bypass HTTPResponse buffering,
-        enabling true token-by-token streaming. The hasattr fallback handles
-        variations across Python versions and socket wrapper implementations.
-        """
-        raw = resp.fp.raw  # type: ignore[union-attr]
-        return raw._sock if hasattr(raw, "_sock") else raw
-
-    def _read_socket_lines(self, sock: Any) -> Iterator[bytes]:
-        """Read lines from socket with minimal buffering."""
-        buffer = b""
+    def _read_sse_lines(self, resp: http.client.HTTPResponse) -> Iterator[bytes]:
+        """Read SSE lines from HTTP response."""
         while True:
-            try:
-                chunk = sock.recv(_SOCKET_RECV_SIZE)
-            except OSError as e:
-                self.lg.debug("socket read ended", extra={"exception": e})
+            line = resp.readline()
+            if not line:
                 break
-            if not chunk:
-                break
-            buffer += chunk
-            while b"\n" in buffer:
-                line, buffer = buffer.split(b"\n", 1)
-                yield line
-        # Yield any remaining partial line (handles unclean stream termination)
-        if buffer:
-            yield buffer
+            yield line.rstrip(b"\r\n")
 
-    def _process_sse_stream_unbuffered(self, resp: http.client.HTTPResponse) -> None:
-        """Process SSE stream with unbuffered socket reads."""
+    def _process_sse_stream(self, resp: http.client.HTTPResponse) -> None:
+        """Process SSE stream from HTTP response."""
         print()  # Start on new line
 
         utf8_buffer = Utf8StreamBuffer()
         processor = self._create_processor()
-        sock = self._get_raw_socket(resp)
 
-        for line in self._read_socket_lines(sock):
-            line = line.strip()
+        for line in self._read_sse_lines(resp):
             if not line or not line.startswith(b"data: "):
                 continue
             data = line[6:]
@@ -299,7 +273,7 @@ class QueryTool(Tool):
                 body = resp.read().decode("utf-8", errors="replace")
                 self.lg.error(f"server error {resp.status}: {body}")
                 return 1
-            self._process_sse_stream_unbuffered(resp)
+            self._process_sse_stream(resp)
             return 0
         except ConnectionRefusedError:
             self.lg.error(

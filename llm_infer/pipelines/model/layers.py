@@ -23,8 +23,9 @@ class QuantizedLinear(nn.Module):
     - AWQ: 4-bit with per-group scales (group_size typically 128)
     - FP8: 8-bit floating point with per-block scales (block_size typically 128)
 
-    The backend is auto-selected based on hardware availability, or can be
-    manually specified.
+    Backend must be provided at construction or set via the backend property
+    before forward() is called. Use BackendRegistry to select the appropriate
+    backend for your hardware.
     """
 
     # Type hints for registered buffers
@@ -54,7 +55,8 @@ class QuantizedLinear(nn.Module):
             group_size: For AWQ - weights per quantization group
             block_size: For FP8 - quantization block size
             bias: Whether to include bias (typically False for quantized)
-            backend: Backend for matmul. If None, auto-selects best available.
+            backend: Backend for matmul. If None, must be set via backend property
+                before forward() is called.
         """
         super().__init__()
         self.in_features = in_features
@@ -63,7 +65,7 @@ class QuantizedLinear(nn.Module):
         self.group_size = group_size
         self.block_size = block_size
 
-        # Store backend (lazy init if None)
+        # Store backend (can be set later via backend property)
         self._backend = backend
 
         # Register format-specific buffers
@@ -169,7 +171,7 @@ class QuantizedLinear(nn.Module):
 
     def extra_repr(self) -> str:
         """String representation for printing."""
-        backend_name = self._backend.name if self._backend else "auto"
+        backend_name = self._backend.name if self._backend else "not set"
         if self.format == QuantFormat.AWQ:
             return (
                 f"in_features={self.in_features}, out_features={self.out_features}, "
@@ -195,15 +197,14 @@ def AWQLinear(  # noqa: N802
 ) -> QuantizedLinear:
     """Create an AWQ quantized linear layer.
 
-    This is a backward-compatible factory function that creates a QuantizedLinear
-    with AWQ format.
+    This is a factory function that creates a QuantizedLinear with AWQ format.
 
     Args:
         in_features: Input feature dimension
         out_features: Output feature dimension
         group_size: Weights per quantization group (typically 128)
         bias: Whether to include bias
-        backend: Backend for matmul (auto-selects if None)
+        backend: Backend for matmul (required before forward())
 
     Returns:
         QuantizedLinear configured for AWQ format
@@ -226,14 +227,13 @@ def Fp8Linear(  # noqa: N802
 ) -> QuantizedLinear:
     """Create an FP8 quantized linear layer.
 
-    This is a backward-compatible factory function that creates a QuantizedLinear
-    with FP8 format.
+    This is a factory function that creates a QuantizedLinear with FP8 format.
 
     Args:
         in_features: Input feature dimension
         out_features: Output feature dimension
         block_size: Quantization block size (typically 128)
-        backend: Backend for matmul (required)
+        backend: Backend for matmul (required before forward())
 
     Returns:
         QuantizedLinear configured for FP8 format

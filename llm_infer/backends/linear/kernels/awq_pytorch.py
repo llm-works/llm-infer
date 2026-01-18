@@ -36,6 +36,7 @@ class PyTorchAWQBackend:
     def __init__(self, lg: Logger) -> None:
         """Initialize PyTorch AWQ backend."""
         self._lg = lg
+        self._lg.debug("initialized PyTorch AWQ backend")
 
     def is_available(self) -> bool:
         """Always available - uses only PyTorch."""
