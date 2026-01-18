@@ -33,7 +33,18 @@ def create_chat_chunk(
     role: Role | None = None,
     finish_reason: FinishReason | None = None,
 ) -> ChatCompletionChunk:
-    """Create a chat completion chunk for streaming."""
+    """Create a chat completion chunk for streaming.
+
+    Args:
+        request_id: Unique request identifier.
+        model: Model name for response.
+        created: Unix timestamp.
+        content: Main response content delta.
+        thinking: Thinking content delta (llm-infer extension, scaffolded for
+            future streaming separation - currently only used in non-streaming).
+        role: Message role (only set on first chunk).
+        finish_reason: Finish reason (only set on final chunk).
+    """
     delta = ChatCompletionChunkDelta(role=role, content=content, thinking=thinking)
     return ChatCompletionChunk(
         id=request_id,

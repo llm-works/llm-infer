@@ -242,6 +242,9 @@ class QueryTool(Tool):
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)
                 yield line
+        # Yield any remaining partial line (handles unclean stream termination)
+        if buffer:
+            yield buffer
 
     def _process_sse_stream_unbuffered(self, resp: http.client.HTTPResponse) -> None:
         """Process SSE stream with unbuffered socket reads."""
@@ -295,6 +298,12 @@ class QueryTool(Tool):
                 f"cannot connect to server at {self.args.host}:{self.args.port}"
             )
             self.lg.info("is the server running? start with: inference serve")
+        except TimeoutError:
+            self.lg.error("connection timed out")
+        except BrokenPipeError:
+            self.lg.error("connection closed by server")
+        except OSError as e:
+            self.lg.error(f"network error: {e}")
         except Exception as e:
             self.lg.error(f"streaming request failed: {e}")
         finally:

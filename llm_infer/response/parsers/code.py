@@ -8,6 +8,9 @@ from collections.abc import Iterator
 
 from ..events import EventType, StreamEvent
 
+# Length of closing fence pattern "```\n" - used for safe buffer splitting
+_FENCE_CLOSE_LEN = 4
+
 
 class CodeBlockParser:
     """Parser for markdown code fences.
@@ -106,7 +109,7 @@ class CodeBlockParser:
         if close_pos is None:
             # No close fence - emit safe content and buffer the rest
             # Keep enough buffer for potential fence pattern
-            safe_len = max(0, len(self._buffer) - 4)  # 4 = len("```\n")
+            safe_len = max(0, len(self._buffer) - _FENCE_CLOSE_LEN)
             if safe_len > 0:
                 yield StreamEvent(EventType.CODE_CONTENT, self._buffer[:safe_len])
                 self._buffer = self._buffer[safe_len:]

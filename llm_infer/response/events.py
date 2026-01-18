@@ -31,10 +31,16 @@ class StreamEvent:
         metadata: Additional event-specific data (e.g., {"language": "python"}).
 
     Note:
-        Events are immutable (frozen) but NOT hashable due to the mutable
-        metadata dict. This is intentional - events are meant for streaming
-        pipelines, not as dict keys or set members. Use (type, content) tuple
-        if you need a hashable representation.
+        Events are frozen (attributes cannot be reassigned) but contain a mutable
+        metadata dict for practical reasons (avoiding MappingProxyType complexity).
+
+        Important:
+        - Events are NOT hashable due to the mutable metadata dict
+        - Do NOT modify metadata after event creation - treat it as read-only
+        - For hashable representation, use tuple: (event.type, event.content)
+
+        The frozen+mutable pattern is intentional: events flow through streaming
+        pipelines and are not used as dict keys or set members.
     """
 
     type: EventType

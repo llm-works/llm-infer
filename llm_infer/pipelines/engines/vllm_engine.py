@@ -14,7 +14,7 @@ import math
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from ...serving.dispatch.config import VLLMConfig
 
@@ -74,6 +74,15 @@ class VLLMStreamingIterator:
 
     Uses the underlying LLMEngine's add_request/step API to yield tokens
     as they are generated, enabling real-time streaming output.
+
+    Supports context manager protocol for reliable cleanup:
+        with engine.generate_stream(...) as stream:
+            for token in stream:
+                print(token)
+        # Request is automatically aborted if not fully consumed
+
+    Note: Also implements __del__ for cleanup when not used as context manager,
+    but context manager usage is preferred for deterministic cleanup.
     """
 
     def __init__(
@@ -137,6 +146,14 @@ class VLLMStreamingIterator:
 
     def __iter__(self) -> Iterator[str]:
         return self
+
+    def __enter__(self) -> Self:
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit context manager, ensuring cleanup."""
+        self._abort_request()
 
     def _abort_request(self) -> None:
         """Abort the request in the engine's scheduler (best-effort cleanup)."""
