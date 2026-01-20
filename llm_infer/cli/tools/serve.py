@@ -24,6 +24,11 @@ class ServeTool(Tool):
     def _add_model_args(self, parser: argparse.ArgumentParser) -> None:
         """Add model-related arguments."""
         parser.add_argument(
+            "--list-models",
+            action="store_true",
+            help="List available models from config and exit",
+        )
+        parser.add_argument(
             "--models-dir", type=Path, help="Directory containing models"
         )
         parser.add_argument("--model", help="Model name (subdirectory in models-dir)")
@@ -159,7 +164,59 @@ class ServeTool(Tool):
                     extra={"key": key, "model": model_name},
                 )
 
+    def _print_model_group(
+        self, header: str, models: list[str], default: str | None
+    ) -> None:
+        """Print a group of models with header and default marker."""
+        if not models:
+            return
+        print(f"  {header}:")
+        for name in sorted(models):
+            marker = " (default)" if name == default else ""
+            print(f"    - {name}{marker}")
+        print()
+
+    def _list_models(self) -> int:
+        """List available models from config."""
+        from ...models.config import ModelsConfig
+
+        models_cfg = ModelsConfig.from_raw_config(self._get_raw_config())
+
+        # Group by task
+        generate_models = []
+        embed_models = []
+        for name, cfg in models_cfg.models.items():
+            if cfg.task == "embed":
+                embed_models.append(name)
+            else:
+                generate_models.append(name)
+
+        print("Configured models:\n")
+        gen_default = models_cfg.get_selection("generate").default
+        embed_default = models_cfg.get_selection("embed").default
+        self._print_model_group("Generation", generate_models, gen_default)
+        self._print_model_group("Embedding", embed_models, embed_default)
+        return 0
+
+    def _apply_cli_overrides(self, config: Any, model_path: Path) -> None:
+        """Apply overrides in precedence order: model < env < cli.
+
+        Note: apply_cli_overrides internally applies env first, then cli.
+        """
+        self._apply_model_overrides(config, model_path.name)
+        config.apply_cli_overrides(
+            host=self.args.host,
+            port=self.args.port,
+            handler=self.args.handler,
+            model_path=str(model_path),
+            engine=self.args.engine,
+            overrides=self._parse_overrides(),
+        )
+
     def run(self, **kwargs: Any) -> int:
+        if self.args.list_models:
+            return self._list_models()
+
         raw_config = self._get_raw_config()
         self._configure_logging(raw_config)
 
@@ -176,17 +233,7 @@ class ServeTool(Tool):
         if model_path is None:
             return 1
 
-        # Apply overrides in precedence order: model < env < cli
-        # (apply_cli_overrides internally applies env first, then cli)
-        self._apply_model_overrides(config, model_path.name)
-        config.apply_cli_overrides(
-            host=self.args.host,
-            port=self.args.port,
-            handler=self.args.handler,
-            model_path=str(model_path),
-            engine=self.args.engine,
-            overrides=self._parse_overrides(),
-        )
+        self._apply_cli_overrides(config, model_path)
         run_server(self.lg, config)
         return 0
 
