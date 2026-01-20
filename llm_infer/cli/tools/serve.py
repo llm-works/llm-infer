@@ -180,7 +180,7 @@ class ServeTool(Tool):
         """List available models from config."""
         from ...models.config import ModelsConfig
 
-        models_cfg = ModelsConfig.from_raw_config(dict(self.app.config))
+        models_cfg = ModelsConfig.from_raw_config(self._get_raw_config())
 
         # Group by task
         generate_models = []
@@ -199,7 +199,10 @@ class ServeTool(Tool):
         return 0
 
     def _apply_cli_overrides(self, config: Any, model_path: Path) -> None:
-        """Apply model and CLI overrides to config."""
+        """Apply overrides in precedence order: model < env < cli.
+
+        Note: apply_cli_overrides internally applies env first, then cli.
+        """
         self._apply_model_overrides(config, model_path.name)
         config.apply_cli_overrides(
             host=self.args.host,

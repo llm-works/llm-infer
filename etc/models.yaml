@@ -73,7 +73,7 @@ models:
     <<: *vllm_small
     max_model_len: 4096  # Don't need 16K for a tiny test model
     vllm:
-      enforce_eager: true
+      enforce_eager: true  # Must repeat - local vllm block replaces merged one
       gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
   # ---------------------------------------------------------------------------
