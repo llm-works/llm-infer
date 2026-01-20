@@ -190,8 +190,8 @@ class VLLMConfig:
         if self.task == "embed":
             kwargs["task"] = "embed"
 
-        # LoRA settings
-        if self.lora.enabled:
+        # LoRA settings (not supported for embedding models)
+        if self.lora.enabled and self.task != "embed":
             kwargs["enable_lora"] = True
             kwargs["max_loras"] = self.lora.max_loras
             kwargs["max_lora_rank"] = self.lora.max_lora_rank
