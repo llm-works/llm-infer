@@ -15,49 +15,14 @@ selection:
     path: !path ../.models/selected.yaml  # Optional: ops-controlled selection file
     default: qwen3-1.7b-gptq-int8  # Fallback model name
 
-models:
-  # Embedding models
-  bge-small-en-v1.5:
-    task: embed
-    max_model_len: null  # Use model default (512)
-    vllm:
-      # Prefix caching with concurrent embedding requests causes KeyError crash in V1 engine
-      # See: https://github.com/vllm-project/vllm/issues/25991
-      enable_prefix_caching: false
+# =============================================================================
+# Templates (YAML anchors for reuse)
+# =============================================================================
+# Use <<: *anchor_name to merge template into model config
 
-  # Qwen2.5 instruct models - support /think /no_think tokens
-  qwen2.5-0.5b-instruct:
-    system_prompt: null
-    max_model_len: 4096  # Don't need 16K for a tiny test model
-    think:
-      default: false
-      enable_suffix: " /think"
-      disable_suffix: " /no_think"
-      system_prompt: "You MUST wrap all your step-by-step reasoning inside <think></think> XML tags. After </think>, output ONLY the final answer with no explanation."
-      tags:
-        open: ["<think>", "<thinking>"]
-        close: ["</think>", "</thinking>"]
-    vllm:
-      enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
-      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
-
-  # Qwen3 instruct models - support /think /no_think tokens
-  qwen3-1.7b-gptq-int8:
-    system_prompt: null
-    max_model_len: 4096  # Reduced for 8GB GPU dev environment
-    think:
-      default: false
-      enable_suffix: " /think"
-      disable_suffix: " /no_think"
-      system_prompt: "You MUST wrap all your step-by-step reasoning inside <think></think> XML tags. After </think>, output ONLY the final answer with no explanation."
-      tags:
-        open: ["<think>", "<thinking>"]
-        close: ["</think>", "</thinking>"]
-    vllm:
-      enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
-      #gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
-
-  qwen3-4b-instruct-2507-awq:
+templates:
+  # Qwen 2.5/3 instruct models - support /think /no_think tokens
+  qwen_think: &qwen_think
     system_prompt: null
     think:
       default: false
@@ -69,7 +34,7 @@ models:
         close: ["</think>", "</thinking>"]
 
   # DeepSeek R1 distillations - always think, uses <think> tags
-  deepseek-r1-distill-qwen-7b:
+  deepseek_r1: &deepseek_r1
     system_prompt: null
     think:
       default: true
@@ -78,6 +43,68 @@ models:
       tags:
         open: ["<think>"]
         close: ["</think>"]
+
+  # vLLM settings for small models (skip CUDA graph capture)
+  vllm_small: &vllm_small
+    vllm:
+      enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
+
+# =============================================================================
+# Models
+# =============================================================================
+
+models:
+  # ---------------------------------------------------------------------------
+  # Embedding models
+  # ---------------------------------------------------------------------------
+  bge-small-en-v1.5:
+    task: embed
+    max_model_len: null  # Use model default (512)
+    vllm:
+      # Prefix caching with concurrent embedding requests causes KeyError crash in V1 engine
+      # See: https://github.com/vllm-project/vllm/issues/25991
+      enable_prefix_caching: false
+
+  # ---------------------------------------------------------------------------
+  # Qwen2.5 instruct models
+  # ---------------------------------------------------------------------------
+  qwen2.5-0.5b-instruct:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096  # Don't need 16K for a tiny test model
+    vllm:
+      enforce_eager: true
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
+  # ---------------------------------------------------------------------------
+  # Qwen3 instruct models
+  # ---------------------------------------------------------------------------
+  qwen3-0.6b-instruct-w4a16:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+
+  qwen3-1.7b-gptq-int8:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096  # Reduced for 8GB GPU dev environment
+
+  qwen3-1.7b-instruct-w4a16:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+
+  qwen3-4b-instruct-2507-awq:
+    <<: *qwen_think
+
+  qwen3-4b-instruct-w4a16:
+    <<: *qwen_think
+
+  # ---------------------------------------------------------------------------
+  # DeepSeek R1 distillations
+  # ---------------------------------------------------------------------------
+  deepseek-r1-distill-qwen-7b:
+    <<: *deepseek_r1
 
 # Defaults for models not explicitly listed
 defaults:
