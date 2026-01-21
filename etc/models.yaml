@@ -79,6 +79,13 @@ models:
   # ---------------------------------------------------------------------------
   # Qwen3 instruct models
   # ---------------------------------------------------------------------------
+  qwen3-0.6b-instruct:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+    vllm:
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
   qwen3-0.6b-instruct-w4a16:
     <<: *qwen_think
     <<: *vllm_small
@@ -93,6 +100,15 @@ models:
     <<: *qwen_think
     <<: *vllm_small
     max_model_len: 4096
+    vllm:
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
+  qwen3-1.7b-instruct:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+    vllm:
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
   qwen3-4b-instruct-2507-awq:
     <<: *qwen_think
