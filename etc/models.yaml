@@ -2,8 +2,7 @@
 # Matched by model name (from selected.yaml or --model)
 
 locations:
-  - !path ../.models/huggingface
-  # add HF cache location
+  - !include "../.env.yaml#paths.models"
 
 # Model selection
 # Priority: CLI --model-path > CLI --model > selection file > selection default
