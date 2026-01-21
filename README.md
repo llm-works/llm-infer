@@ -1,5 +1,14 @@
 # LLM Inference Engine
 
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
+![CUDA](https://img.shields.io/badge/CUDA-12.x-green.svg)
+![vLLM](https://img.shields.io/badge/backend-vLLM%20%7C%20native-blue.svg)
+![Type Hints](https://img.shields.io/badge/type%20hints-100%25-brightgreen.svg)
+[![Linting:
+Ruff](https://img.shields.io/badge/linting-ruff-yellowgreen)](https://github.com/astral-sh/ruff)
+[![CI](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml/badge.svg)](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
+
 A readable LLM llm-infer server implementing paged attention and continuous batching.
 
 ## What This Is
@@ -56,6 +65,22 @@ experiment with, understand, and deploy efficient models.
 git clone https://github.com/serendip-ml/inference.git
 cd inference
 pip install -e .
+```
+
+### Environment Setup
+
+Create a local environment config with paths to your model directories:
+
+```bash
+cp .env.yaml.example .env.yaml
+```
+
+Edit `.env.yaml` to point to your local model storage:
+
+```yaml
+paths:
+  models: !path ~/models/huggingface
+  adapters: !path ~/models/adapters
 ```
 
 ### Requirements
