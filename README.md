@@ -67,6 +67,22 @@ cd inference
 pip install -e .
 ```
 
+### Environment Setup
+
+Create a local environment config with paths to your model directories:
+
+```bash
+cp .env.yaml.example .env.yaml
+```
+
+Edit `.env.yaml` to point to your local model storage:
+
+```yaml
+paths:
+  models: !path ~/models/huggingface
+  adapters: !path ~/models/adapters
+```
+
 ### Requirements
 
 - Python >= 3.11
