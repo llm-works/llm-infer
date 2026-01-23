@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
 from appinfra.log import Logger
+from appinfra.size import size_str
 
 from ...serving.dispatch.config import VLLMConfig
 
@@ -302,13 +303,13 @@ class VLLMEngine:
         if self._kv_cache_bytes > 0 and self._model_memory_bytes > self._kv_cache_bytes:
             self._model_memory_bytes -= self._kv_cache_bytes
 
-        self._lg.debug(
+        self._lg.info(
             "memory estimation complete",
             extra={
-                "mem_before": mem_before,
-                "mem_after": mem_after,
-                "model_memory": self._model_memory_bytes,
-                "kv_cache": self._kv_cache_bytes,
+                "mem_before": size_str(mem_before or 0),
+                "mem_after": size_str(mem_after or 0),
+                "model_memory": size_str(self._model_memory_bytes),
+                "kv_cache": size_str(self._kv_cache_bytes),
             },
         )
 
