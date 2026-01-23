@@ -186,9 +186,9 @@ class VLLMConfig:
             if value is not None:
                 kwargs[key] = value
 
-        # Task mode only needed for embedding models
-        if self.task == "embed":
-            kwargs["task"] = "embed"
+        # Task mode for embedding models (vLLM <0.14 only, now auto-detected)
+        # if self.task == "embed":
+        #     kwargs["task"] = "embed"
 
         # LoRA settings (not supported for embedding models)
         if self.lora.enabled and self.task != "embed":
