@@ -98,6 +98,9 @@ llm-infer = "llm_infer.cli.cli:main"
 # Fallback for builds without git (e.g., Docker)
 fallback_version = "0.0.0.dev0"
 
+[tool.setuptools.package-data]
+llm_infer = ["py.typed"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["llm_infer*"]

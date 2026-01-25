@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
+
 if TYPE_CHECKING:
     from .config import InferenceConfig
     from .handler import RequestHandler
@@ -23,7 +25,9 @@ class EngineFactory(ABC):
     """Base class for engine factories."""
 
     @abstractmethod
-    def create(self, lg: Any, config: InferenceConfig, on_progress: Any = None) -> Any:
+    def create(
+        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
+    ) -> Any:
         """Create an engine instance."""
         ...
 
@@ -41,7 +45,9 @@ class EngineFactory(ABC):
 class NativeEngineFactory(EngineFactory):
     """Factory for native inference engine."""
 
-    def create(self, lg: Any, config: InferenceConfig, on_progress: Any = None) -> Any:
+    def create(
+        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
+    ) -> Any:
         from ...pipelines import EngineConfig, InferenceEngine, ModelConfig
 
         if config.models.path is None:
@@ -84,7 +90,9 @@ class VLLMEngineFactory(EngineFactory):
                 "(set via config, --model-path, or MODEL_PATH)"
             )
 
-    def create(self, lg: Any, config: InferenceConfig, on_progress: Any = None) -> Any:
+    def create(
+        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
+    ) -> Any:
         try:
             from ...pipelines.engines.vllm_engine import VLLMEngine
         except ImportError as e:
@@ -129,7 +137,9 @@ class HandlerFactory(ABC):
     """Base class for handler factories."""
 
     @abstractmethod
-    def create(self, lg: Any, engine: Any, config: InferenceConfig) -> RequestHandler:
+    def create(
+        self, lg: Logger, engine: Any, config: InferenceConfig
+    ) -> RequestHandler:
         """Create a handler instance."""
         ...
 
@@ -137,7 +147,9 @@ class HandlerFactory(ABC):
 class SequentialHandlerFactory(HandlerFactory):
     """Factory for sequential (one-at-a-time) handler."""
 
-    def create(self, lg: Any, engine: Any, config: InferenceConfig) -> RequestHandler:
+    def create(
+        self, lg: Logger, engine: Any, config: InferenceConfig
+    ) -> RequestHandler:
         from .handlers import SequentialHandler
 
         return SequentialHandler(engine)
@@ -146,7 +158,9 @@ class SequentialHandlerFactory(HandlerFactory):
 class BoundedHandlerFactory(HandlerFactory):
     """Factory for bounded queue handler with batching."""
 
-    def create(self, lg: Any, engine: Any, config: InferenceConfig) -> RequestHandler:
+    def create(
+        self, lg: Logger, engine: Any, config: InferenceConfig
+    ) -> RequestHandler:
         from .handlers import BoundedQueueHandler
 
         engine_factory = get_engine_factory(config.backends.engine)

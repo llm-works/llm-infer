@@ -7,6 +7,7 @@ import urllib.request
 from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
+from appinfra.log import Logger
 
 
 class MetricsTool(Tool):
@@ -17,6 +18,12 @@ class MetricsTool(Tool):
             name="metrics", aliases=["m"], help_text="Get server metrics"
         )
         super().__init__(parent, config)
+
+    @property
+    def _lg(self) -> Logger:
+        """Get logger with type narrowing (always set after setup)."""
+        assert self.lg is not None
+        return self.lg
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
@@ -41,15 +48,15 @@ class MetricsTool(Tool):
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.URLError as e:
             if "Connection refused" in str(e):
-                self.lg.error(
+                self._lg.error(
                     "server not running",
                     extra={"host": self.args.host, "port": self.args.port},
                 )
             else:
-                self.lg.error("request failed", extra={"error": str(e)})
+                self._lg.error("request failed", extra={"error": str(e)})
             return 1
         except Exception as e:
-            self.lg.error("request failed", extra={"error": str(e)})
+            self._lg.error("request failed", extra={"error": str(e)})
             return 1
 
         if self.args.json:
@@ -64,7 +71,7 @@ class MetricsTool(Tool):
         kv = data["kv_cache"]
         seq = data["sequences"]
 
-        self.lg.info(
+        self._lg.info(
             "GPU memory",
             extra={
                 "allocated_mb": f"{gpu['allocated_mb']:.1f}",
@@ -72,7 +79,7 @@ class MetricsTool(Tool):
                 "peak_mb": f"{gpu['peak_mb']:.1f}",
             },
         )
-        self.lg.info(
+        self._lg.info(
             "KV cache",
             extra={
                 "mb": f"{kv['mb']:.1f}",
@@ -80,7 +87,7 @@ class MetricsTool(Tool):
                 "capacity_tokens": kv["capacity_tokens"],
             },
         )
-        self.lg.info(
+        self._lg.info(
             "Sequences",
             extra={
                 "active": seq["active"],

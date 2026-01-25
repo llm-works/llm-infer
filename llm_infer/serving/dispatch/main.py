@@ -4,10 +4,11 @@ import multiprocessing as mp
 import signal
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
+from appinfra.log import Logger
 from appinfra.size import size_str
 from appinfra.time import ETA, Ticker, delta_str, since, start
 
@@ -42,7 +43,7 @@ _PHASE_ACTIONS = {
 class ProgressTracker:
     """Tracks loading progress with timing and ETA for each phase."""
 
-    def __init__(self, lg: Any) -> None:
+    def __init__(self, lg: Logger) -> None:
         self._lg = lg
         self._start_times: dict[str, float] = {}
         self._last_logged: dict[str, int] = {}
@@ -114,7 +115,7 @@ class ProgressTracker:
 # ---------------------------------------------------------------------------
 
 
-def create_engine(lg: Any, config: InferenceConfig) -> Any:
+def create_engine(lg: Logger, config: InferenceConfig) -> Any:
     """Create engine from configuration.
 
     Uses factory pattern to dispatch to native or vLLM engine based on
@@ -144,7 +145,7 @@ def create_engine(lg: Any, config: InferenceConfig) -> Any:
     return engine
 
 
-def create_handler(lg: Any, engine: Any, config: InferenceConfig) -> Any:
+def create_handler(lg: Logger, engine: Any, config: InferenceConfig) -> Any:
     """Create a request handler for the engine using factory pattern."""
     factory = get_handler_factory(config.dispatch.handler)
     return factory.create(lg, engine, config)
@@ -167,7 +168,7 @@ class BootSequence:
         6. run_loop() - Process requests until shutdown
     """
 
-    def __init__(self, config: InferenceConfig, lg: Any) -> None:
+    def __init__(self, config: InferenceConfig, lg: Logger) -> None:
         self._config = config
         self._lg = lg
 
@@ -375,7 +376,8 @@ class BootSequence:
         )
         routes_builder = self._add_lora_routes(routes_builder)
 
-        return (
+        return cast(
+            Server,
             routes_builder.done()
             .subprocess.with_ipc(self._request_q, self._response_q)
             .with_log_file(cfg.log_file)
@@ -387,7 +389,7 @@ class BootSequence:
             .with_log_level(cfg.uvicorn.log_level)
             .with_access_log(cfg.uvicorn.access_log)
             .done()
-            .build()
+            .build(),
         )
 
     def _install_signal_handlers(self) -> None:
@@ -462,7 +464,7 @@ class BootSequence:
 # ---------------------------------------------------------------------------
 
 
-def run_server(lg: Any, config: InferenceConfig) -> None:
+def run_server(lg: Logger, config: InferenceConfig) -> None:
     """Run the inference server.
 
     Args:

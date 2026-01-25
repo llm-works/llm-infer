@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove `importlib.util` hack from `llm_infer.api` module
 
 ### Added
+- PEP 561 `py.typed` marker for type checker support in downstream packages
 - `think` field in `ChatCompletionRequest` for API-level think mode control (llm-infer extension)
 - `ThinkTagNormalizer` class for streaming-safe normalization of think tags to canonical form
 - pynvml-based GPU stats for vLLM backend: device-level memory (used/total/free), model memory

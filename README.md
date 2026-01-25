@@ -1,11 +1,11 @@
 # LLM Inference Engine
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
-![CUDA](https://img.shields.io/badge/CUDA-12.x-green.svg)
+![CUDA](https://img.shields.io/badge/CUDA-12.x-blue.svg)
 ![vLLM](https://img.shields.io/badge/backend-vLLM%20%7C%20native-blue.svg)
 ![Type Hints](https://img.shields.io/badge/type%20hints-100%25-brightgreen.svg)
-[![Linting:
-Ruff](https://img.shields.io/badge/linting-ruff-yellowgreen)](https://github.com/astral-sh/ruff)
+[![Typed](https://img.shields.io/badge/typed-PEP%20561-brightgreen.svg)](https://peps.python.org/pep-0561/)
+[![Linting: Ruff](https://img.shields.io/badge/linting-ruff-brightgreen)](https://github.com/astral-sh/ruff)
 [![CI](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml/badge.svg)](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 

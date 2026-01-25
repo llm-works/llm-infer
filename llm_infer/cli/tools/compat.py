@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 from appinfra.app.tools import Tool, ToolConfig
+from appinfra.log import Logger
 
 from ...compat import check_spec_accuracy, generate_compat_spec, get_spec_header
 
@@ -69,6 +70,12 @@ class CompatTool(Tool):
         self._add_generate_args(subparsers)
         self._add_check_args(subparsers)
 
+    @property
+    def _lg(self) -> Logger:
+        """Get logger with type narrowing (always set after setup)."""
+        assert self.lg is not None
+        return self.lg
+
     def run(self, **kwargs: Any) -> int:
         if self.args.command in ("generate", "gen"):
             return self._generate()
@@ -76,7 +83,7 @@ class CompatTool(Tool):
             return self._check()
         else:
             # No subcommand - show help
-            self.lg.error("no command specified, use 'generate' or 'check'")
+            self._lg.error("no command specified, use 'generate' or 'check'")
             return 1
 
     def _serialize_spec(self, spec: dict) -> str:
@@ -92,12 +99,12 @@ class CompatTool(Tool):
         """Generate compatibility spec."""
         template_path = self._get_template_path()
         try:
-            spec = generate_compat_spec(self.lg, template_path)
+            spec = generate_compat_spec(self._lg, template_path)
         except FileNotFoundError:
-            self.lg.error("template file not found: compat_template.yaml")
+            self._lg.error("template file not found: compat_template.yaml")
             return 1
         except yaml.YAMLError as e:
-            self.lg.error(f"template parse error: {e}")
+            self._lg.error(f"template parse error: {e}")
             return 1
 
         output = self._serialize_spec(spec)
@@ -105,9 +112,9 @@ class CompatTool(Tool):
             try:
                 with open(self.args.output, "w") as f:
                     f.write(output)
-                self.lg.info(f"spec written to {self.args.output}")
+                self._lg.info(f"spec written to {self.args.output}")
             except OSError as e:
-                self.lg.error(f"failed to write file: {e}")
+                self._lg.error(f"failed to write file: {e}")
                 return 1
         else:
             sys.stdout.write(output)
@@ -117,14 +124,14 @@ class CompatTool(Tool):
         """Verify spec file matches implementation."""
         spec_file = getattr(self.args, "file", None)
         template_path = self._get_template_path()
-        is_valid, issues = check_spec_accuracy(self.lg, spec_file, template_path)
+        is_valid, issues = check_spec_accuracy(self._lg, spec_file, template_path)
 
         if is_valid:
             target = spec_file or "template"
-            self.lg.info(f"spec {target} is accurate")
+            self._lg.info(f"spec {target} is accurate")
             return 0
         else:
-            self.lg.error("spec has discrepancies")
+            self._lg.error("spec has discrepancies")
             for issue in issues:
-                self.lg.warning(f"  - {issue}")
+                self._lg.warning(f"  - {issue}")
             return 1
