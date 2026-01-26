@@ -9,7 +9,7 @@ description = "A readable LLM inference server implementing paged attention and 
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
-    "appinfra[fastapi]",
+    "appinfra[fastapi]>=0.3.2",
     "torch>=2.0.0,<3.0.0",
     "transformers>=4.30.0,<5.0.0",
     "safetensors>=0.4.0,<1.0.0",
