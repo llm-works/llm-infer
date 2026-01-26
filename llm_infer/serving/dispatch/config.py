@@ -411,19 +411,7 @@ class InferenceConfig:
     @classmethod
     def _parse_ollama_config(cls, data: dict[str, Any]) -> OllamaConfig:
         """Parse Ollama engine configuration."""
-        return OllamaConfig(
-            model=data.get("model", ""),
-            task=data.get("task", "generate"),
-            host=data.get("host", "http://localhost:11434"),
-            timeout=data.get("timeout", 300),
-            models_path=data.get("models_path"),
-            keep_alive=data.get("keep_alive", "5m"),
-            num_ctx=data.get("num_ctx"),
-            num_gpu=data.get("num_gpu"),
-            warmup=data.get("warmup", True),
-            auto_start=data.get("auto_start", True),
-            binary_path=data.get("binary_path", "ollama"),
-        )
+        return OllamaConfig.from_dict(data)
 
     @classmethod
     def _parse_engines_config(cls, engines_data: dict[str, Any]) -> EnginesConfig:

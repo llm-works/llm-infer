@@ -9,12 +9,12 @@ configured models_path, or connect to an already-running server.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -23,30 +23,6 @@ from appinfra.log import Logger
 if TYPE_CHECKING:
     from ...context import RequestContext
     from ...serving.dispatch.config import OllamaConfig
-
-
-@dataclass
-class OllamaStreamingResult:
-    """Streaming result wrapper for Ollama generation.
-
-    Implements StreamingResultProtocol for compatibility with handlers.
-    """
-
-    _chunks: list[str] = field(default_factory=list)
-    _current_idx: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    finish_reason: str | None = None
-
-    def __iter__(self) -> Iterator[str]:
-        return self
-
-    def __next__(self) -> str:
-        if self._current_idx >= len(self._chunks):
-            raise StopIteration
-        chunk = self._chunks[self._current_idx]
-        self._current_idx += 1
-        return chunk
 
 
 class OllamaStreamingIterator:
@@ -129,9 +105,10 @@ class OllamaStreamingIterator:
         Handles both /api/generate and /api/chat response formats:
         - generate: {"response": "text", "done": false}
         - chat: {"message": {"content": "text"}, "done": false}
-        """
-        import json
 
+        Raises:
+            json.JSONDecodeError: If line contains malformed JSON.
+        """
         if not line.strip():
             return None
         data = json.loads(line)
@@ -164,6 +141,14 @@ class OllamaStreamingIterator:
             self._finished = True
             self._cleanup()
             raise
+        except json.JSONDecodeError as e:
+            self._lg.warning(
+                "malformed JSON in stream response",
+                extra={"line": line[:100], "exception": e},
+            )
+            self._finished = True
+            self._cleanup()
+            raise RuntimeError(f"Ollama returned malformed JSON: {e}") from e
 
 
 class OllamaEngine:
