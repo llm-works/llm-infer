@@ -184,15 +184,20 @@ class OllamaEngine:
             timeout=httpx.Timeout(config.timeout, connect=10.0),
         )
 
-        # Start server if needed and configured
-        if config.auto_start and not self._is_server_running():
-            self._start_server()
-            self._owns_process = True
+        # Initialize server and verify connection, cleaning up on failure
+        try:
+            if config.auto_start and not self._is_server_running():
+                self._start_server()
+                self._owns_process = True
 
-        # Verify connection and get model info
-        self._verify_connection()
-        self._model_info = self._fetch_model_info()
-        self._eos_token_id = self._extract_eos_token_id()
+            self._verify_connection()
+            self._model_info = self._fetch_model_info()
+            self._eos_token_id = self._extract_eos_token_id()
+        except Exception:
+            self._client.close()
+            if self._owns_process:
+                self._stop_server()
+            raise
 
     def _is_server_running(self) -> bool:
         """Check if Ollama server is already running."""
