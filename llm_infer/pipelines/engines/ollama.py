@@ -204,7 +204,7 @@ class OllamaEngine:
         """Check if Ollama server is already running."""
         try:
             response = self._client.get("/api/tags")
-            return response.status_code == 200
+            return response.is_success
         except httpx.HTTPError:
             return False
 
