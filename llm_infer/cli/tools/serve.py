@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
-from appinfra.log import Logger
 
 from ...models import ModelResolver
 from ...serving.dispatch.config_overrides import parse_override_args
@@ -17,12 +16,6 @@ class ServeTool(Tool):
     def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(name="serve", help_text="Start the inference server")
         super().__init__(parent, config)
-
-    @property
-    def _lg(self) -> Logger:
-        """Get logger with type narrowing (always set after setup)."""
-        assert self.lg is not None
-        return self.lg
 
     def add_args(self, parser: argparse.ArgumentParser) -> None:
         self._add_model_args(parser)
@@ -117,7 +110,7 @@ class ServeTool(Tool):
         # Use resolver for selection file parsing (lightweight, no heavy imports)
         if selection.get("path"):
             resolver = ModelResolver(
-                lg=self._lg, locations=[]
+                lg=self.lg, locations=[]
             )  # Locations not needed for selection file
             sel_name, sel_path = resolver.load_selection_file(selection["path"])
             if sel_path:
@@ -154,19 +147,19 @@ class ServeTool(Tool):
             return
         if model_cfg.task:
             config.engines.vllm.task = model_cfg.task
-            self._lg.debug("model override", extra={"task": model_cfg.task})
+            self.lg.debug("model override", extra={"task": model_cfg.task})
         if model_cfg._max_model_len_set:
             config.engines.vllm.max_model_len = model_cfg.max_model_len
-            self._lg.debug(
+            self.lg.debug(
                 "model override", extra={"max_model_len": model_cfg.max_model_len}
             )
         # Apply model-specific vLLM overrides
         for key, value in model_cfg.vllm.items():
             if hasattr(config.engines.vllm, key):
                 setattr(config.engines.vllm, key, value)
-                self._lg.debug("model vllm override", extra={key: value})
+                self.lg.debug("model vllm override", extra={key: value})
             else:
-                self._lg.warning(
+                self.lg.warning(
                     "unknown vllm config key in model override",
                     extra={"key": key, "model": model_name},
                 )
@@ -229,7 +222,7 @@ class ServeTool(Tool):
 
         model_name = self._get_model_name_early(raw_config)
         host, port, handler = self._get_server_config(raw_config)
-        self._lg.info(
+        self.lg.info(
             "starting server...",
             extra={"model": model_name, "host": host, "port": port, "handler": handler},
         )
@@ -241,7 +234,7 @@ class ServeTool(Tool):
             return 1
 
         self._apply_cli_overrides(config, model_path)
-        run_server(self._lg, config)
+        run_server(self.lg, config)
         return 0
 
     def _parse_overrides(self) -> dict[str, str] | None:
@@ -254,7 +247,7 @@ class ServeTool(Tool):
         Uses ModelResolver for unified resolution logic.
         """
         locations = self._get_model_locations()
-        resolver = ModelResolver(lg=self._lg, locations=locations)
+        resolver = ModelResolver(lg=self.lg, locations=locations)
 
         # Get selection config based on task type (--embed flag)
         task = "embed" if self.args.embed else "generate"

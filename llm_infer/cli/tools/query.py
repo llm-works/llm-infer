@@ -10,7 +10,6 @@ from collections.abc import Iterator
 from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
-from appinfra.log import Logger
 
 from ...response import ResponseProcessor, TerminalResolver
 from ...response.utf8 import Utf8StreamBuffer
@@ -24,12 +23,6 @@ class QueryTool(Tool):
             name="query", aliases=["q"], help_text="Query the running inference server"
         )
         super().__init__(parent, config)
-
-    @property
-    def _lg(self) -> Logger:
-        """Get logger with type narrowing (always set after setup)."""
-        assert self.lg is not None
-        return self.lg
 
     def _add_connection_args(self, parser: argparse.ArgumentParser) -> None:
         """Add server connection arguments."""
@@ -101,10 +94,10 @@ class QueryTool(Tool):
         elif self.args.prompt:
             prompt = self.args.prompt
         else:
-            self._lg.error("no prompt provided, use positional argument or --stdin")
+            self.lg.error("no prompt provided, use positional argument or --stdin")
             return None
         if not prompt:
-            self._lg.error("empty prompt")
+            self.lg.error("empty prompt")
             return None
         return prompt
 
@@ -121,7 +114,7 @@ class QueryTool(Tool):
 
     def _send_request(self, url: str, payload: dict) -> dict | None:
         """Send request to server. Returns response dict or None on error."""
-        self._lg.debug("sending request", extra={"url": url, "payload": payload})
+        self.lg.debug("sending request", extra={"url": url, "payload": payload})
         try:
             req = urllib.request.Request(
                 url,
@@ -134,17 +127,17 @@ class QueryTool(Tool):
                 return result
         except urllib.error.URLError as e:
             if "Connection refused" in str(e):
-                self._lg.error(
+                self.lg.error(
                     f"cannot connect to server at {self.args.host}:{self.args.port}"
                 )
-                self._lg.info("is the server running? start with: inference serve")
+                self.lg.info("is the server running? start with: inference serve")
             else:
-                self._lg.error(f"request failed: {e}")
+                self.lg.error(f"request failed: {e}")
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
-            self._lg.error(f"server error {e.code}: {body}")
+            self.lg.error(f"server error {e.code}: {body}")
         except Exception as e:
-            self._lg.error(f"request failed: {e}")
+            self.lg.error(f"request failed: {e}")
         return None
 
     def _get_system_prompt(self) -> str | None:
@@ -271,30 +264,30 @@ class QueryTool(Tool):
     def _stream_request(self, prompt: str) -> int:
         """Send streaming request and print tokens as they arrive."""
         payload = self._build_streaming_payload(prompt)
-        self._lg.debug("sending streaming request", extra={"host": self.args.host})
+        self.lg.debug("sending streaming request", extra={"host": self.args.host})
 
         conn = None
         try:
             conn, resp = self._open_streaming_connection(payload)
             if resp.status != 200:
                 body = resp.read().decode("utf-8", errors="replace")
-                self._lg.error(f"server error {resp.status}: {body}")
+                self.lg.error(f"server error {resp.status}: {body}")
                 return 1
             self._process_sse_stream(resp)
             return 0
         except ConnectionRefusedError:
-            self._lg.error(
+            self.lg.error(
                 f"cannot connect to server at {self.args.host}:{self.args.port}"
             )
-            self._lg.info("is the server running? start with: inference serve")
+            self.lg.info("is the server running? start with: inference serve")
         except TimeoutError:
-            self._lg.error("connection timed out")
+            self.lg.error("connection timed out")
         except BrokenPipeError:
-            self._lg.error("connection closed by server")
+            self.lg.error("connection closed by server")
         except OSError as e:
-            self._lg.error(f"network error: {e}")
+            self.lg.error(f"network error: {e}")
         except Exception as e:
-            self._lg.error(f"streaming request failed: {e}")
+            self.lg.error(f"streaming request failed: {e}")
         finally:
             if conn:
                 conn.close()
@@ -325,7 +318,7 @@ class QueryTool(Tool):
         if data is None:
             return 1
 
-        self._lg.debug(
+        self.lg.debug(
             "response received",
             extra={
                 "prompt_tokens": data.get("prompt_tokens", 0),
@@ -358,15 +351,15 @@ class QueryTool(Tool):
                 data = json.loads(resp.read().decode("utf-8"))
         except urllib.error.URLError as e:
             if "Connection refused" in str(e):
-                self._lg.error(
+                self.lg.error(
                     "server not running",
                     extra={"host": self.args.host, "port": self.args.port},
                 )
             else:
-                self._lg.error("health check failed", extra={"error": str(e)})
+                self.lg.error("health check failed", extra={"error": str(e)})
             return 1
         except Exception as e:
-            self._lg.error("health check failed", extra={"error": str(e)})
+            self.lg.error("health check failed", extra={"error": str(e)})
             return 1
 
         if self.args.json:
@@ -374,7 +367,7 @@ class QueryTool(Tool):
         else:
             status = data.get("status", "unknown")
             if status == "ok":
-                self._lg.info("server ready", extra={"status": status})
+                self.lg.info("server ready", extra={"status": status})
             else:
-                self._lg.info("server initializing", extra={"status": status})
+                self.lg.info("server initializing", extra={"status": status})
         return 0
