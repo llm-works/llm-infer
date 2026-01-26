@@ -1296,7 +1296,7 @@ returned the response, the context manager had no references and was garbage col
 GC'd the context manager, it called `__exit__()` which closed the underlying stream.
 
 This caused `httpx.StreamClosed` when trying to iterate:
-```
+```text
 httpx.StreamClosed: Attempted to read or stream content, but the stream has been closed.
 ```
 

@@ -137,6 +137,9 @@ class OllamaStreamingIterator:
             while True:
                 line = next(self._line_iter)
                 if result := self._process_stream_line(line):
+                    # Clean up if this was the final chunk (done=true with content)
+                    if self._finished:
+                        self._cleanup()
                     return result
         except StopIteration:
             self._finished = True
@@ -189,7 +192,6 @@ class OllamaEngine:
         try:
             if config.auto_start and not self._is_server_running():
                 self._start_server()
-                self._owns_process = True
 
             self._verify_connection()
             self._model_info = self._fetch_model_info()
@@ -233,6 +235,8 @@ class OllamaEngine:
             stderr=subprocess.DEVNULL,
             start_new_session=True,  # Detach from parent process group
         )
+        # Mark ownership immediately so cleanup works if _wait_for_server() fails
+        self._owns_process = True
 
         # Wait for server to be ready
         self._wait_for_server()
