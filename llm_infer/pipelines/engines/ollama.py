@@ -10,6 +10,7 @@ configured models_path, or connect to an already-running server.
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import subprocess
@@ -78,8 +79,8 @@ class OllamaStreamingIterator:
         if self._stream_context is not None:
             try:
                 self._stream_context.__exit__(None, None, None)
-            except Exception:
-                pass
+            except Exception as e:
+                self._lg.debug("cleanup exception suppressed", extra={"exception": e})
             self._stream_context = None
             self._response = None
 
@@ -345,9 +346,15 @@ class OllamaEngine:
         return len(tokens)
 
     def tokenize(self, text: str, use_chat_template: bool | None = None) -> list[int]:
-        """Tokenize text using Ollama's tokenize API."""
+        """Tokenize text using Ollama's tokenize API.
+
+        Note: When Ollama's tokenize API is unavailable (common), returns an
+        estimated token count as a list of sequential integers. These are NOT
+        real token IDs - only use len() of the result for counting purposes.
+        """
         # Skip if we already know tokenize is not supported (expected for Ollama)
         if self._tokenize_available is False:
+            # Return sequential ints for length estimation only - not real token IDs
             return list(range(len(text) // 4))
 
         # Note: use_chat_template is handled by Ollama internally based on model
@@ -410,6 +417,28 @@ class OllamaEngine:
         model_lower = self._config.model.lower()
         return "instruct" in model_lower or "chat" in model_lower
 
+    def _post_json(self, endpoint: str, payload: dict[str, Any], operation: str) -> Any:
+        """POST JSON to Ollama API with error handling.
+
+        Args:
+            endpoint: API endpoint (e.g., "/api/generate").
+            payload: JSON payload to send.
+            operation: Operation name for error messages (e.g., "generate").
+
+        Returns:
+            Parsed JSON response.
+
+        Raises:
+            RuntimeError: If the request fails.
+        """
+        try:
+            response = self._client.post(endpoint, json=payload)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            self._lg.error(f"{operation} request failed", extra={"exception": e})
+            raise RuntimeError(f"Ollama {operation} failed: {e}") from e
+        return response.json()
+
     # -------------------------------------------------------------------------
     # InferenceEngineProtocol: Generation methods
     # -------------------------------------------------------------------------
@@ -465,10 +494,7 @@ class OllamaEngine:
             stop_sequences=stop_sequences,
             stream=False,
         )
-
-        response = self._client.post("/api/generate", json=payload)
-        response.raise_for_status()
-        data = response.json()
+        data = self._post_json("/api/generate", payload, "generate")
         result: str = data.get("response", "")
         return result
 
@@ -502,9 +528,7 @@ class OllamaEngine:
         if self._config.keep_alive:
             payload["keep_alive"] = self._config.keep_alive
 
-        response = self._client.post("/api/chat", json=payload)
-        response.raise_for_status()
-        data = response.json()
+        data = self._post_json("/api/chat", payload, "chat")
         content: str = data.get("message", {}).get("content", "")
         return content
 
@@ -654,19 +678,12 @@ class OllamaEngine:
         Returns:
             Tuple of (embeddings list, total tokens).
         """
-        import math
-
         embeddings: list[list[float]] = []
         total_tokens = 0
 
         for text in inputs:
-            response = self._client.post(
-                "/api/embeddings",
-                json={"model": self._config.model, "prompt": text},
-            )
-            response.raise_for_status()
-            data = response.json()
-
+            payload = {"model": self._config.model, "prompt": text}
+            data = self._post_json("/api/embeddings", payload, "embedding")
             embedding = data.get("embedding", [])
 
             if dimensions is not None and len(embedding) > dimensions:
