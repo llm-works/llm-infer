@@ -407,7 +407,9 @@ class OllamaEngine:
         if self._eos_token_id is not None:
             stop_ids.add(self._eos_token_id)
 
-        if stop_sequences:
+        # Only tokenize stop sequences if real tokenizer is available
+        # (fallback returns fake sequential IDs starting at 0, which would be wrong)
+        if stop_sequences and self._tokenize_available:
             for seq in stop_sequences:
                 tokens = self.tokenize(seq, use_chat_template=False)
                 if tokens:
