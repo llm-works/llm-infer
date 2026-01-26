@@ -94,7 +94,7 @@ class VLLMEngineFactory(EngineFactory):
         self, lg: Logger, config: InferenceConfig, on_progress: Any = None
     ) -> Any:
         try:
-            from ...pipelines.engines.vllm_engine import VLLMEngine
+            from ...pipelines.engines.vllm import VLLMEngine
         except ImportError as e:
             raise ImportError(
                 "vLLM engine requested (backends.engine=vllm) but vLLM is not installed. "
@@ -113,10 +113,64 @@ class VLLMEngineFactory(EngineFactory):
         return 1
 
 
+class OllamaEngineFactory(EngineFactory):
+    """Factory for Ollama-backed inference engine."""
+
+    def _get_ollama_model_name(self, lg: Logger, config: InferenceConfig) -> str:
+        """Get Ollama model name from model config.
+
+        Resolution: models.yaml 'ollama' field > engines.ollama.model > model name as-is.
+        """
+        from pathlib import Path
+
+        model_name = Path(config.models.path).name if config.models.path else None
+
+        # Look up model config to get Ollama-specific name
+        if model_name and (ollama_name := config.models.get(model_name).ollama):
+            lg.debug(
+                "resolved ollama model",
+                extra={"model": model_name, "ollama": ollama_name},
+            )
+            return ollama_name
+
+        # Fall back to engines.ollama.model if set
+        if config.engines.ollama.model:
+            return config.engines.ollama.model
+
+        # Fall back to model name as-is
+        if model_name:
+            lg.warning(
+                "no ollama field in model config, using as-is",
+                extra={"model": model_name},
+            )
+            return model_name
+
+        raise ValueError(
+            "Model name required for Ollama. Set --model with 'ollama' field in models.yaml."
+        )
+
+    def create(
+        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
+    ) -> Any:
+        from ...pipelines.engines.ollama import OllamaEngine
+
+        ollama_model = self._get_ollama_model_name(lg, config)
+        ollama_cfg = replace(config.engines.ollama, model=ollama_model)
+        return OllamaEngine(lg, ollama_cfg)
+
+    def warmup_enabled(self, config: InferenceConfig) -> bool:
+        return config.engines.ollama.warmup
+
+    def max_batch_size(self, config: InferenceConfig) -> int:
+        # Ollama handles batching internally
+        return 1
+
+
 # Engine factory registry
 ENGINE_FACTORIES: dict[str, EngineFactory] = {
     "native": NativeEngineFactory(),
     "vllm": VLLMEngineFactory(),
+    "ollama": OllamaEngineFactory(),
 }
 
 

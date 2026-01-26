@@ -47,6 +47,7 @@ class ModelConfig:
     system_prompt: str | None = None
     think: ThinkConfig = field(default_factory=ThinkConfig)
     vllm: dict[str, Any] = field(default_factory=dict)  # vLLM-specific overrides
+    ollama: str | None = None  # Ollama model name (e.g., "llama3.2:8b", "qwen2.5:7b")
 
     # Sentinel to distinguish "not set" from "explicitly set to None"
     _max_model_len_set: bool = field(default=False, repr=False)
@@ -63,6 +64,7 @@ class ModelConfig:
             system_prompt=data.get("system_prompt"),
             think=ThinkConfig.from_dict(think_data),
             vllm=data.get("vllm") or {},
+            ollama=data.get("ollama"),
         )
 
 

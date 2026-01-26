@@ -94,7 +94,12 @@ class StreamingGenerator(ABC):
 
 
 class ChatStreamingGenerator(StreamingGenerator):
-    """Streaming generator for chat completions."""
+    """Streaming generator for chat completions.
+
+    Note: Think tags stream inline in content (not separated into thinking field).
+    This matches vLLM behavior and allows clients to parse tags themselves.
+    The normalizer only converts tag variants (e.g. <thinking> -> <think>).
+    """
 
     def __init__(
         self,

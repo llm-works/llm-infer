@@ -48,16 +48,79 @@ class BackendsConfig:
     """Backend selection configuration.
 
     Multi-level backend selection for flexibility in inference optimization:
-    - engine: Full inference engine (native | vllm)
+    - engine: Full inference engine (native | vllm | ollama)
     - model: Model implementation (native | gptqmodel) - only if engine=native
     - linear: Kernel implementation (pytorch | marlin) - only if model=native
 
     Higher levels override lower levels.
     """
 
-    engine: str = "native"  # native | vllm
+    engine: str = "native"  # native | vllm | ollama
     model: str = "native"  # native | gptqmodel
     linear: str = "pytorch"  # pytorch | marlin
+
+
+@dataclass
+class OllamaConfig:
+    """Ollama engine configuration.
+
+    Configuration for the Ollama backend. llm-infer will automatically
+    start/stop the Ollama server with the configured models_path.
+    """
+
+    # Model name (as known to Ollama, e.g., "llama3.2", "qwen2.5:7b")
+    model: str = ""
+
+    # Task mode: "generate" for LLM, "embed" for embedding models
+    task: str = "generate"
+
+    # Server connection
+    host: str = "http://localhost:11434"
+    timeout: int = 300  # Request timeout in seconds
+
+    # Model storage path (sets OLLAMA_MODELS when starting server)
+    models_path: str | None = None
+
+    # Model lifecycle
+    keep_alive: str | None = (
+        "5m"  # How long to keep model loaded (e.g., "5m", "1h", "0" to unload immediately)
+    )
+
+    # Generation options
+    num_ctx: int | None = None  # Context window size (None = model default)
+    num_gpu: int | None = None  # Number of GPU layers (None = auto, 0 = CPU only)
+
+    # Warmup
+    warmup: bool = True  # Run warmup query on startup
+
+    # Server management
+    auto_start: bool = True  # Automatically start Ollama server if not running
+    binary_path: str = "ollama"  # Path to ollama binary
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], model: str = "") -> "OllamaConfig":
+        """Create config from dictionary (ollama section of config file).
+
+        Args:
+            data: Dictionary with Ollama config values.
+            model: Model name (from CLI or config).
+
+        Returns:
+            OllamaConfig instance with values from dict, defaults for missing keys.
+        """
+        return cls(
+            model=model or data.get("model", ""),
+            task=data.get("task", "generate"),
+            host=data.get("host", "http://localhost:11434"),
+            timeout=data.get("timeout", 300),
+            models_path=data.get("models_path"),
+            keep_alive=data.get("keep_alive", "5m"),
+            num_ctx=data.get("num_ctx"),
+            num_gpu=data.get("num_gpu"),
+            warmup=data.get("warmup", True),
+            auto_start=data.get("auto_start", True),
+            binary_path=data.get("binary_path", "ollama"),
+        )
 
 
 @dataclass
@@ -207,6 +270,7 @@ class EnginesConfig:
 
     native: NativeEngineConfig = field(default_factory=NativeEngineConfig)
     vllm: VLLMConfig = field(default_factory=VLLMConfig)
+    ollama: OllamaConfig = field(default_factory=OllamaConfig)
 
 
 @dataclass
@@ -345,11 +409,29 @@ class InferenceConfig:
         )
 
     @classmethod
+    def _parse_ollama_config(cls, data: dict[str, Any]) -> OllamaConfig:
+        """Parse Ollama engine configuration."""
+        return OllamaConfig(
+            model=data.get("model", ""),
+            task=data.get("task", "generate"),
+            host=data.get("host", "http://localhost:11434"),
+            timeout=data.get("timeout", 300),
+            models_path=data.get("models_path"),
+            keep_alive=data.get("keep_alive", "5m"),
+            num_ctx=data.get("num_ctx"),
+            num_gpu=data.get("num_gpu"),
+            warmup=data.get("warmup", True),
+            auto_start=data.get("auto_start", True),
+            binary_path=data.get("binary_path", "ollama"),
+        )
+
+    @classmethod
     def _parse_engines_config(cls, engines_data: dict[str, Any]) -> EnginesConfig:
         """Parse engines configuration section."""
         return EnginesConfig(
             native=cls._parse_native_config(engines_data.get("native", {}) or {}),
             vllm=cls._parse_vllm_config(engines_data.get("vllm", {}) or {}),
+            ollama=cls._parse_ollama_config(engines_data.get("ollama", {}) or {}),
         )
 
     def apply_env_overrides(self) -> "InferenceConfig":
