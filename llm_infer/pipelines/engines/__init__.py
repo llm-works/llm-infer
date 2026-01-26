@@ -7,7 +7,9 @@ This module provides different inference engine backends:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from appinfra.log import Logger
 
 if TYPE_CHECKING:
     from ..engine import InferenceEngine
@@ -17,16 +19,16 @@ __all__ = ["create_engine", "VLLMEngine"]
 
 
 def create_engine(
+    lg: Logger,
     engine_type: str,
     config: dict,
-    lg: Any = None,
 ) -> InferenceEngine | VLLMEngine:
     """Create an inference engine based on type.
 
     Args:
+        lg: Logger instance.
         engine_type: Engine type ("native" or "vllm")
         config: Configuration dictionary
-        lg: Optional logger
 
     Returns:
         Initialized engine instance
@@ -38,10 +40,10 @@ def create_engine(
     if engine_type == "vllm":
         from .vllm_engine import VLLMEngine
 
-        return VLLMEngine.from_config(config, lg)
+        return VLLMEngine.from_config(lg, config)
     elif engine_type == "native":
         from .native import create_native_engine
 
-        return create_native_engine(config, lg)
+        return create_native_engine(lg, config)
     else:
         raise ValueError(f"Unknown engine type: {engine_type}. Use 'native' or 'vllm'.")

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
+
 if TYPE_CHECKING:
     from ..engine import InferenceEngine
 
@@ -49,16 +51,11 @@ def _build_engine_config(config: dict[str, Any]) -> tuple[Any, Any]:
     return engine_cfg, model_path
 
 
-def create_native_engine(config: dict[str, Any], lg: Any = None) -> InferenceEngine:
+def create_native_engine(lg: Logger, config: dict[str, Any]) -> InferenceEngine:
     """Create native inference engine from config dictionary."""
+    from ...serving.dispatch.main import ProgressTracker
     from ..engine import InferenceEngine
 
     engine_cfg, _ = _build_engine_config(config)
-
-    on_progress = None
-    if lg:
-        from ...serving.dispatch.main import ProgressTracker
-
-        on_progress = ProgressTracker(lg)
-
+    on_progress = ProgressTracker(lg)
     return InferenceEngine(lg, engine_cfg, on_progress=on_progress)
