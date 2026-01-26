@@ -204,7 +204,10 @@ class OllamaEngine:
         """Check if Ollama server is already running."""
         try:
             response = self._client.get("/api/tags")
-            return response.is_success
+            # Use raise_for_status() instead of checking status_code or is_success
+            # to avoid mypy [no-any-return] when httpx types aren't available
+            response.raise_for_status()
+            return True
         except httpx.HTTPError:
             return False
 
