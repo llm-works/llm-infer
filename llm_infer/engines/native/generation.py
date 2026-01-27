@@ -5,11 +5,11 @@ from collections.abc import Sequence
 import torch
 from torch import Tensor
 
-from ..context import Event
-from ..primitives.guards import GenerationGuard
-from ..primitives.kv_cache import BlockPool
-from ..primitives.sampler import sample
+from ...context import Event
+from .guards import GenerationGuard
+from .kv_cache import BlockPool
 from .model import TransformerModel
+from .sampler import sample
 from .scheduler import Request, RequestState
 
 

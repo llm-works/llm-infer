@@ -1,4 +1,4 @@
-"""Engine implementations.
+"""Engine implementations and factory.
 
 This module provides different inference engine backends:
 - NativeEngine: Custom implementation for learning/reference (default)
@@ -12,12 +12,20 @@ from typing import TYPE_CHECKING
 
 from appinfra.log import Logger
 
+from .protocol import InferenceEngineProtocol, StreamingResultProtocol
+
 if TYPE_CHECKING:
-    from ..engine import InferenceEngine
+    from .native.engine import InferenceEngine
     from .ollama import OllamaEngine
     from .vllm import VLLMEngine
 
-__all__ = ["create_engine", "VLLMEngine", "OllamaEngine"]
+__all__ = [
+    "create_engine",
+    "InferenceEngineProtocol",
+    "StreamingResultProtocol",
+    "VLLMEngine",
+    "OllamaEngine",
+]
 
 
 def _resolve_ollama_model(config: dict) -> str:
@@ -57,7 +65,7 @@ def create_engine(
 
         return VLLMEngine.from_config(lg, config)
     elif engine_type == "ollama":
-        from ...serving.dispatch.config import OllamaConfig
+        from ..serving.dispatch.config import OllamaConfig
         from .ollama import OllamaEngine
 
         model_name = _resolve_ollama_model(config)

@@ -3,9 +3,9 @@
 import pytest
 import torch
 
-from llm_infer.primitives.attention.backends.naive import NaiveAttentionBackend
-from llm_infer.primitives.kv_cache.pool import BlockPool
-from llm_infer.primitives.kv_cache.sequence import SequenceKVCache
+from llm_infer.engines.native.attention.backends.naive import NaiveAttentionBackend
+from llm_infer.engines.native.kv_cache.pool import BlockPool
+from llm_infer.engines.native.kv_cache.sequence import SequenceKVCache
 
 pytestmark = pytest.mark.unit
 

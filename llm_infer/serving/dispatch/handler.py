@@ -37,7 +37,7 @@ def _stable_adapter_id(adapter_id: str) -> int:
 if TYPE_CHECKING:
     from appinfra.log import Logger
 
-    from ...primitives.protocols import InferenceEngineProtocol
+    from ...engines.protocol import InferenceEngineProtocol
     from ..adapters import AdapterManager
 
 

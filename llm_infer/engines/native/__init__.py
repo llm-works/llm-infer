@@ -1,7 +1,11 @@
-"""Native engine factory wrapper.
+"""Native inference engine.
 
-This module provides a factory function for creating the native inference engine,
-maintaining compatibility with the engines module interface.
+This module provides the custom native inference engine implementation,
+used for learning/reference. It includes all the building blocks:
+- Transformer model with paged attention
+- KV cache management
+- Tokenization
+- Sampling
 """
 
 from __future__ import annotations
@@ -11,7 +15,39 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 
 if TYPE_CHECKING:
-    from ..engine import InferenceEngine
+    from .engine import InferenceEngine
+
+from .config import EngineConfig
+from .engine import InferenceEngine, StreamingResult
+from .generation import run_decode, run_prefill
+from .model import (
+    ModelArchitecture,
+    TransformerConfig,
+    TransformerModel,
+    get_architecture,
+)
+from .scheduler import Request, RequestState, Scheduler
+
+__all__ = [
+    # Factory
+    "create_native_engine",
+    # Engine
+    "EngineConfig",
+    "InferenceEngine",
+    "StreamingResult",
+    # Generation
+    "run_decode",
+    "run_prefill",
+    # Model
+    "ModelArchitecture",
+    "TransformerConfig",
+    "TransformerModel",
+    "get_architecture",
+    # Scheduler
+    "Request",
+    "RequestState",
+    "Scheduler",
+]
 
 
 def _parse_dtype(dtype_str: str) -> Any:
@@ -25,15 +61,12 @@ def _parse_dtype(dtype_str: str) -> Any:
     }.get(dtype_str, torch.float16)
 
 
-def _build_engine_config(config: dict[str, Any]) -> tuple[Any, Any]:
+def _build_engine_config(config: dict[str, Any]) -> tuple[EngineConfig, str]:
     """Build EngineConfig from config dict. Returns (engine_config, model_path)."""
-    from ..config import EngineConfig
-    from ..model import ModelConfig
-
     model_path = config.get("model", {}).get("path", "")
     backends = config.get("backends", {})
     engine = config.get("engine", {})
-    model_config = ModelConfig.from_hf_config(model_path)
+    model_config = TransformerConfig.from_hf_config(model_path)
 
     engine_cfg = EngineConfig(
         model=model_config,
@@ -54,7 +87,6 @@ def _build_engine_config(config: dict[str, Any]) -> tuple[Any, Any]:
 def create_native_engine(lg: Logger, config: dict[str, Any]) -> InferenceEngine:
     """Create native inference engine from config dictionary."""
     from ...serving.dispatch.main import ProgressTracker
-    from ..engine import InferenceEngine
 
     engine_cfg, _ = _build_engine_config(config)
     on_progress = ProgressTracker(lg)

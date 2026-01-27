@@ -48,7 +48,7 @@ class NativeEngineFactory(EngineFactory):
     def create(
         self, lg: Logger, config: InferenceConfig, on_progress: Any = None
     ) -> Any:
-        from ...pipelines import EngineConfig, InferenceEngine, ModelConfig
+        from ...engines.native import EngineConfig, InferenceEngine, TransformerConfig
 
         if config.models.path is None:
             raise ValueError(
@@ -57,7 +57,7 @@ class NativeEngineFactory(EngineFactory):
             )
         native_cfg = config.engines.native
         model_path = str(config.models.path)
-        model_config = ModelConfig.from_hf_config(model_path)
+        model_config = TransformerConfig.from_hf_config(model_path)
         engine_config = EngineConfig(
             model=model_config,
             model_path=model_path,
@@ -94,7 +94,7 @@ class VLLMEngineFactory(EngineFactory):
         self, lg: Logger, config: InferenceConfig, on_progress: Any = None
     ) -> Any:
         try:
-            from ...pipelines.engines.vllm import VLLMEngine
+            from ...engines.vllm import VLLMEngine
         except ImportError as e:
             raise ImportError(
                 "vLLM engine requested (backends.engine=vllm) but vLLM is not installed. "
@@ -153,7 +153,7 @@ class OllamaEngineFactory(EngineFactory):
         self, lg: Logger, config: InferenceConfig, on_progress: Any = None
     ) -> Any:
         try:
-            from ...pipelines.engines.ollama import OllamaEngine
+            from ...engines.ollama import OllamaEngine
         except ImportError as e:
             raise ImportError(
                 "Ollama engine requested (backends.engine=ollama) but httpx is not installed. "

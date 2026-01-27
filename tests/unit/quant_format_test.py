@@ -2,7 +2,7 @@
 
 import pytest
 
-from llm_infer.backends.linear.formats import QuantFormat
+from llm_infer.engines.native.backends.linear.formats import QuantFormat
 
 pytestmark = pytest.mark.unit
 

@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from llm_infer.primitives.sampler.sampler import (
+from llm_infer.engines.native.sampler.sampler import (
     _apply_repetition_penalty,
     _apply_top_k,
     _apply_top_p,

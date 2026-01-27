@@ -5,9 +5,11 @@ import pytest
 import torch
 from appinfra.log import create_lg
 
-from llm_infer.backends.linear.formats import QuantFormat
-from llm_infer.backends.linear.kernels.awq_pytorch import PyTorchAWQBackend
-from llm_infer.pipelines.model.layers import AWQLinear
+from llm_infer.engines.native.backends.linear.formats import QuantFormat
+from llm_infer.engines.native.backends.linear.kernels.awq_pytorch import (
+    PyTorchAWQBackend,
+)
+from llm_infer.engines.native.model.layers import AWQLinear
 
 pytestmark = pytest.mark.unit
 

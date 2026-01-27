@@ -9,8 +9,12 @@ from typing import Any
 
 
 @dataclass
-class ModelConfig:
-    """Configuration for a transformer model."""
+class TransformerConfig:
+    """Configuration for a transformer model architecture.
+
+    Parsed from HuggingFace config.json. Contains architectural details
+    like layer count, dimensions, and quantization settings.
+    """
 
     num_layers: int
     num_heads: int
@@ -43,7 +47,7 @@ class ModelConfig:
     quant_group_size: int = 128  # Typically 128 for AWQ
 
     @classmethod
-    def from_name(cls, name: str) -> ModelConfig:
+    def from_name(cls, name: str) -> TransformerConfig:
         """Load config for a known model architecture."""
         # fmt: off
         configs = {
@@ -69,7 +73,9 @@ class ModelConfig:
             return result
 
     @classmethod
-    def from_hf_config(cls, model_path: str | Path) -> ModelConfig:  # cq: max-lines=35
+    def from_hf_config(  # cq: max-lines=35
+        cls, model_path: str | Path
+    ) -> TransformerConfig:
         """Load config from HuggingFace model directory."""
         from .architecture import get_config_defaults
 

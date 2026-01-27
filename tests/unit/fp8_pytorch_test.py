@@ -4,9 +4,11 @@ import pytest
 import torch
 from appinfra.log import create_lg
 
-from llm_infer.backends.linear.formats import QuantFormat
-from llm_infer.backends.linear.formats.fp8 import FP8Weights
-from llm_infer.backends.linear.kernels.fp8_pytorch import PyTorchFP8Backend
+from llm_infer.engines.native.backends.linear.formats import QuantFormat
+from llm_infer.engines.native.backends.linear.formats.fp8 import FP8Weights
+from llm_infer.engines.native.backends.linear.kernels.fp8_pytorch import (
+    PyTorchFP8Backend,
+)
 
 pytestmark = pytest.mark.unit
 

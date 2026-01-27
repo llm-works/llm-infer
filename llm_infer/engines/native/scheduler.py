@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from ..primitives.kv_cache import BlockPool, SequenceKVCache
+from .kv_cache import BlockPool, SequenceKVCache
 
 if TYPE_CHECKING:
-    from ..context import RequestContext
+    from ...context import RequestContext
 
 
 class RequestState(Enum):

@@ -22,8 +22,8 @@ import httpx
 from appinfra.log import Logger
 
 if TYPE_CHECKING:
-    from ...context import RequestContext
-    from ...serving.dispatch.config import OllamaConfig
+    from ..context import RequestContext
+    from ..serving.dispatch.config import OllamaConfig
 
 
 class OllamaStreamingIterator:
