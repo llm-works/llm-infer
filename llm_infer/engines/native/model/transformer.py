@@ -29,9 +29,10 @@ Memory efficiency:
     while dtype conversion on GPU doubles memory usage temporarily.
 
 Example:
-    >>> from llm_infer.engines.native import TransformerConfig, TransformerModel
+    >>> from llm_infer.engines.native import TransformerConfig, TransformerModel, get_architecture
     >>> config = TransformerConfig.from_hf_config("/path/to/model")
-    >>> model = TransformerModel(config, "/path/to/model", device="cuda")
+    >>> arch = get_architecture(lg, config)
+    >>> model = TransformerModel(config, arch, "/path/to/model", device="cuda")
 """
 
 from collections.abc import Callable
