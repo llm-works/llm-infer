@@ -383,6 +383,24 @@ class TestOllamaEngineFactoryGetModelName:
         with pytest.raises(ValueError, match="Model name required"):
             factory._get_ollama_model_name(mock_lg, config)
 
+    def test_falls_back_when_model_not_in_models_yaml(self) -> None:
+        """Test fallback when model isn't defined in models.yaml."""
+        from llm_infer.serving.dispatch.factories import OllamaEngineFactory
+
+        factory = OllamaEngineFactory()
+        mock_lg = MagicMock()
+
+        # Model not in models.yaml - models.get() returns config with ollama=None
+        config = MagicMock()
+        config.models.path = "/models/unknown-model"
+        config.models.get.return_value = MagicMock(ollama=None)
+        config.engines.ollama.model = "fallback:latest"
+
+        result = factory._get_ollama_model_name(mock_lg, config)
+
+        assert result == "fallback:latest"
+        config.models.get.assert_called_with("unknown-model")
+
 
 class TestOllamaEngineFactoryWarmup:
     """Test OllamaEngineFactory.warmup_enabled method."""

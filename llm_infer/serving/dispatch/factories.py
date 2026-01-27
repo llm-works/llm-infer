@@ -152,7 +152,13 @@ class OllamaEngineFactory(EngineFactory):
     def create(
         self, lg: Logger, config: InferenceConfig, on_progress: Any = None
     ) -> Any:
-        from ...pipelines.engines.ollama import OllamaEngine
+        try:
+            from ...pipelines.engines.ollama import OllamaEngine
+        except ImportError as e:
+            raise ImportError(
+                "Ollama engine requested (backends.engine=ollama) but httpx is not installed. "
+                "Install with: pip install httpx\nOr use native engine: backends.engine=native"
+            ) from e
 
         ollama_model = self._get_ollama_model_name(lg, config)
         ollama_cfg = replace(config.engines.ollama, model=ollama_model)

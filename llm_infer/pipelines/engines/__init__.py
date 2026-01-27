@@ -20,6 +20,19 @@ if TYPE_CHECKING:
 __all__ = ["create_engine", "VLLMEngine", "OllamaEngine"]
 
 
+def _resolve_ollama_model(config: dict) -> str:
+    """Resolve Ollama model name from config with validation."""
+    model_name: str = config.get("model", {}).get("name", "") or ""
+    if not model_name:
+        model_name = config.get("ollama", {}).get("model", "") or ""
+    if not model_name:
+        raise ValueError(
+            "Ollama engine requires a model name. "
+            "Set config.model.name or config.ollama.model."
+        )
+    return model_name
+
+
 def create_engine(
     lg: Logger,
     engine_type: str,
@@ -47,10 +60,8 @@ def create_engine(
         from ...serving.dispatch.config import OllamaConfig
         from .ollama import OllamaEngine
 
-        ollama_cfg = OllamaConfig.from_dict(
-            config.get("ollama", {}),
-            model=config.get("model", {}).get("name", ""),
-        )
+        model_name = _resolve_ollama_model(config)
+        ollama_cfg = OllamaConfig.from_dict(config.get("ollama", {}), model=model_name)
         return OllamaEngine(lg, ollama_cfg)
     elif engine_type == "native":
         from .native import create_native_engine

@@ -280,7 +280,7 @@ class ServeTool(Tool):
             # Try selection file/default
             task = "embed" if self.args.embed else "generate"
             selection = config.models.get_selection(task)
-            if selection and selection.default:
+            if selection.default:
                 model_name = selection.default
 
         if not model_name:
