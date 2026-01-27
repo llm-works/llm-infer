@@ -51,7 +51,9 @@ class ServeTool(Tool):
             "--handler", choices=["sequential", "bounded"], help="Request handler type"
         )
         parser.add_argument(
-            "--engine", choices=["native", "vllm"], help="Inference engine backend"
+            "--engine",
+            choices=["native", "vllm", "ollama"],
+            help="Inference engine backend",
         )
         parser.add_argument(
             "-o",
@@ -245,7 +247,15 @@ class ServeTool(Tool):
         """Resolve model path from CLI, selection file, or config default.
 
         Uses ModelResolver for unified resolution logic.
+        For Ollama engine, returns synthetic path from model name (no local validation).
         """
+        # Determine effective engine (CLI override > config)
+        engine = self.args.engine or config.backends.engine
+
+        # For Ollama, we just need the model name - Ollama manages its own files
+        if engine == "ollama":
+            return self._resolve_ollama_model_name(config)
+
         locations = self._get_model_locations()
         resolver = ModelResolver(lg=self.lg, locations=locations)
 
@@ -258,3 +268,25 @@ class ServeTool(Tool):
             model_name=self.args.model,
             selection=selection,
         )
+
+    def _resolve_ollama_model_name(self, config: Any) -> Path | None:
+        """Resolve model name for Ollama (no local file validation).
+
+        For Ollama, we return a synthetic Path from the model name.
+        The OllamaEngineFactory will look up the 'ollama' field in models.yaml.
+        """
+        model_name = self.args.model
+        if not model_name:
+            # Try selection file/default
+            task = "embed" if self.args.embed else "generate"
+            selection = config.models.get_selection(task)
+            if selection.default:
+                model_name = selection.default
+
+        if not model_name:
+            self.lg.error("no model specified for Ollama engine")
+            return None
+
+        # Return synthetic path - just the model name
+        # OllamaEngineFactory extracts .name and looks up ollama field
+        return Path(model_name)

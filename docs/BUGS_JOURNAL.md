@@ -1249,3 +1249,100 @@ Confirming that `put()` succeeds but the other side never receives narrows the p
 queue consumer or the queue itself. In this case, it pointed to appinfra's IPC listener being
 broken by the startup callback.
 
+
+### 16. Ollama Streaming Returns Empty Content (httpx Context Manager GC)
+
+**Date:** 2026-01-26
+
+**File:** `llm_infer/pipelines/engines/ollama.py`
+
+**Problem:** Streaming responses from the Ollama engine returned empty content. The SSE chunks had
+the correct structure but `content` was always `null`, with only the role announcement and
+finish_reason chunks being sent.
+
+**Symptom:**
+```json
+data: {"choices":[{"delta":{"role":"assistant","content":null}}]}
+data: {"choices":[{"delta":{"content":null},"finish_reason":"stop"}]}
+data: [DONE]
+```
+
+Expected behavior: content chunks between role announcement and finish, e.g.:
+```json
+data: {"choices":[{"delta":{"role":"assistant","content":null}}]}
+data: {"choices":[{"delta":{"content":"1"}}]}
+data: {"choices":[{"delta":{"content":"\n"}}]}
+data: {"choices":[{"delta":{"content":"2"}}]}
+...
+data: {"choices":[{"delta":{"content":null},"finish_reason":"stop"}]}
+data: [DONE]
+```
+
+**Root cause:** The `OllamaStreamingIterator` used httpx's streaming API incorrectly. When starting
+the stream, it called `__enter__()` on the context manager but didn't keep a reference to the
+context manager itself:
+
+```python
+# Buggy code
+def _start_stream(self) -> None:
+    self._response = self._client.stream(
+        "POST", self._url, json=self._payload
+    ).__enter__()  # Context manager is a temporary, gets GC'd!
+    self._line_iter = self._response.iter_lines()
+```
+
+The context manager returned by `client.stream()` was a temporary object. After `__enter__()`
+returned the response, the context manager had no references and was garbage collected. When Python
+GC'd the context manager, it called `__exit__()` which closed the underlying stream.
+
+This caused `httpx.StreamClosed` when trying to iterate:
+```text
+httpx.StreamClosed: Attempted to read or stream content, but the stream has been closed.
+```
+
+The error was silently swallowed somewhere in the call chain, resulting in the iterator yielding
+nothing.
+
+**Fix:** Store a reference to the context manager to prevent garbage collection:
+
+```python
+# Fixed code
+def __init__(self, ...):
+    self._stream_context: Any = None  # Must hold reference to prevent GC
+    self._response: httpx.Response | None = None
+    ...
+
+def _start_stream(self) -> None:
+    # Must keep reference to context manager to prevent stream from closing
+    self._stream_context = self._client.stream(
+        "POST", self._url, json=self._payload
+    )
+    self._response = self._stream_context.__enter__()
+    self._line_iter = self._response.iter_lines()
+
+def _cleanup(self) -> None:
+    if self._stream_context is not None:
+        try:
+            self._stream_context.__exit__(None, None, None)
+        except Exception:
+            pass
+        self._stream_context = None
+        self._response = None
+```
+
+**Debugging approach:**
+1. Verified Ollama API worked directly with curl - streaming worked fine
+2. Tested httpx streaming in isolation - worked fine
+3. Tested `OllamaStreamingIterator` directly in Python - got `StreamClosed` error
+4. Realized the context manager was being GC'd between `__enter__()` and iteration
+
+**Files changed:**
+- `llm_infer/pipelines/engines/ollama.py` - Fixed `OllamaStreamingIterator` context manager handling
+
+**Insight:** When using Python context managers manually (calling `__enter__()` directly instead of
+`with`), you must keep a reference to the context manager object itself, not just the value returned
+by `__enter__()`. Otherwise the context manager may be garbage collected, triggering `__exit__()`
+and
+cleaning up resources prematurely. This is especially tricky with streaming APIs where the resource
+(the HTTP connection) needs to stay open for the duration of iteration.
+

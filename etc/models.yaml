@@ -2,7 +2,7 @@
 # Matched by model name (from selected.yaml or --model)
 
 locations:
-  - !include "../.env.yaml#paths.models"
+  - !include "../.env.yaml#paths.models.huggingface"
 
 # Model selection
 # Priority: CLI --model-path > CLI --model > selection file > selection default
@@ -39,6 +39,17 @@ templates:
       default: true
       enable_suffix: null
       disable_suffix: null
+      tags:
+        open: ["<think>"]
+        close: ["</think>"]
+
+  # Ollama Qwen models - need explicit instruction (don't follow /think suffix)
+  ollama_qwen_think: &ollama_qwen_think
+    think:
+      default: false
+      enable_suffix: "\n\nBefore answering, show your reasoning inside <think></think> tags. Then give the final answer."
+      disable_suffix: null
+      system_prompt: null
       tags:
         open: ["<think>"]
         close: ["</think>"]
@@ -120,6 +131,28 @@ models:
   # ---------------------------------------------------------------------------
   deepseek-r1-distill-qwen-7b:
     <<: *deepseek_r1
+
+  # ---------------------------------------------------------------------------
+  # Ollama models
+  # ---------------------------------------------------------------------------
+  # For Ollama, the 'ollama' field specifies the Ollama model name.
+  # Use: llm-infer serve --engine ollama --model <name-below>
+  #
+  # Note: Ollama models are stored in ~/.ollama/models (or OLLAMA_MODELS path),
+  # separate from HuggingFace models in the 'locations' directories.
+
+  llama3.2-3b:
+    ollama: llama3.2:3b
+    think:
+      default: false
+
+  qwen2.5-7b:
+    ollama: qwen2.5:7b
+    <<: *ollama_qwen_think
+
+  qwen2.5-coder-7b:
+    ollama: qwen2.5-coder:7b
+    <<: *ollama_qwen_think
 
 # Defaults for models not explicitly listed
 defaults:
