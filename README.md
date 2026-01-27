@@ -26,7 +26,7 @@ with new techniques without fighting the framework.
 **For experimentation**: Streamlined developer experience through a CLI tool and YAML configuration.
 Go from model weights to running server in minutes, not hours.
 
-**For production**: When you're ready to scale, swap in vLLM as the inference backend. The
+**For production**: When you're ready to scale, swap in vLLM or Ollama as the inference backend. The
 OpenAI-compatible API means your application code stays the same—only the backend changes.
 
 ## Why This Matters

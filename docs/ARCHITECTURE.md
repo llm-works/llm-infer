@@ -179,7 +179,7 @@ The system supports multiple engine backends:
 
 **Ollama Engine** (for local development)
 - Uses Ollama for model management and inference
-- No separate Ollama server required - llm-infer can spawn and manage its own if configured
+- Requires Ollama installed on host; llm-infer can auto-start and manage the server if configured
 - Simple setup: just `ollama pull <model>` to download models
 - Good for quick experimentation without GPU configuration
 
