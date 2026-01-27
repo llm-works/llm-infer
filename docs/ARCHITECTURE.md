@@ -22,23 +22,18 @@ The system is organized into four layers:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Pipeline Layer                              │
-│                  (llm_infer/pipelines/)                         │
-│  Inference engine, scheduler, model loading, generation loop    │
+│                      Engines Layer                              │
+│                   (llm_infer/engines/)                          │
+│  Inference backends: native, vLLM, Ollama                       │
+│  Protocol interfaces for engine abstraction                     │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Primitives Layer                             │
-│                  (llm_infer/primitives/)                        │
-│  Attention backends, KV cache, tokenizer, sampler               │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Backends Layer                              │
-│                   (llm_infer/backends/)                         │
-│  Quantization kernels (AWQ, FP8), linear layer implementations  │
+│                   Native Engine Internals                       │
+│                (llm_infer/engines/native/)                      │
+│  Transformer model, scheduler, KV cache, attention, sampler     │
+│  Quantization backends (AWQ, FP8)                               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -78,63 +73,69 @@ HTTP server and request handling.
 HTTP Request → FastAPI Route → Dispatch Handler → Engine → Response
 ```
 
-### Pipeline Layer (`llm_infer/pipelines/`)
+### Engines Layer (`llm_infer/engines/`)
 
-Core inference logic.
+Inference engine implementations with a common protocol interface.
 
-**InferenceEngine** (`pipelines/engine.py`)
+**Protocol** (`engines/protocol.py`)
+- `InferenceEngineProtocol`: Common interface for all engines
+- `StreamingResultProtocol`: Streaming generation interface
+- Enables engine-agnostic handlers and serving layer
+
+**Engine Implementations:**
+- `native/`: Custom implementation for learning/research
+- `vllm.py`: vLLM wrapper for production
+- `ollama.py`: Ollama wrapper for local models
+
+### Native Engine (`llm_infer/engines/native/`)
+
+Custom inference implementation with full visibility into the pipeline.
+
+**InferenceEngine** (`native/engine.py`)
 - Orchestrates model, scheduler, and KV cache
 - Exposes `generate()` and `generate_stream()` methods
 - Manages memory and lifecycle
 
-**Scheduler** (`pipelines/scheduler.py`)
+**Scheduler** (`native/scheduler.py`)
 - Manages request queues
 - Forms batches of prefill and decode requests
 - Tracks request state
 
-**Model** (`pipelines/model/`)
+**Model** (`native/model/`)
 - `TransformerModel`: Main model class
 - `architecture.py`: Model-specific configurations (Llama, Mistral, Qwen, Granite)
 - `layers.py`: Layer implementations (attention, MLP, embeddings)
 - `config.py`: Model configuration loading from HuggingFace
 
-**Generation** (`pipelines/generation.py`)
+**Generation** (`native/generation.py`)
 - `run_prefill()`: Process prompt tokens
 - `run_decode()`: Generate one token
 - `run_decode_batch()`: Batched decode for multiple requests
 
-### Primitives Layer (`llm_infer/primitives/`)
-
-Low-level building blocks with protocol-based interfaces.
-
-**Attention** (`primitives/attention/`)
+**Attention** (`native/attention/`)
 - `AttentionBackend` protocol for swappable implementations
 - `FlashInferBackend`: Optimized CUDA kernels (recommended)
 - `NaiveBackend`: Pure PyTorch implementation (for debugging)
 - `rope.py`: Rotary position embedding implementations
 
-**KV Cache** (`primitives/kv_cache/`)
+**KV Cache** (`native/kv_cache/`)
 - `BlockPool`: Block-based memory allocator
 - `SequenceKVCache`: Per-sequence cache management
 - Implements paged attention memory model
 
-**Tokenizer** (`primitives/tokenizer/`)
+**Tokenizer** (`native/tokenizer/`)
 - `Tokenizer` protocol
 - `HuggingFaceTokenizer`: Wraps HF tokenizers with chat template support
 
-**Sampler** (`primitives/sampler/`)
+**Sampler** (`native/sampler/`)
 - Token sampling with temperature, top-p, top-k
 - Repetition penalty support
 
-**Guards** (`primitives/guards/`)
+**Guards** (`native/guards/`)
 - Generation guards that can modify or stop generation
 - `RepetitionGuard`: Detects and handles repetitive output
 
-### Backends Layer (`llm_infer/backends/`)
-
-Quantization and kernel implementations.
-
-**Linear Backends** (`backends/linear/`)
+**Quantization Backends** (`native/backends/linear/`)
 - `QuantFormat`: AWQ (4-bit) and FP8 (8-bit) formats
 - Kernel implementations:
   - `awq_pytorch.py`: Pure PyTorch AWQ (reference)
@@ -151,7 +152,7 @@ components. This enables:
 2. **Testability**: Mock implementations for unit testing
 3. **Extensibility**: Add new implementations without changing consumers
 
-Key protocols in `llm_infer/primitives/protocols.py`:
+Key protocols in `llm_infer/engines/protocol.py` and `llm_infer/engines/native/protocols.py`:
 
 | Protocol | Purpose |
 |----------|---------|
@@ -176,10 +177,16 @@ The system supports multiple engine backends:
 - Continuous batching
 - Tensor parallelism support
 
+**Ollama Engine** (for local development)
+- Uses Ollama for model management and inference
+- Requires Ollama installed on host; llm-infer can auto-start and manage the server if configured
+- Simple setup: just `ollama pull <model>` to download models
+- Good for quick experimentation without GPU configuration
+
 Select via configuration:
 ```yaml
 backends:
-  engine: native  # or vllm
+  engine: native  # or vllm, ollama
 ```
 
 ## Request Lifecycle
@@ -238,7 +245,7 @@ memory constraints.
 
 ## Adding New Model Architectures
 
-1. Create entry in `llm_infer/pipelines/model/architecture.py`:
+1. Create entry in `llm_infer/engines/native/model/architecture.py`:
    ```python
    @register_architecture("my_model")
    class MyModelArchitecture(Architecture):
@@ -259,32 +266,35 @@ llm_infer/
 ├── context.py              # Request context for tracing
 ├── compat.py               # Compatibility spec generation
 ├── logging_setup.py        # Logging configuration
-├── backends/               # Quantization backends
-│   └── linear/
-│       ├── formats/        # AWQ, FP8 format definitions
-│       └── kernels/        # Kernel implementations
 ├── cli/                    # Command-line interface
 │   ├── cli.py              # Main entry point
 │   ├── config/             # Configuration loading
 │   └── tools/              # Subcommand implementations
-├── pipelines/              # Inference pipeline
-│   ├── engine.py           # InferenceEngine
-│   ├── scheduler.py        # Request scheduling
-│   ├── generation.py       # Prefill/decode functions
-│   ├── config.py           # Engine configuration
-│   ├── engines/            # Engine backends (native, vllm)
-│   └── model/              # Model implementation
-│       ├── transformer.py  # TransformerModel
-│       ├── architecture.py # Model architectures
-│       ├── layers.py       # Layer implementations
-│       └── config.py       # Model config loading
-├── primitives/             # Core building blocks
-│   ├── protocols.py        # Protocol definitions
-│   ├── attention/          # Attention implementations
-│   ├── kv_cache/           # KV cache management
-│   ├── sampler/            # Token sampling
-│   ├── tokenizer/          # Tokenizer wrappers
-│   └── guards/             # Generation guards
+├── engines/                # Inference engines
+│   ├── __init__.py         # Engine factory (create_engine)
+│   ├── protocol.py         # InferenceEngineProtocol
+│   ├── vllm.py             # vLLM engine wrapper
+│   ├── ollama.py           # Ollama engine wrapper
+│   └── native/             # Native engine implementation
+│       ├── engine.py       # InferenceEngine
+│       ├── scheduler.py    # Request scheduling
+│       ├── generation.py   # Prefill/decode functions
+│       ├── config.py       # Engine configuration
+│       ├── protocols.py    # Internal protocol definitions
+│       ├── model/          # Model implementation
+│       │   ├── transformer.py  # TransformerModel
+│       │   ├── architecture.py # Model architectures
+│       │   ├── layers.py       # Layer implementations
+│       │   └── config.py       # Model config loading
+│       ├── attention/      # Attention implementations
+│       ├── kv_cache/       # KV cache management
+│       ├── sampler/        # Token sampling
+│       ├── tokenizer/      # Tokenizer wrappers
+│       ├── guards/         # Generation guards
+│       └── backends/       # Quantization backends
+│           └── linear/
+│               ├── formats/    # AWQ, FP8 format definitions
+│               └── kernels/    # Kernel implementations
 └── serving/                # HTTP server
     ├── api/                # FastAPI routes
     │   └── openai/         # OpenAI-compatible endpoints

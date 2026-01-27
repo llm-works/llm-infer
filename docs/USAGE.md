@@ -38,7 +38,7 @@ models:
 
 # Backend selection
 backends:
-  engine: native      # native | vllm
+  engine: native      # native | vllm | ollama
   model: native       # native | gptqmodel (only if engine=native)
   linear: marlin      # pytorch | marlin (only if model=native)
 
@@ -60,6 +60,16 @@ engines:
     tensor_parallel_size: 1
     max_num_seqs: 256
     enable_prefix_caching: true
+    warmup: true
+
+  ollama:
+    host: http://localhost:11434  # Ollama server URL
+    timeout: 300                   # Request timeout in seconds
+    models_path: /path/to/models   # Model storage (sets OLLAMA_MODELS)
+    auto_start: true               # Start Ollama server if not running
+    keep_alive: 5m                 # How long to keep model loaded
+    num_ctx: null                  # Context window (null = model default)
+    num_gpu: null                  # GPU layers (null = auto, 0 = CPU only)
     warmup: true
 
 # Request dispatch
@@ -88,6 +98,12 @@ api:
 - Tensor parallelism for multi-GPU setups
 - Prefix caching and speculative decoding
 - Drop-in replacement via `backends.engine: vllm`
+
+**Ollama Engine** - For local development:
+- Uses Ollama for model management and inference
+- Can auto-start Ollama server or connect to existing one
+- Simple model setup: `ollama pull <model>`
+- Good for quick experimentation without GPU configuration
 
 ### Quantization
 
@@ -152,7 +168,7 @@ llm-infer serve --model qwen2.5-1.5b
 
 Options:
 - `--config, -c`: Config file path (default: `etc/llm-infer.yaml`)
-- `--engine`: Inference backend (`native` | `vllm`)
+- `--engine`: Inference backend (`native` | `vllm` | `ollama`)
 - `--model-path`: Direct path to model directory
 - `--model, -m`: Model name to load
 - `--handler`: Request handler type (`sequential` | `bounded`)
@@ -375,6 +391,13 @@ for chunk in stream:
 2. **Prefix caching**: Enable for repeated prefixes
 3. **Tensor parallelism**: Use multiple GPUs with `tensor_parallel_size`
 4. **Speculative decoding**: Configure draft model for faster decoding
+
+### Ollama Engine
+
+1. **Context size**: Set `num_ctx` for larger context windows
+2. **GPU layers**: Use `num_gpu: 0` for CPU-only, or specific number for partial offload
+3. **Keep alive**: Adjust `keep_alive` to control model unloading (e.g., `"0"` to unload immediately)
+4. **Auto-start**: Set `auto_start: false` to connect to external Ollama server
 
 ## Debugging
 
