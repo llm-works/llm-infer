@@ -29,9 +29,10 @@ Memory efficiency:
     while dtype conversion on GPU doubles memory usage temporarily.
 
 Example:
-    >>> from llm_infer.model import ModelConfig, TransformerModel
-    >>> config = ModelConfig.from_hf_config("/path/to/model")
-    >>> model = TransformerModel(config, "/path/to/model", device="cuda")
+    >>> from llm_infer.engines.native import TransformerConfig, TransformerModel, get_architecture
+    >>> config = TransformerConfig.from_hf_config("/path/to/model")
+    >>> arch = get_architecture(lg, config)
+    >>> model = TransformerModel(config, arch, "/path/to/model", device="cuda")
 """
 
 from collections.abc import Callable
@@ -43,17 +44,17 @@ import torch.nn.functional as F  # noqa: N812
 from safetensors import safe_open
 from torch import Tensor, nn
 
-from ...backends.linear.formats.base import QuantizedLinearBackend
-from ...primitives.attention import (
+from ..attention import (
     apply_rope,
     get_attention_backend,
     precompute_rope_freqs,
     update_kv_cache,
 )
-from ...primitives.kv_cache import BlockPool, SequenceKVCache
-from ...primitives.protocols import AttentionBackend
+from ..backends.linear.formats.base import QuantizedLinearBackend
+from ..kv_cache import BlockPool, SequenceKVCache
+from ..protocols import AttentionBackend
 from .architecture import ModelArchitecture
-from .config import ModelConfig
+from .config import TransformerConfig
 from .layers import AWQLinear, Fp8Linear, RMSNorm
 
 
@@ -67,7 +68,7 @@ class TransformerModel(nn.Module):
     - SwiGLU activation in the MLP
     - Paged KV cache for memory-efficient inference
 
-    The model supports various configurations through ModelConfig, including
+    The model supports various configurations through TransformerConfig, including
     models where head_dim != hidden_size // num_heads (e.g., Mistral-22B).
 
     Attributes:
@@ -84,7 +85,7 @@ class TransformerModel(nn.Module):
 
     def __init__(
         self,
-        config: ModelConfig,
+        config: TransformerConfig,
         arch: ModelArchitecture,
         weights_path: str,
         device: str = "cuda",
@@ -96,7 +97,7 @@ class TransformerModel(nn.Module):
         """Initialize the transformer model.
 
         Args:
-            config: Model configuration from ModelConfig.from_hf_config()
+            config: Model configuration from TransformerConfig.from_hf_config()
             arch: Model architecture instance for forward-pass behavior
             weights_path: Path to model directory containing .safetensors files,
                 or path to a single .safetensors file

@@ -2,8 +2,8 @@
 
 import pytest
 
-from llm_infer.pipelines.scheduler import Request, RequestState, Scheduler
-from llm_infer.primitives.kv_cache.pool import BlockPool
+from llm_infer.engines.native.kv_cache.pool import BlockPool
+from llm_infer.engines.native.scheduler import Request, RequestState, Scheduler
 
 pytestmark = pytest.mark.unit
 

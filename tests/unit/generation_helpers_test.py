@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from llm_infer.primitives.guards import GuardResult, RepetitionGuard
+from llm_infer.engines.native.guards import GuardResult, RepetitionGuard
 
 pytestmark = pytest.mark.unit
 

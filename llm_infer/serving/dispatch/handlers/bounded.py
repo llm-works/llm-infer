@@ -9,8 +9,8 @@ from ..handler import RequestHandler
 from ..types import Request, RequestStatus, Response, StreamChunk
 
 if TYPE_CHECKING:
-    from ....pipelines.scheduler import Request as EngineRequest
-    from ....primitives.protocols import InferenceEngineProtocol
+    from ....engines.native.scheduler import Request as EngineRequest
+    from ....engines.protocol import InferenceEngineProtocol
 
 
 @dataclass
@@ -225,7 +225,7 @@ class BoundedQueueHandler(RequestHandler):
         self, request: Request, tokens: list[int], ctx: Any
     ) -> Any:
         """Create engine request with sampling params and stop tokens."""
-        from ....pipelines.scheduler import Request as EngineRequest
+        from ....engines.native.scheduler import Request as EngineRequest
 
         stop_token_ids = self._build_stop_token_ids(request)
         return EngineRequest.create(

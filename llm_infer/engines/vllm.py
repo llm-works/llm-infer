@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Self
 from appinfra.log import Logger
 from appinfra.size import size_str
 
-from ...serving.dispatch.config import VLLMConfig
+from ..serving.dispatch.config import VLLMConfig
 
 # Check for vLLM availability
 _VLLM_AVAILABLE = False
@@ -35,7 +35,7 @@ except ImportError as e:
 if TYPE_CHECKING:
     from vllm.lora.request import LoRARequest
 
-    from ...context import RequestContext
+    from ..context import RequestContext
 
 
 def _check_vllm_available() -> None:

@@ -5,14 +5,14 @@ from pathlib import Path
 
 import torch
 
-from .model import ModelConfig
+from .model import TransformerConfig
 
 
 @dataclass
 class EngineConfig:
     """Configuration for the inference engine."""
 
-    model: ModelConfig
+    model: TransformerConfig
     model_path: str
     max_batch_size: int = 32
     num_blocks: int = 1024

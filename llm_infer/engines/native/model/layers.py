@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 import torch
 from torch import Tensor, nn
 
-from ...backends.linear.formats import AWQWeights, FP8Weights, QuantFormat
+from ..backends.linear.formats import AWQWeights, FP8Weights, QuantFormat
 
 if TYPE_CHECKING:
-    from ...backends.linear.formats.base import QuantizedLinearBackend
+    from ..backends.linear.formats.base import QuantizedLinearBackend
 
 
 class QuantizedLinear(nn.Module):

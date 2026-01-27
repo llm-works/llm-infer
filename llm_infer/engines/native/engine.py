@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from ..backends.linear import BackendRegistry, QuantFormat
-from ..primitives.attention import get_attention_backend
-from ..primitives.guards import GenerationGuard, RepetitionGuard
-from ..primitives.kv_cache import BlockPool
-from ..primitives.tokenizer import HuggingFaceTokenizer
+from .attention import get_attention_backend
+from .backends.linear import BackendRegistry, QuantFormat
 from .config import EngineConfig
 from .generation import run_decode, run_decode_batch, run_prefill
+from .guards import GenerationGuard, RepetitionGuard
+from .kv_cache import BlockPool
 from .model import TransformerModel, get_architecture
 from .scheduler import Request
+from .tokenizer import HuggingFaceTokenizer
 
 if TYPE_CHECKING:
-    from ..context import RequestContext
+    from ...context import RequestContext
 
 
 class InferenceEngine:
@@ -351,7 +351,7 @@ class InferenceEngine:
             tokens = self.tokenizer.encode(prompt, add_special_tokens=True)
 
         if context:
-            from ..context import Event
+            from ...context import Event
 
             context.mark(Event.TOKENIZED, tokens=len(tokens))
 

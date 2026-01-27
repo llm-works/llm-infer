@@ -14,7 +14,7 @@ from ..handler import RequestHandler
 from ..types import Request, RequestStatus, Response
 
 if TYPE_CHECKING:
-    from ....primitives.protocols import InferenceEngineProtocol
+    from ....engines.protocol import InferenceEngineProtocol
 
 
 @dataclass

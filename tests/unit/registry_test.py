@@ -3,8 +3,8 @@
 import pytest
 from appinfra.log import create_lg
 
-from llm_infer.backends.linear.formats.base import QuantFormat
-from llm_infer.backends.linear.registry import BackendRegistry
+from llm_infer.engines.native.backends.linear.formats.base import QuantFormat
+from llm_infer.engines.native.backends.linear.registry import BackendRegistry
 
 pytestmark = pytest.mark.unit
 

@@ -39,7 +39,7 @@ def _get_architectures(lg: Logger) -> dict[str, type]:
     lg.debug("importing model architectures...")
     start = appinfra.time.start()
 
-    from .pipelines.model.architecture import ARCHITECTURES
+    from .engines.native.model.architecture import ARCHITECTURES
 
     lg.debug(
         "model architectures imported",

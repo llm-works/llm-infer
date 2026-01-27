@@ -22,12 +22,12 @@ from typing import TYPE_CHECKING, Any
 
 from torch import Tensor
 
-from ...primitives.tokenizer import TokenizerConfig
+from ..tokenizer import TokenizerConfig
 
 if TYPE_CHECKING:
     from torch import nn
 
-    from .config import ModelConfig
+    from .config import TransformerConfig
 
 # Corrected Mistral pre-tokenizer regex
 # The original regex in Mistral tokenizer files has a bug that causes incorrect tokenization.
@@ -141,7 +141,7 @@ class LlamaArchitecture(ModelArchitecture):
     Works for: LLaMA 1/2/3, Qwen, Qwen2, and other LLaMA-style models.
     """
 
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: TransformerConfig):
         """Initialize with model configuration.
 
         Args:
@@ -211,7 +211,7 @@ class GraniteArchitecture(LlamaArchitecture):
     - residual_multiplier: Scales sublayer output before residual add
     - logits_scaling: Divides final logits
 
-    These values are read from ModelConfig (parsed from HF config.json).
+    These values are read from TransformerConfig (parsed from HF config.json).
     """
 
     def scale_embeddings(self, hidden: Tensor) -> Tensor:
@@ -271,7 +271,7 @@ def get_config_defaults(model_type: str | None) -> dict:
     return CONFIG_DEFAULTS.get(model_type or "", {})
 
 
-def get_architecture(lg: Any, config: ModelConfig) -> LlamaArchitecture:
+def get_architecture(lg: Any, config: TransformerConfig) -> LlamaArchitecture:
     """Get architecture instance for a model configuration.
 
     Args:

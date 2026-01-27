@@ -2,8 +2,8 @@
 
 import pytest
 
-from llm_infer.primitives.kv_cache.pool import BlockPool
-from llm_infer.primitives.kv_cache.sequence import SequenceKVCache
+from llm_infer.engines.native.kv_cache.pool import BlockPool
+from llm_infer.engines.native.kv_cache.sequence import SequenceKVCache
 
 pytestmark = pytest.mark.unit
 

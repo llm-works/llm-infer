@@ -5,40 +5,44 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-class TestPrimitivesImports:
-    """Test primitives module imports."""
+class TestNativeEngineImports:
+    """Test native engine module imports."""
 
-    def test_import_primitives(self) -> None:
-        """Test primitives package imports correctly."""
-        from llm_infer import primitives
+    def test_import_native_engine(self) -> None:
+        """Test native engine package imports correctly."""
+        from llm_infer.engines import native
 
-        assert hasattr(primitives, "sampler")
-        assert hasattr(primitives, "guards")
-        assert hasattr(primitives, "kv_cache")
+        assert hasattr(native, "InferenceEngine")
+        assert hasattr(native, "EngineConfig")
+        assert hasattr(native, "TransformerConfig")
+        assert hasattr(native, "Scheduler")
 
     def test_import_sampler(self) -> None:
         """Test sampler module imports."""
-        from llm_infer.primitives.sampler import sample
+        from llm_infer.engines.native.sampler import sample
 
         assert callable(sample)
 
     def test_import_guards(self) -> None:
         """Test guards module imports."""
-        from llm_infer.primitives.guards import GuardResult, RepetitionGuard
+        from llm_infer.engines.native.guards import GuardResult, RepetitionGuard
 
         assert GuardResult is not None
         assert RepetitionGuard is not None
 
     def test_import_kv_cache(self) -> None:
         """Test kv_cache module imports."""
-        from llm_infer.primitives.kv_cache import BlockPool, SequenceKVCache
+        from llm_infer.engines.native.kv_cache import BlockPool, SequenceKVCache
 
         assert BlockPool is not None
         assert SequenceKVCache is not None
 
     def test_import_tokenizer(self) -> None:
         """Test tokenizer module imports."""
-        from llm_infer.primitives.tokenizer import HuggingFaceTokenizer, TokenizerConfig
+        from llm_infer.engines.native.tokenizer import (
+            HuggingFaceTokenizer,
+            TokenizerConfig,
+        )
 
         assert HuggingFaceTokenizer is not None
         assert TokenizerConfig is not None
@@ -49,13 +53,13 @@ class TestBackendsImports:
 
     def test_import_linear_backends(self) -> None:
         """Test linear backends imports."""
-        from llm_infer.backends.linear import BackendRegistry
+        from llm_infer.engines.native.backends.linear import BackendRegistry
 
         assert BackendRegistry is not None
 
     def test_import_formats(self) -> None:
         """Test formats module imports."""
-        from llm_infer.backends.linear.formats import (
+        from llm_infer.engines.native.backends.linear.formats import (
             AWQWeights,
             FP8Weights,
             QuantFormat,
@@ -67,7 +71,7 @@ class TestBackendsImports:
 
     def test_import_pytorch_backends(self) -> None:
         """Test PyTorch backends import."""
-        from llm_infer.backends.linear.kernels import (
+        from llm_infer.engines.native.backends.linear.kernels import (
             PyTorchAWQBackend,
             PyTorchFP8Backend,
         )
@@ -76,24 +80,18 @@ class TestBackendsImports:
         assert PyTorchFP8Backend is not None
 
 
-class TestPipelinesImports:
-    """Test pipelines module imports."""
-
-    def test_import_pipelines(self) -> None:
-        """Test pipelines package imports."""
-        from llm_infer import pipelines
-
-        assert hasattr(pipelines, "model")
+class TestNativeEngineModulesImports:
+    """Test native engine submodule imports."""
 
     def test_import_model_config(self) -> None:
         """Test model config imports."""
-        from llm_infer.pipelines.model import ModelConfig
+        from llm_infer.engines.native.model import TransformerConfig
 
-        assert ModelConfig is not None
+        assert TransformerConfig is not None
 
     def test_import_scheduler(self) -> None:
         """Test scheduler imports."""
-        from llm_infer.pipelines.scheduler import Request, RequestState, Scheduler
+        from llm_infer.engines.native.scheduler import Request, RequestState, Scheduler
 
         assert Request is not None
         assert RequestState is not None
@@ -101,7 +99,7 @@ class TestPipelinesImports:
 
     def test_import_engine_config(self) -> None:
         """Test engine config imports."""
-        from llm_infer.pipelines.config import EngineConfig
+        from llm_infer.engines.native.config import EngineConfig
 
         assert EngineConfig is not None
 
@@ -111,7 +109,7 @@ class TestAttentionImports:
 
     def test_import_attention(self) -> None:
         """Test attention module imports."""
-        from llm_infer.primitives.attention import (
+        from llm_infer.engines.native.attention import (
             FLASHINFER_AVAILABLE,
             NaiveAttentionBackend,
             apply_rope,
@@ -126,6 +124,39 @@ class TestAttentionImports:
         assert callable(rotate_half)
         assert isinstance(FLASHINFER_AVAILABLE, bool)
         assert NaiveAttentionBackend is not None
+
+
+class TestEnginesImports:
+    """Test engines module imports."""
+
+    def test_import_engines(self) -> None:
+        """Test engines package imports."""
+        from llm_infer import engines
+
+        assert hasattr(engines, "create_engine")
+        assert hasattr(engines, "InferenceEngineProtocol")
+
+    def test_import_protocol(self) -> None:
+        """Test protocol imports."""
+        from llm_infer.engines.protocol import (
+            InferenceEngineProtocol,
+            StreamingResultProtocol,
+        )
+
+        assert InferenceEngineProtocol is not None
+        assert StreamingResultProtocol is not None
+
+    def test_import_vllm_engine(self) -> None:
+        """Test vLLM engine imports."""
+        from llm_infer.engines.vllm import VLLMEngine
+
+        assert VLLMEngine is not None
+
+    def test_import_ollama_engine(self) -> None:
+        """Test Ollama engine imports."""
+        from llm_infer.engines.ollama import OllamaEngine
+
+        assert OllamaEngine is not None
 
 
 def _run_import_test(code: str) -> None:

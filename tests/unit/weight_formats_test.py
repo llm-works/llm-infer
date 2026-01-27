@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from llm_infer.backends.linear.formats.awq import AWQWeights
-from llm_infer.backends.linear.formats.fp8 import FP8Weights
+from llm_infer.engines.native.backends.linear.formats.awq import AWQWeights
+from llm_infer.engines.native.backends.linear.formats.fp8 import FP8Weights
 
 pytestmark = pytest.mark.unit
 
