@@ -5,7 +5,7 @@ supporting multiple formats (AWQ, FP8) with priority-based backend selection.
 
 Quick start:
     >>> from appinfra.log import create_lg
-    >>> from llm_infer.backends.linear import BackendRegistry, QuantFormat
+    >>> from llm_infer.engines.native.backends.linear import BackendRegistry, QuantFormat
     >>> lg = create_lg(__name__, "info")
     >>> registry = BackendRegistry(lg)
     >>> backend = registry.get(QuantFormat.AWQ)  # Auto-selects best available
