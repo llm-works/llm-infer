@@ -740,3 +740,97 @@ class TestOllamaMessageConversion:
         assert result[1]["role"] == "tool"
         assert result[1]["content"] == "result"
         assert "tool_call_id" not in result[1]
+
+    def test_converts_assistant_tool_calls_format(self) -> None:
+        """Test assistant tool_calls are converted from OpenAI to Ollama format."""
+        from llm_infer.engines.ollama import _convert_messages_to_ollama_format
+
+        messages = [
+            {"role": "user", "content": "What's the weather?"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_abc123",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"location": "Boston"}',
+                        },
+                    }
+                ],
+            },
+        ]
+        result = _convert_messages_to_ollama_format(messages)
+
+        # Assistant message should have Ollama-format tool_calls
+        assistant_msg = result[1]
+        assert assistant_msg["role"] == "assistant"
+        assert len(assistant_msg["tool_calls"]) == 1
+
+        tc = assistant_msg["tool_calls"][0]
+        # Should not have 'id' or 'type'
+        assert "id" not in tc
+        assert "type" not in tc
+        # Should have function with dict arguments (not JSON string)
+        assert tc["function"]["name"] == "get_weather"
+        assert tc["function"]["arguments"] == {"location": "Boston"}
+
+    def test_converts_tool_call_arguments_from_string_to_dict(self) -> None:
+        """Test that JSON string arguments are parsed to dict."""
+        from llm_infer.engines.ollama import _convert_tool_call_to_ollama
+
+        openai_tc = {
+            "id": "call_123",
+            "type": "function",
+            "function": {
+                "name": "search",
+                "arguments": '{"query": "weather", "limit": 10}',
+            },
+        }
+        result = _convert_tool_call_to_ollama(openai_tc)
+
+        assert result == {
+            "function": {
+                "name": "search",
+                "arguments": {"query": "weather", "limit": 10},
+            }
+        }
+
+    def test_handles_dict_arguments_already(self) -> None:
+        """Test that dict arguments are passed through unchanged."""
+        from llm_infer.engines.ollama import _convert_tool_call_to_ollama
+
+        # Arguments already a dict (e.g., from Ollama response being re-sent)
+        tc = {
+            "function": {
+                "name": "get_weather",
+                "arguments": {"city": "NYC"},
+            },
+        }
+        result = _convert_tool_call_to_ollama(tc)
+
+        assert result["function"]["arguments"] == {"city": "NYC"}
+
+    def test_handles_empty_arguments(self) -> None:
+        """Test handling of empty/missing arguments."""
+        from llm_infer.engines.ollama import _convert_tool_call_to_ollama
+
+        # Empty string
+        tc1 = {"function": {"name": "no_args", "arguments": ""}}
+        assert _convert_tool_call_to_ollama(tc1)["function"]["arguments"] == {}
+
+        # Missing arguments
+        tc2 = {"function": {"name": "no_args"}}
+        assert _convert_tool_call_to_ollama(tc2)["function"]["arguments"] == {}
+
+    def test_handles_invalid_json_arguments(self) -> None:
+        """Test graceful handling of malformed JSON arguments."""
+        from llm_infer.engines.ollama import _convert_tool_call_to_ollama
+
+        tc = {"function": {"name": "test", "arguments": "not valid json{"}}
+        result = _convert_tool_call_to_ollama(tc)
+
+        # Should return empty dict on parse failure
+        assert result["function"]["arguments"] == {}
