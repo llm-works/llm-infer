@@ -74,8 +74,9 @@ def tool_choice_to_dict(
         return None
     if isinstance(tool_choice, str):
         return tool_choice
-    # ToolChoiceObject
-    return tool_choice.model_dump(exclude_none=True)
+    # ToolChoiceObject - model_dump returns dict[str, Any]
+    result: dict[str, Any] = tool_choice.model_dump(exclude_none=True)
+    return result
 
 
 def generate_tool_call_id() -> str:
