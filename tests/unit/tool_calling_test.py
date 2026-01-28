@@ -650,3 +650,93 @@ class TestOllamaToolCallConversion:
 
         parsed = json.loads(result[0].function.arguments)
         assert parsed == {"query": "test", "limit": 10}
+
+
+# =============================================================================
+# Ollama Message Format Conversion Tests
+# =============================================================================
+
+
+class TestOllamaMessageConversion:
+    """Test conversion from OpenAI format to Ollama format for tool messages."""
+
+    def test_converts_tool_response_to_ollama_format(self) -> None:
+        """Test tool response messages are converted from tool_call_id to tool_name."""
+        from llm_infer.engines.ollama import _convert_messages_to_ollama_format
+
+        messages = [
+            {"role": "user", "content": "What's the weather?"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_abc123",
+                        "function": {"name": "get_weather", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_abc123", "content": '{"temp": 72}'},
+        ]
+        result = _convert_messages_to_ollama_format(messages)
+
+        # Tool message should have tool_name instead of tool_call_id
+        assert result[2]["role"] == "tool"
+        assert result[2]["tool_name"] == "get_weather"
+        assert result[2]["content"] == '{"temp": 72}'
+        assert "tool_call_id" not in result[2]
+
+    def test_preserves_non_tool_messages(self) -> None:
+        """Test non-tool messages are preserved unchanged."""
+        from llm_infer.engines.ollama import _convert_messages_to_ollama_format
+
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+        result = _convert_messages_to_ollama_format(messages)
+        assert result == messages
+
+    def test_handles_multiple_tool_calls(self) -> None:
+        """Test multiple tool calls are correctly mapped."""
+        from llm_infer.engines.ollama import _convert_messages_to_ollama_format
+
+        messages = [
+            {"role": "user", "content": "Get weather for NYC and LA"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "get_weather", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_2",
+                        "function": {"name": "get_weather", "arguments": "{}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"temp": 72}'},
+            {"role": "tool", "tool_call_id": "call_2", "content": '{"temp": 85}'},
+        ]
+        result = _convert_messages_to_ollama_format(messages)
+
+        assert result[2]["tool_name"] == "get_weather"
+        assert result[3]["tool_name"] == "get_weather"
+
+    def test_handles_missing_tool_call_id_mapping(self) -> None:
+        """Test graceful handling when tool_call_id has no matching tool_call."""
+        from llm_infer.engines.ollama import _convert_messages_to_ollama_format
+
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "tool", "tool_call_id": "unknown_id", "content": "result"},
+        ]
+        result = _convert_messages_to_ollama_format(messages)
+
+        # Should still convert, just without tool_name
+        assert result[1]["role"] == "tool"
+        assert result[1]["content"] == "result"
+        assert "tool_call_id" not in result[1]

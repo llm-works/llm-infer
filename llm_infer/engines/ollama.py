@@ -26,6 +26,43 @@ if TYPE_CHECKING:
     from ..serving.dispatch.config import OllamaConfig
 
 
+def _convert_messages_to_ollama_format(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Convert OpenAI-format messages to Ollama format.
+
+    Key difference: Ollama uses 'tool_name' for tool responses, while OpenAI uses
+    'tool_call_id'. We need to look up the function name from the tool_call_id.
+    """
+    # Build mapping of tool_call_id -> function_name from assistant messages
+    id_to_name: dict[str, str] = {}
+    for msg in messages:
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                tc_id = tc.get("id", "")
+                func_name = tc.get("function", {}).get("name", "")
+                if tc_id and func_name:
+                    id_to_name[tc_id] = func_name
+
+    # Convert messages
+    result: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") == "tool" and msg.get("tool_call_id"):
+            # Convert OpenAI tool response to Ollama format
+            tool_call_id = msg["tool_call_id"]
+            tool_name = id_to_name.get(tool_call_id, "")
+            converted = {
+                "role": "tool",
+                "content": msg.get("content", ""),
+            }
+            if tool_name:
+                converted["tool_name"] = tool_name
+            result.append(converted)
+        else:
+            result.append(msg)
+    return result
+
+
 class OllamaStreamingIterator:
     """True streaming iterator using Ollama's streaming API.
 
@@ -540,9 +577,11 @@ class OllamaEngine:
         stream: bool,
     ) -> dict[str, Any]:
         """Build payload for /api/chat endpoint."""
+        # Convert OpenAI-format messages to Ollama format (tool_call_id -> tool_name)
+        ollama_messages = _convert_messages_to_ollama_format(messages)
         payload: dict[str, Any] = {
             "model": self._config.model,
-            "messages": messages,
+            "messages": ollama_messages,
             "stream": stream,
             "options": self._build_options(
                 max_tokens, temperature, top_p, top_k, repetition_penalty
