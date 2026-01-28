@@ -1,6 +1,7 @@
 """SSE streaming utilities for OpenAI-compatible responses."""
 
 import time
+import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
@@ -36,13 +37,17 @@ def _convert_tool_calls_to_deltas(
     result = []
     for i, tc in enumerate(tool_calls):
         func = tc.get("function", {})
+        name = func.get("name", "")
+        if not name:
+            # Skip malformed tool calls with missing function name
+            continue
         result.append(
             ToolCallDelta(
                 index=i,
-                id=tc.get("id", f"call_{i}"),
+                id=tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
                 type="function",
                 function=FunctionCall(
-                    name=func.get("name", ""),
+                    name=name,
                     arguments=func.get("arguments", "{}"),
                 ),
             )

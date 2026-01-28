@@ -116,15 +116,19 @@ def _convert_tool_calls(
     if not tool_calls:
         return None
     result = []
-    for i, tc in enumerate(tool_calls):
+    for tc in tool_calls:
         # Handle both Ollama format and already-converted format
         func = tc.get("function", {})
+        name = func.get("name", "")
+        if not name:
+            # Skip malformed tool calls with missing function name
+            continue
         result.append(
             ToolCall(
                 id=tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
                 type="function",
                 function=FunctionCall(
-                    name=func.get("name", ""),
+                    name=name,
                     arguments=func.get("arguments", "{}"),
                 ),
             )
