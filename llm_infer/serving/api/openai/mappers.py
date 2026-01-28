@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from llm_infer.schemas.openai import (
@@ -74,6 +75,11 @@ def tool_choice_to_dict(
         return tool_choice
     # ToolChoiceObject
     return tool_choice.model_dump(exclude_none=True)
+
+
+def generate_tool_call_id() -> str:
+    """Generate a unique tool call ID in OpenAI format (call_ + 24 hex chars)."""
+    return f"call_{uuid.uuid4().hex[:24]}"
 
 
 def resolve_think_mode(think: bool | None, model_config: ModelConfig | None) -> bool:

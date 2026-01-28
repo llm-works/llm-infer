@@ -1,7 +1,6 @@
 """SSE streaming utilities for OpenAI-compatible responses."""
 
 import time
-import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
@@ -17,6 +16,8 @@ from llm_infer.schemas.openai import (
     ToolCallDelta,
 )
 
+from .mappers import generate_tool_call_id
+
 
 def format_sse_event(data: str) -> str:
     """Format data as SSE event."""
@@ -31,11 +32,15 @@ def format_sse_done() -> str:
 def _convert_tool_calls_to_deltas(
     tool_calls: list[dict[str, Any]] | None,
 ) -> list[ToolCallDelta] | None:
-    """Convert internal tool_calls format to streaming delta format."""
+    """Convert internal tool_calls format to streaming delta format.
+
+    Uses sequential indices (0, 1, 2...) for valid tool calls, skipping malformed
+    entries. This matches OpenAI's expected format where indices are contiguous.
+    """
     if not tool_calls:
         return None
-    result = []
-    for i, tc in enumerate(tool_calls):
+    result: list[ToolCallDelta] = []
+    for tc in tool_calls:
         func = tc.get("function", {})
         name = func.get("name", "")
         if not name:
@@ -43,8 +48,8 @@ def _convert_tool_calls_to_deltas(
             continue
         result.append(
             ToolCallDelta(
-                index=i,
-                id=tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
+                index=len(result),  # Sequential index for valid tool calls
+                id=tc.get("id", generate_tool_call_id()),
                 type="function",
                 function=FunctionCall(
                     name=name,

@@ -457,8 +457,8 @@ class TestConvertToolCallsToDeltas:
         result = _convert_tool_calls_to_deltas(tool_calls)
         assert len(result) == 1
         assert result[0].function.name == "valid"
-        # Index should reflect position in original list after skipping
-        assert result[0].index == 1
+        # Index is sequential for valid tool calls (0-based)
+        assert result[0].index == 0
 
     def test_all_malformed_returns_none(self) -> None:
         """Test all malformed returns None."""

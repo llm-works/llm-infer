@@ -177,8 +177,17 @@ class InferenceEngine:
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
         messages: list[dict[str, str]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> str:
-        """Generate text from a prompt (blocking)."""
+        """Generate text from a prompt (blocking).
+
+        Args:
+            tools: Tool definitions (not supported, accepted for interface compat)
+            tool_choice: Tool choice (not supported, accepted for interface compat)
+        """
+        # Note: tools/tool_choice are accepted but not used
+        _ = tools, tool_choice
         if use_chat_template is None:
             use_chat_template = self.should_use_chat_template()
 
@@ -273,6 +282,8 @@ class InferenceEngine:
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
         messages: list[dict[str, str]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> StreamingResult:
         """
         Stream generated tokens (sync version).
@@ -292,10 +303,14 @@ class InferenceEngine:
             stop_sequences: Optional list of strings that stop generation.
             context: Optional request context for logging.
             messages: Optional list of chat messages (for multi-turn/system).
+            tools: Tool definitions (not supported, accepted for interface compat)
+            tool_choice: Tool choice (not supported, accepted for interface compat)
 
         Returns:
             StreamingResult object that yields tokens and tracks metadata.
         """
+        # Note: tools/tool_choice are accepted but not used
+        _ = tools, tool_choice
         if use_chat_template is None:
             use_chat_template = self.should_use_chat_template()
 

@@ -36,6 +36,7 @@ from .mappers import (
     chat_request_to_internal,
     completion_request_to_internal,
     determine_finish_reason,
+    generate_tool_call_id,
     resolve_think_mode,
 )
 from .streaming_generators import ChatStreamingGenerator, CompletionStreamingGenerator
@@ -125,7 +126,7 @@ def _convert_tool_calls(
             continue
         result.append(
             ToolCall(
-                id=tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
+                id=tc.get("id", generate_tool_call_id()),
                 type="function",
                 function=FunctionCall(
                     name=name,
