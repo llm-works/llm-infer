@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -80,6 +81,19 @@ def tool_choice_to_dict(
 def generate_tool_call_id() -> str:
     """Generate a unique tool call ID in OpenAI format (call_ + 24 hex chars)."""
     return f"call_{uuid.uuid4().hex[:24]}"
+
+
+def normalize_arguments(args: Any) -> str:
+    """Normalize tool call arguments to JSON string.
+
+    Ollama returns arguments as a dict, OpenAI expects a JSON string.
+    """
+    if args is None:
+        return "{}"
+    if isinstance(args, str):
+        return args
+    # Ollama returns arguments as dict - serialize to JSON string
+    return json.dumps(args)
 
 
 def resolve_think_mode(think: bool | None, model_config: ModelConfig | None) -> bool:
@@ -175,13 +189,14 @@ def _build_messages_with_injections(
         (with think suffix if applied) for logging/display, and messages is the
         full message list for template processing (or None for single-message case).
     """
-    # Single user message with no system prompt to inject and no tool messages:
-    # pass content directly
+    # Single user message with no system prompt to inject, no tool messages,
+    # and no tools defined: pass content directly
     if (
         len(body.messages) == 1
         and body.messages[0].role == Role.USER
         and not system_prompt
         and not _has_tool_messages(body)
+        and not body.tools
     ):
         prompt = (body.messages[0].content or "") + think_suffix
         return prompt, None

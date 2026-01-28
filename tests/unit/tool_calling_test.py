@@ -18,6 +18,7 @@ from llm_infer.schemas.openai import (
 )
 from llm_infer.serving.api.openai.mappers import (
     determine_finish_reason,
+    normalize_arguments,
     tool_choice_to_dict,
     tools_to_dict,
 )
@@ -575,3 +576,72 @@ class TestToolCallIdFormat:
         ]
         result = _convert_tool_calls_to_deltas(tool_calls)
         assert result[0].id != result[1].id
+
+
+# =============================================================================
+# Argument Normalization Tests (Ollama dict -> OpenAI string)
+# =============================================================================
+
+
+class TestNormalizeArguments:
+    """Test normalize_arguments handles Ollama dict format."""
+
+    def test_none_returns_empty_object(self) -> None:
+        """Test None input returns empty JSON object string."""
+        assert normalize_arguments(None) == "{}"
+
+    def test_string_passthrough(self) -> None:
+        """Test string arguments pass through unchanged."""
+        assert normalize_arguments("{}") == "{}"
+        assert normalize_arguments('{"x": 1}') == '{"x": 1}'
+
+    def test_dict_serialized_to_json(self) -> None:
+        """Test dict arguments are serialized to JSON string."""
+        result = normalize_arguments({"path": "/tmp"})
+        assert result == '{"path": "/tmp"}'
+
+    def test_complex_dict_serialized(self) -> None:
+        """Test complex dict with nested values."""
+        args = {"location": "NYC", "units": "celsius", "options": {"detailed": True}}
+        result = normalize_arguments(args)
+        # Parse back to verify it's valid JSON
+        import json
+
+        parsed = json.loads(result)
+        assert parsed == args
+
+
+class TestOllamaToolCallConversion:
+    """Test that Ollama-format tool calls (dict arguments) are properly converted."""
+
+    def test_router_handles_ollama_dict_arguments(self) -> None:
+        """Test router converts Ollama dict arguments to JSON string."""
+        # Ollama returns arguments as dict, not string
+        tool_calls = [
+            {
+                "id": "call_test",
+                "function": {
+                    "name": "list_files",
+                    "arguments": {"path": "/tmp"},  # Dict, not string!
+                },
+            }
+        ]
+        result = _convert_tool_calls(tool_calls)
+        assert result[0].function.arguments == '{"path": "/tmp"}'
+
+    def test_streaming_handles_ollama_dict_arguments(self) -> None:
+        """Test streaming converts Ollama dict arguments to JSON string."""
+        tool_calls = [
+            {
+                "id": "call_test",
+                "function": {
+                    "name": "search",
+                    "arguments": {"query": "test", "limit": 10},
+                },
+            }
+        ]
+        result = _convert_tool_calls_to_deltas(tool_calls)
+        import json
+
+        parsed = json.loads(result[0].function.arguments)
+        assert parsed == {"query": "test", "limit": 10}

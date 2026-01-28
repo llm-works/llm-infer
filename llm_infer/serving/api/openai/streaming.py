@@ -16,7 +16,7 @@ from llm_infer.schemas.openai import (
     ToolCallDelta,
 )
 
-from .mappers import generate_tool_call_id
+from .mappers import generate_tool_call_id, normalize_arguments
 
 
 def format_sse_event(data: str) -> str:
@@ -53,7 +53,7 @@ def _convert_tool_calls_to_deltas(
                 type="function",
                 function=FunctionCall(
                     name=name,
-                    arguments=func.get("arguments", "{}"),
+                    arguments=normalize_arguments(func.get("arguments")),
                 ),
             )
         )

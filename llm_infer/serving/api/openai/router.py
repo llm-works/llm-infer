@@ -37,6 +37,7 @@ from .mappers import (
     completion_request_to_internal,
     determine_finish_reason,
     generate_tool_call_id,
+    normalize_arguments,
     resolve_think_mode,
 )
 from .streaming_generators import ChatStreamingGenerator, CompletionStreamingGenerator
@@ -130,7 +131,7 @@ def _convert_tool_calls(
                 type="function",
                 function=FunctionCall(
                     name=name,
-                    arguments=func.get("arguments", "{}"),
+                    arguments=normalize_arguments(func.get("arguments")),
                 ),
             )
         )
