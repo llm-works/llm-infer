@@ -32,7 +32,9 @@ def _convert_tool_call_to_ollama(tc: dict[str, Any]) -> dict[str, Any]:
     OpenAI: {"id": "...", "type": "function", "function": {"name": "...", "arguments": "{...}"}}
     Ollama: {"function": {"name": "...", "arguments": {...}}}
     """
-    func = tc.get("function", {})
+    func = tc.get("function") or {}
+    if not isinstance(func, dict):
+        func = {}
     args = func.get("arguments", {})
 
     # OpenAI sends arguments as JSON string, Ollama expects dict
@@ -41,6 +43,8 @@ def _convert_tool_call_to_ollama(tc: dict[str, Any]) -> dict[str, Any]:
             args = json.loads(args) if args else {}
         except json.JSONDecodeError:
             args = {}
+    elif not isinstance(args, dict):
+        args = {}
 
     return {"function": {"name": func.get("name", ""), "arguments": args}}
 
@@ -51,8 +55,11 @@ def _build_tool_call_id_mapping(messages: list[dict[str, Any]]) -> dict[str, str
     for msg in messages:
         if msg.get("role") == "assistant" and msg.get("tool_calls"):
             for tc in msg["tool_calls"]:
+                func = tc.get("function")
+                if not isinstance(func, dict):
+                    continue
                 tc_id = tc.get("id", "")
-                func_name = tc.get("function", {}).get("name", "")
+                func_name = func.get("name", "")
                 if tc_id and func_name:
                     id_to_name[tc_id] = func_name
     return id_to_name
@@ -65,14 +72,17 @@ def _convert_single_message(
     if msg.get("role") == "assistant" and msg.get("tool_calls"):
         return {
             "role": "assistant",
-            "content": msg.get("content", ""),
+            "content": msg.get("content") or "",
             "tool_calls": [
                 _convert_tool_call_to_ollama(tc) for tc in msg["tool_calls"]
             ],
         }
     if msg.get("role") == "tool" and msg.get("tool_call_id"):
         tool_name = id_to_name.get(msg["tool_call_id"], "")
-        converted: dict[str, Any] = {"role": "tool", "content": msg.get("content", "")}
+        converted: dict[str, Any] = {
+            "role": "tool",
+            "content": msg.get("content") or "",
+        }
         if tool_name:
             converted["tool_name"] = tool_name
         return converted
