@@ -26,41 +26,90 @@ if TYPE_CHECKING:
     from ..serving.dispatch.config import OllamaConfig
 
 
+def _convert_tool_call_to_ollama(tc: dict[str, Any]) -> dict[str, Any]:
+    """Convert a single OpenAI tool_call to Ollama format.
+
+    OpenAI: {"id": "...", "type": "function", "function": {"name": "...", "arguments": "{...}"}}
+    Ollama: {"function": {"name": "...", "arguments": {...}}}
+    """
+    func = tc.get("function") or {}
+    if not isinstance(func, dict):
+        func = {}
+    args = func.get("arguments", {})
+
+    # OpenAI sends arguments as JSON string, Ollama expects dict
+    if isinstance(args, str):
+        try:
+            args = json.loads(args) if args else {}
+        except json.JSONDecodeError:
+            args = {}
+    elif not isinstance(args, dict):
+        args = {}
+
+    return {"function": {"name": func.get("name", ""), "arguments": args}}
+
+
+def _build_tool_call_id_mapping(messages: list[dict[str, Any]]) -> dict[str, str]:
+    """Build mapping of tool_call_id -> function_name from assistant messages."""
+    id_to_name: dict[str, str] = {}
+    for msg in messages:
+        tool_calls = msg.get("tool_calls")
+        if (
+            msg.get("role") == "assistant"
+            and isinstance(tool_calls, list)
+            and tool_calls
+        ):
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                func = tc.get("function")
+                if not isinstance(func, dict):
+                    continue
+                tc_id = tc.get("id", "")
+                func_name = func.get("name", "")
+                if tc_id and func_name:
+                    id_to_name[tc_id] = func_name
+    return id_to_name
+
+
+def _convert_single_message(
+    msg: dict[str, Any], id_to_name: dict[str, str]
+) -> dict[str, Any]:
+    """Convert a single message from OpenAI to Ollama format."""
+    tool_calls = msg.get("tool_calls")
+    if msg.get("role") == "assistant" and isinstance(tool_calls, list) and tool_calls:
+        return {
+            "role": "assistant",
+            "content": msg.get("content") or "",
+            "tool_calls": [
+                _convert_tool_call_to_ollama(tc)
+                for tc in tool_calls
+                if isinstance(tc, dict)
+            ],
+        }
+    if msg.get("role") == "tool" and msg.get("tool_call_id"):
+        tool_name = id_to_name.get(msg["tool_call_id"], "")
+        converted: dict[str, Any] = {
+            "role": "tool",
+            "content": msg.get("content") or "",
+        }
+        if tool_name:
+            converted["tool_name"] = tool_name
+        return converted
+    return msg
+
+
 def _convert_messages_to_ollama_format(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Convert OpenAI-format messages to Ollama format.
 
-    Key difference: Ollama uses 'tool_name' for tool responses, while OpenAI uses
-    'tool_call_id'. We need to look up the function name from the tool_call_id.
+    Key differences:
+    - Tool calls: Ollama has no 'id'/'type', arguments is dict not JSON string
+    - Tool responses: Ollama uses 'tool_name' instead of 'tool_call_id'
     """
-    # Build mapping of tool_call_id -> function_name from assistant messages
-    id_to_name: dict[str, str] = {}
-    for msg in messages:
-        if msg.get("role") == "assistant" and msg.get("tool_calls"):
-            for tc in msg["tool_calls"]:
-                tc_id = tc.get("id", "")
-                func_name = tc.get("function", {}).get("name", "")
-                if tc_id and func_name:
-                    id_to_name[tc_id] = func_name
-
-    # Convert messages
-    result: list[dict[str, Any]] = []
-    for msg in messages:
-        if msg.get("role") == "tool" and msg.get("tool_call_id"):
-            # Convert OpenAI tool response to Ollama format
-            tool_call_id = msg["tool_call_id"]
-            tool_name = id_to_name.get(tool_call_id, "")
-            converted = {
-                "role": "tool",
-                "content": msg.get("content", ""),
-            }
-            if tool_name:
-                converted["tool_name"] = tool_name
-            result.append(converted)
-        else:
-            result.append(msg)
-    return result
+    id_to_name = _build_tool_call_id_mapping(messages)
+    return [_convert_single_message(msg, id_to_name) for msg in messages]
 
 
 class OllamaStreamingIterator:
