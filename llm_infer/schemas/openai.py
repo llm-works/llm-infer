@@ -1,7 +1,7 @@
 """OpenAI-compatible Pydantic models for request/response schemas."""
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -21,6 +21,63 @@ class FinishReason(str, Enum):
     STOP = "stop"
     LENGTH = "length"
     CONTENT_FILTER = "content_filter"
+    TOOL_CALLS = "tool_calls"
+
+
+# =============================================================================
+# Tool/Function Calling Types
+# =============================================================================
+
+
+class FunctionDefinition(BaseModel):
+    """Function definition within a tool."""
+
+    name: str = Field(..., description="The name of the function to call")
+    description: str | None = Field(
+        None, description="Description of what the function does"
+    )
+    parameters: dict[str, Any] | None = Field(
+        None, description="JSON Schema for function parameters"
+    )
+
+
+class Tool(BaseModel):
+    """Tool definition for function calling."""
+
+    type: Literal["function"] = "function"
+    function: FunctionDefinition
+
+
+class ToolChoiceFunction(BaseModel):
+    """Specific function to call."""
+
+    name: str
+
+
+class ToolChoiceObject(BaseModel):
+    """Tool choice specifying a specific function."""
+
+    type: Literal["function"] = "function"
+    function: ToolChoiceFunction
+
+
+# tool_choice can be "auto", "none", "required", or a specific tool object
+ToolChoice = Literal["auto", "none", "required"] | ToolChoiceObject
+
+
+class FunctionCall(BaseModel):
+    """Function call in assistant message."""
+
+    name: str = Field(..., description="Name of the function to call")
+    arguments: str = Field(..., description="JSON string of function arguments")
+
+
+class ToolCall(BaseModel):
+    """Tool call in assistant message."""
+
+    id: str = Field(..., description="Unique ID for this tool call")
+    type: Literal["function"] = "function"
+    function: FunctionCall
 
 
 # =============================================================================
@@ -32,8 +89,16 @@ class ChatMessage(BaseModel):
     """A single chat message."""
 
     role: Role
-    content: str
+    content: str | None = None  # Can be None when tool_calls present
     name: str | None = None
+    # Tool calling fields
+    tool_calls: list[ToolCall] | None = Field(
+        None, description="Tool calls made by the assistant (assistant messages only)"
+    )
+    tool_call_id: str | None = Field(
+        None,
+        description="ID of the tool call this message responds to (tool messages only)",
+    )
     # llm-infer extension: separated thinking content
     thinking: str | None = Field(
         None,
@@ -64,6 +129,16 @@ class ChatCompletionRequest(BaseModel):
     stop: str | list[str] | None = None
     presence_penalty: float = Field(0.0, ge=-2.0, le=2.0)
     frequency_penalty: float = Field(0.0, ge=-2.0, le=2.0)
+
+    # Tool/function calling
+    tools: list[Tool] | None = Field(
+        None, description="List of tools the model may call"
+    )
+    tool_choice: ToolChoice | None = Field(
+        None,
+        description="Controls tool use: 'auto' (default), 'none', 'required', "
+        "or specific tool",
+    )
 
     # Accepted but ignored (for SDK compatibility)
     logit_bias: dict[str, float] | None = None
@@ -128,11 +203,25 @@ class ChatCompletionResponse(BaseModel):
 # =============================================================================
 
 
+class ToolCallDelta(BaseModel):
+    """Tool call delta for streaming responses.
+
+    In streaming, tool calls are sent incrementally with an index to identify
+    which tool call is being updated.
+    """
+
+    index: int = Field(..., description="Index of the tool call being streamed")
+    id: str | None = Field(None, description="Tool call ID (sent in first chunk)")
+    type: Literal["function"] | None = None
+    function: FunctionCall | None = None
+
+
 class ChatCompletionChunkDelta(BaseModel):
     """Delta content in streaming response."""
 
     role: Role | None = None
     content: str | None = None
+    tool_calls: list[ToolCallDelta] | None = None
     # llm-infer extension: separated thinking content
     thinking: str | None = None
 

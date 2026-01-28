@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
+from typing import Any
 
 from llm_infer.schemas.openai import (
     ChatCompletionChunk,
@@ -10,8 +11,12 @@ from llm_infer.schemas.openai import (
     CompletionChunk,
     CompletionChunkChoice,
     FinishReason,
+    FunctionCall,
     Role,
+    ToolCallDelta,
 )
+
+from .mappers import generate_tool_call_id, normalize_arguments
 
 
 def format_sse_event(data: str) -> str:
@@ -24,6 +29,37 @@ def format_sse_done() -> str:
     return "data: [DONE]\n\n"
 
 
+def _convert_tool_calls_to_deltas(
+    tool_calls: list[dict[str, Any]] | None,
+) -> list[ToolCallDelta] | None:
+    """Convert internal tool_calls format to streaming delta format.
+
+    Uses sequential indices (0, 1, 2...) for valid tool calls, skipping malformed
+    entries. This matches OpenAI's expected format where indices are contiguous.
+    """
+    if not tool_calls:
+        return None
+    result: list[ToolCallDelta] = []
+    for tc in tool_calls:
+        func = tc.get("function", {})
+        name = func.get("name", "")
+        if not name:
+            # Skip malformed tool calls with missing function name
+            continue
+        result.append(
+            ToolCallDelta(
+                index=len(result),  # Sequential index for valid tool calls
+                id=tc.get("id", generate_tool_call_id()),
+                type="function",
+                function=FunctionCall(
+                    name=name,
+                    arguments=normalize_arguments(func.get("arguments")),
+                ),
+            )
+        )
+    return result if result else None
+
+
 def create_chat_chunk(
     request_id: str,
     model: str,
@@ -32,6 +68,7 @@ def create_chat_chunk(
     thinking: str | None = None,
     role: Role | None = None,
     finish_reason: FinishReason | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> ChatCompletionChunk:
     """Create a chat completion chunk for streaming.
 
@@ -44,8 +81,12 @@ def create_chat_chunk(
             future streaming separation - currently only used in non-streaming).
         role: Message role (only set on first chunk).
         finish_reason: Finish reason (only set on final chunk).
+        tool_calls: Tool calls (only set on final chunk when model calls tools).
     """
-    delta = ChatCompletionChunkDelta(role=role, content=content, thinking=thinking)
+    tool_call_deltas = _convert_tool_calls_to_deltas(tool_calls)
+    delta = ChatCompletionChunkDelta(
+        role=role, content=content, thinking=thinking, tool_calls=tool_call_deltas
+    )
     return ChatCompletionChunk(
         id=request_id,
         created=created,

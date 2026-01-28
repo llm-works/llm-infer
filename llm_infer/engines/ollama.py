@@ -55,6 +55,8 @@ class OllamaStreamingIterator:
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
         self.finish_reason: str | None = None
+        # Tool calls (populated on completion if model made tool calls)
+        self.tool_calls: list[dict[str, Any]] | None = None
 
     def _start_stream(self) -> None:
         """Start the streaming request."""
@@ -92,12 +94,22 @@ class OllamaStreamingIterator:
         self._finished = True
         self.prompt_tokens = data.get("prompt_eval_count", 0)
         self.completion_tokens = data.get("eval_count", 0)
-        self.finish_reason = "length" if data.get("done_reason") == "length" else "stop"
+
         # Handle both generate and chat response formats
         response: str = data.get("response", "")
-        if not response:
-            message = data.get("message", {})
-            response = message.get("content", "") if isinstance(message, dict) else ""
+        message = data.get("message", {})
+        if not response and isinstance(message, dict):
+            response = message.get("content", "")
+
+        # Check for tool calls in the final message
+        if isinstance(message, dict) and message.get("tool_calls"):
+            self.tool_calls = message["tool_calls"]
+            self.finish_reason = "tool_calls"
+        elif data.get("done_reason") == "length":
+            self.finish_reason = "length"
+        else:
+            self.finish_reason = "stop"
+
         return response if response else None
 
     def _process_stream_line(self, line: str) -> str | None:
@@ -463,8 +475,10 @@ class OllamaEngine:
         use_chat_template: bool | None = None,
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
-        messages: list[dict[str, str]] | None = None,
-    ) -> str:
+        messages: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> str | dict[str, Any]:
         """Generate text completion (blocking).
 
         Args:
@@ -478,9 +492,12 @@ class OllamaEngine:
             stop_sequences: Sequences that stop generation.
             context: Request context for logging.
             messages: Chat messages (alternative to prompt).
+            tools: List of tool definitions for function calling.
+            tool_choice: Controls tool usage ("auto", "none", "required", or specific).
 
         Returns:
-            Generated text.
+            Generated text string, or dict with "content" and "tool_calls" when
+            tools are provided and model returns tool calls.
         """
         if messages:
             return self._generate_chat(
@@ -491,6 +508,8 @@ class OllamaEngine:
                 top_k=top_k,
                 repetition_penalty=repetition_penalty,
                 stop_sequences=stop_sequences,
+                tools=tools,
+                tool_choice=tool_choice,
             )
 
         payload = self._build_generate_payload(
@@ -507,38 +526,74 @@ class OllamaEngine:
         result: str = data.get("response", "")
         return result
 
-    def _generate_chat(
+    def _build_chat_payload(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         max_tokens: int,
         temperature: float,
         top_p: float,
         top_k: int,
         repetition_penalty: float,
         stop_sequences: list[str] | None,
-    ) -> str:
-        """Generate using chat API."""
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | None,
+        stream: bool,
+    ) -> dict[str, Any]:
+        """Build payload for /api/chat endpoint."""
         payload: dict[str, Any] = {
             "model": self._config.model,
             "messages": messages,
-            "stream": False,
+            "stream": stream,
             "options": self._build_options(
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
+                max_tokens, temperature, top_p, top_k, repetition_penalty
             ),
         }
-
         if stop_sequences:
             payload["options"]["stop"] = stop_sequences
-
         if self._config.keep_alive:
             payload["keep_alive"] = self._config.keep_alive
+        if tools:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
+        return payload
 
+    def _generate_chat(
+        self,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        top_k: int,
+        repetition_penalty: float,
+        stop_sequences: list[str] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> str | dict[str, Any]:
+        """Generate using chat API.
+
+        Returns:
+            Content string if no tool calls, or dict with "content" and "tool_calls"
+            when the model returns tool calls.
+        """
+        payload = self._build_chat_payload(
+            messages,
+            max_tokens,
+            temperature,
+            top_p,
+            top_k,
+            repetition_penalty,
+            stop_sequences,
+            tools,
+            tool_choice,
+            stream=False,
+        )
         data = self._post_json("/api/chat", payload, "chat")
-        content: str = data.get("message", {}).get("content", "")
+        message = data.get("message", {})
+        content: str = message.get("content", "")
+        tool_calls = message.get("tool_calls")
+        if tool_calls:
+            return {"content": content, "tool_calls": tool_calls}
         return content
 
     def _build_generate_payload(
@@ -604,28 +659,29 @@ class OllamaEngine:
 
     def _build_chat_stream_payload(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         max_tokens: int,
         temperature: float,
         top_p: float,
         top_k: int,
         repetition_penalty: float,
         stop_sequences: list[str] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build payload for streaming chat endpoint."""
-        payload: dict[str, Any] = {
-            "model": self._config.model,
-            "messages": messages,
-            "stream": True,
-            "options": self._build_options(
-                max_tokens, temperature, top_p, top_k, repetition_penalty
-            ),
-        }
-        if stop_sequences:
-            payload["options"]["stop"] = stop_sequences
-        if self._config.keep_alive:
-            payload["keep_alive"] = self._config.keep_alive
-        return payload
+        return self._build_chat_payload(
+            messages,
+            max_tokens,
+            temperature,
+            top_p,
+            top_k,
+            repetition_penalty,
+            stop_sequences,
+            tools,
+            tool_choice,
+            stream=True,
+        )
 
     def generate_stream_sync(
         self,
@@ -638,7 +694,9 @@ class OllamaEngine:
         use_chat_template: bool | None = None,
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
-        messages: list[dict[str, str]] | None = None,
+        messages: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> OllamaStreamingIterator:
         """Generate text with streaming."""
         if messages:
@@ -650,6 +708,8 @@ class OllamaEngine:
                 top_k,
                 repetition_penalty,
                 stop_sequences,
+                tools,
+                tool_choice,
             )
             return OllamaStreamingIterator(self._lg, self._client, "/api/chat", payload)
 

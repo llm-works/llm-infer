@@ -350,32 +350,54 @@ class RequestHandler(ABC):
         }
         if lora_request := self._resolve_lora_request(request.adapter_id):
             params["lora_request"] = lora_request
+        # Tool calling support
+        if request.tools:
+            params["tools"] = request.tools
+        if request.tool_choice is not None:
+            params["tool_choice"] = request.tool_choice
         return params
 
-    def _process_blocking_request(self, request: Request) -> Response:
-        """Process request with blocking generation (non-streaming)."""
-        ctx = request.context
-        try:
-            result = self.engine.generate(**self._build_engine_params(request))
-            if ctx:
-                ctx.mark(Event.DECODED)
-            prompt_tokens = self.engine.count_tokens(request.prompt)
-            completion_tokens = self.engine.count_tokens(result)
-            if ctx:
-                ctx.mark(
-                    Event.COMPLETE,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                )
-            return Response(
-                id=request.id,
-                status=RequestStatus.COMPLETED,
-                result=result,
+    def _parse_generate_result(
+        self, result: str | dict[str, Any]
+    ) -> tuple[str, list[dict[str, Any]] | None]:
+        """Parse engine generate result, extracting content and tool_calls."""
+        if isinstance(result, dict):
+            return result.get("content", ""), result.get("tool_calls")
+        return result, None
+
+    def _build_success_response(
+        self,
+        request: Request,
+        result_text: str,
+        tool_calls: list[dict[str, Any]] | None,
+    ) -> Response:
+        """Build successful response with token counts."""
+        prompt_tokens = self.engine.count_tokens(request.prompt)
+        completion_tokens = self.engine.count_tokens(result_text)
+        if request.context:
+            request.context.mark(
+                Event.COMPLETE,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             )
+        return Response(
+            id=request.id,
+            status=RequestStatus.COMPLETED,
+            result=result_text,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            tool_calls=tool_calls,
+        )
+
+    def _process_blocking_request(self, request: Request) -> Response:
+        """Process request with blocking generation (non-streaming)."""
+        try:
+            result = self.engine.generate(**self._build_engine_params(request))
+            if request.context:
+                request.context.mark(Event.DECODED)
+            result_text, tool_calls = self._parse_generate_result(result)
+            return self._build_success_response(request, result_text, tool_calls)
         except AdapterError as e:
-            # Adapter validation errors (invalid ID, not enabled, not found)
             if self._lg:
                 self._lg.warning(
                     "adapter error", extra={"request_id": request.id, "error": str(e)}
@@ -401,6 +423,7 @@ class RequestHandler(ABC):
             finish_reason=stream.finish_reason,
             prompt_tokens=stream.prompt_tokens,
             completion_tokens=stream.completion_tokens,
+            tool_calls=getattr(stream, "tool_calls", None),
         )
         self._response_q.put(final_chunk)
 

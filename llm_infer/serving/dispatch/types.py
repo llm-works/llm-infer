@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ...context import RequestContext
@@ -35,8 +35,13 @@ class Request:
     stream: bool = False
     use_chat_template: bool | None = None
     stop_sequences: list[str] | None = None
-    messages: list[dict[str, str]] | None = None  # Chat messages for multi-turn
+    messages: list[dict[str, Any]] | None = None  # Chat messages for multi-turn
     adapter_id: str | None = None  # LoRA adapter name for vLLM
+    # Tool calling support
+    tools: list[dict[str, Any]] | None = None  # OpenAI-format tool definitions
+    tool_choice: str | dict[str, Any] | None = (
+        None  # "auto", "none", "required", or object
+    )
 
 
 @dataclass
@@ -49,6 +54,8 @@ class Response:
     error: str | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # Tool calling response (list of tool call dicts if model requested tool calls)
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -63,9 +70,15 @@ class StreamChunk:
     id: str  # Request ID this chunk belongs to
     token: str  # The token text
     is_final: bool = False  # True for the last chunk
-    finish_reason: str | None = None  # "stop", "length", etc. (only on final)
+    finish_reason: str | None = (
+        None  # "stop", "length", "tool_calls", etc. (only on final)
+    )
     prompt_tokens: int | None = None  # Only set on final chunk
     completion_tokens: int | None = None  # Only set on final chunk
+    # Tool calling support for streaming
+    tool_calls: list[dict[str, Any]] | None = (
+        None  # Tool calls (streamed incrementally)
+    )
 
 
 @dataclass

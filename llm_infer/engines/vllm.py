@@ -587,6 +587,8 @@ class VLLMEngine:
         context: RequestContext | None = None,
         messages: list[dict[str, str]] | None = None,
         lora_request: LoRARequest | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> str:
         """Generate text completion (blocking).
 
@@ -602,10 +604,16 @@ class VLLMEngine:
             context: Request context for logging
             messages: Chat messages (alternative to prompt)
             lora_request: Optional vLLM LoRARequest for adapter inference
+            tools: Tool definitions (not supported, accepted for interface compat)
+            tool_choice: Tool choice (not supported, accepted for interface compat)
 
         Returns:
             Generated text
         """
+        # Note: tools/tool_choice are accepted but not used - vLLM doesn't support
+        # native tool calling. The model may still generate tool-call-like output
+        # in its response text if prompted appropriately.
+        _ = tools, tool_choice
         # Prepare prompt
         final_prompt = self._prepare_prompt(prompt, messages, use_chat_template)
 
@@ -660,17 +668,25 @@ class VLLMEngine:
         context: RequestContext | None = None,
         messages: list[dict[str, str]] | None = None,
         lora_request: LoRARequest | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> VLLMStreamingIterator:
         """Generate text with true token-by-token streaming.
 
         Uses vLLM's underlying LLMEngine add_request/step API to yield
         tokens as they are generated, enabling real-time streaming.
 
+        Args:
+            tools: Tool definitions (not supported, accepted for interface compat)
+            tool_choice: Tool choice (not supported, accepted for interface compat)
+
         Returns:
             VLLMStreamingIterator that yields token strings and has
             prompt_tokens, completion_tokens, finish_reason attributes
             after iteration completes.
         """
+        # Note: tools/tool_choice are accepted but not used
+        _ = tools, tool_choice
         final_prompt = self._prepare_prompt(prompt, messages, use_chat_template)
         sampling_params = self._create_sampling_params(
             max_tokens=max_tokens,
