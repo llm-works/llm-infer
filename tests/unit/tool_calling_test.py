@@ -24,7 +24,12 @@ from llm_infer.serving.api.openai.mappers import (
 )
 from llm_infer.serving.api.openai.router import _convert_tool_calls
 from llm_infer.serving.api.openai.streaming import _convert_tool_calls_to_deltas
-from llm_infer.serving.dispatch.types import Request, Response, StreamChunk
+from llm_infer.serving.dispatch.types import (
+    Request,
+    RequestStatus,
+    Response,
+    StreamChunk,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -507,7 +512,7 @@ class TestDispatchTypesToolCalling:
         """Test Response dataclass accepts tool_calls."""
         resp = Response(
             id="resp-1",
-            status="completed",
+            status=RequestStatus.COMPLETED,
             result="",
             tool_calls=[{"function": {"name": "test", "arguments": "{}"}}],
         )
