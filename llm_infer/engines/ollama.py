@@ -53,8 +53,15 @@ def _build_tool_call_id_mapping(messages: list[dict[str, Any]]) -> dict[str, str
     """Build mapping of tool_call_id -> function_name from assistant messages."""
     id_to_name: dict[str, str] = {}
     for msg in messages:
-        if msg.get("role") == "assistant" and msg.get("tool_calls"):
-            for tc in msg["tool_calls"]:
+        tool_calls = msg.get("tool_calls")
+        if (
+            msg.get("role") == "assistant"
+            and isinstance(tool_calls, list)
+            and tool_calls
+        ):
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
                 func = tc.get("function")
                 if not isinstance(func, dict):
                     continue
@@ -69,12 +76,15 @@ def _convert_single_message(
     msg: dict[str, Any], id_to_name: dict[str, str]
 ) -> dict[str, Any]:
     """Convert a single message from OpenAI to Ollama format."""
-    if msg.get("role") == "assistant" and msg.get("tool_calls"):
+    tool_calls = msg.get("tool_calls")
+    if msg.get("role") == "assistant" and isinstance(tool_calls, list) and tool_calls:
         return {
             "role": "assistant",
             "content": msg.get("content") or "",
             "tool_calls": [
-                _convert_tool_call_to_ollama(tc) for tc in msg["tool_calls"]
+                _convert_tool_call_to_ollama(tc)
+                for tc in tool_calls
+                if isinstance(tc, dict)
             ],
         }
     if msg.get("role") == "tool" and msg.get("tool_call_id"):
