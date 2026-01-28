@@ -31,6 +31,8 @@ def _map_finish_reason(reason: str | None) -> FinishReason:
     """
     if reason == "length":
         return FinishReason.LENGTH
+    if reason == "tool_calls":
+        return FinishReason.TOOL_CALLS
     # "error" and all other cases map to STOP
     return FinishReason.STOP
 
@@ -66,7 +68,11 @@ class StreamingGenerator(ABC):
         pass
 
     @abstractmethod
-    def create_final_chunk(self, finish_reason: FinishReason) -> str:
+    def create_final_chunk(
+        self,
+        finish_reason: FinishReason,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> str:
         """Create SSE event for the final chunk with finish reason."""
         pass
 
@@ -79,17 +85,19 @@ class StreamingGenerator(ABC):
 
         # Stream tokens
         finish_reason = FinishReason.STOP
+        tool_calls = None
         async for chunk in self.ipc.submit_streaming(self.request_id, internal_request):
             if chunk.is_final:
                 finish_reason = _map_finish_reason(chunk.finish_reason)
+                tool_calls = getattr(chunk, "tool_calls", None)
                 break
             if chunk.token:
                 content = self.create_content_chunk(chunk.token)
                 if content:  # Skip empty chunks (e.g., normalizer buffering)
                     yield content
 
-        # Final chunk with finish_reason
-        yield self.create_final_chunk(finish_reason)
+        # Final chunk with finish_reason and tool_calls
+        yield self.create_final_chunk(finish_reason, tool_calls)
         yield format_sse_done()
 
 
@@ -135,7 +143,11 @@ class ChatStreamingGenerator(StreamingGenerator):
         )
         return format_sse_event(chunk.model_dump_json())
 
-    def create_final_chunk(self, finish_reason: FinishReason) -> str:
+    def create_final_chunk(
+        self,
+        finish_reason: FinishReason,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> str:
         """Create final chunk for chat."""
         # Flush normalizer buffer if active
         flushed = ""
@@ -148,6 +160,7 @@ class ChatStreamingGenerator(StreamingGenerator):
             created=self.created,
             content=flushed if flushed else None,
             finish_reason=finish_reason,
+            tool_calls=tool_calls,
         )
         return format_sse_event(chunk.model_dump_json())
 
@@ -165,8 +178,15 @@ class CompletionStreamingGenerator(StreamingGenerator):
         )
         return format_sse_event(chunk.model_dump_json())
 
-    def create_final_chunk(self, finish_reason: FinishReason) -> str:
-        """Create final chunk for completion."""
+    def create_final_chunk(
+        self,
+        finish_reason: FinishReason,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Create final chunk for completion.
+
+        Note: Legacy completions don't support tool calls, so tool_calls is ignored.
+        """
         chunk = create_completion_chunk(
             request_id=self.request_id,
             model=self.model,

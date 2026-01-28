@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from llm_infer.schemas.openai import (
     ChatCompletionRequest,
@@ -10,6 +10,8 @@ from llm_infer.schemas.openai import (
     CompletionRequest,
     FinishReason,
     Role,
+    Tool,
+    ToolChoice,
 )
 
 from ...dispatch.types import Request as InternalRequest
@@ -53,6 +55,25 @@ def normalize_stop_sequences(stop: str | list[str] | None) -> list[str] | None:
     if isinstance(stop, str):
         return [stop]
     return stop
+
+
+def tools_to_dict(tools: list[Tool] | None) -> list[dict[str, Any]] | None:
+    """Convert Tool objects to dict format for internal/backend use."""
+    if tools is None:
+        return None
+    return [tool.model_dump(exclude_none=True) for tool in tools]
+
+
+def tool_choice_to_dict(
+    tool_choice: ToolChoice | None,
+) -> str | dict[str, Any] | None:
+    """Convert ToolChoice to dict/string format for internal/backend use."""
+    if tool_choice is None:
+        return None
+    if isinstance(tool_choice, str):
+        return tool_choice
+    # ToolChoiceObject
+    return tool_choice.model_dump(exclude_none=True)
 
 
 def resolve_think_mode(think: bool | None, model_config: ModelConfig | None) -> bool:
@@ -113,9 +134,34 @@ def _inject_think_suffix(messages: list[dict[str, str]], suffix: str) -> str | N
     return messages[-1]["content"]
 
 
+def _message_to_dict(msg: ChatMessage) -> dict[str, Any]:
+    """Convert ChatMessage to dict format, including tool calling fields."""
+    result: dict[str, Any] = {"role": msg.role.value, "content": msg.content or ""}
+
+    # Include tool_calls for assistant messages
+    if msg.tool_calls:
+        result["tool_calls"] = [
+            tc.model_dump(exclude_none=True) for tc in msg.tool_calls
+        ]
+
+    # Include tool_call_id for tool response messages
+    if msg.tool_call_id:
+        result["tool_call_id"] = msg.tool_call_id
+
+    return result
+
+
+def _has_tool_messages(body: ChatCompletionRequest) -> bool:
+    """Check if request contains tool-related messages."""
+    return any(
+        msg.tool_calls or msg.tool_call_id or msg.role == Role.TOOL
+        for msg in body.messages
+    )
+
+
 def _build_messages_with_injections(
     body: ChatCompletionRequest, think_suffix: str, system_prompt: str | None
-) -> tuple[str, list[dict[str, str]] | None]:
+) -> tuple[str, list[dict[str, Any]] | None]:
     """Build messages list, injecting system prompt and think suffix as needed.
 
     Returns:
@@ -123,19 +169,19 @@ def _build_messages_with_injections(
         (with think suffix if applied) for logging/display, and messages is the
         full message list for template processing (or None for single-message case).
     """
-    # Single user message with no system prompt to inject: pass content directly
+    # Single user message with no system prompt to inject and no tool messages:
+    # pass content directly
     if (
         len(body.messages) == 1
         and body.messages[0].role == Role.USER
         and not system_prompt
+        and not _has_tool_messages(body)
     ):
         prompt = (body.messages[0].content or "") + think_suffix
         return prompt, None
 
-    # Build messages list for template
-    messages = [
-        {"role": msg.role.value, "content": msg.content or ""} for msg in body.messages
-    ]
+    # Build messages list for template, including tool calling fields
+    messages = [_message_to_dict(msg) for msg in body.messages]
 
     # Inject model config system prompt only if request doesn't already have one
     if system_prompt and not _has_system_message(body):
@@ -174,6 +220,8 @@ def chat_request_to_internal(
         stop_sequences=normalize_stop_sequences(body.stop),
         messages=messages,
         adapter_id=body.adapter_id,
+        tools=tools_to_dict(body.tools),
+        tool_choice=tool_choice_to_dict(body.tool_choice),
     )
 
 
@@ -204,10 +252,13 @@ def determine_finish_reason(
     is_eos: bool,
     max_tokens_reached: bool,
     guard_triggered: bool = False,
+    has_tool_calls: bool = False,
 ) -> FinishReason:
     """Determine OpenAI finish_reason from internal state."""
     if guard_triggered:
         return FinishReason.CONTENT_FILTER
+    if has_tool_calls:
+        return FinishReason.TOOL_CALLS
     if max_tokens_reached:
         return FinishReason.LENGTH
     return FinishReason.STOP

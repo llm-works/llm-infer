@@ -24,9 +24,11 @@ from llm_infer.schemas.openai import (
     EmbeddingResponse,
     EmbeddingUsage,
     FinishReason,
+    FunctionCall,
     ModelInfo,
     ModelList,
     Role,
+    ToolCall,
 )
 
 from ..errors import raise_for_error_status
@@ -107,13 +109,37 @@ def _extract_and_separate_thinking(
     return extract_thinking(normalized, open_tags, close_tags)
 
 
+def _convert_tool_calls(
+    tool_calls: list[dict[str, Any]] | None,
+) -> list[ToolCall] | None:
+    """Convert internal tool_calls format to OpenAI schema objects."""
+    if not tool_calls:
+        return None
+    result = []
+    for i, tc in enumerate(tool_calls):
+        # Handle both Ollama format and already-converted format
+        func = tc.get("function", {})
+        result.append(
+            ToolCall(
+                id=tc.get("id", f"call_{uuid.uuid4().hex[:24]}"),
+                type="function",
+                function=FunctionCall(
+                    name=func.get("name", ""),
+                    arguments=func.get("arguments", "{}"),
+                ),
+            )
+        )
+    return result if result else None
+
+
 def _build_chat_response(
     request_id: str,
     model_name: str,
-    content: str,
+    content: str | None,
     thinking: str | None,
     finish_reason: FinishReason,
     response: Any,
+    tool_calls: list[ToolCall] | None = None,
 ) -> ChatCompletionResponse:
     """Build chat completion response object."""
     return ChatCompletionResponse(
@@ -124,12 +150,32 @@ def _build_chat_response(
             ChatCompletionChoice(
                 index=0,
                 message=ChatMessage(
-                    role=Role.ASSISTANT, content=content, thinking=thinking
+                    role=Role.ASSISTANT,
+                    content=content,
+                    thinking=thinking,
+                    tool_calls=tool_calls,
+                    tool_call_id=None,
                 ),
                 finish_reason=finish_reason,
             )
         ],
         usage=_build_completion_usage(response),
+    )
+
+
+def _determine_chat_finish_reason(
+    response: Any, body: ChatCompletionRequest, has_tool_calls: bool
+) -> FinishReason:
+    """Determine finish reason for chat completion."""
+    max_tokens_reached = (
+        response.completion_tokens is not None
+        and body.max_tokens is not None
+        and response.completion_tokens >= body.max_tokens
+    )
+    return determine_finish_reason(
+        is_eos=not max_tokens_reached,
+        max_tokens_reached=max_tokens_reached,
+        has_tool_calls=has_tool_calls,
     )
 
 
@@ -148,18 +194,18 @@ async def _handle_chat_non_streaming(
     thinking, content = _extract_and_separate_thinking(
         response.result or "", body.think, model_config
     )
-
-    max_tokens_reached = (
-        response.completion_tokens is not None
-        and body.max_tokens is not None
-        and response.completion_tokens >= body.max_tokens
-    )
-    finish_reason = determine_finish_reason(
-        is_eos=not max_tokens_reached, max_tokens_reached=max_tokens_reached
-    )
+    tool_calls = _convert_tool_calls(getattr(response, "tool_calls", None))
+    has_tool_calls = bool(tool_calls)
+    finish_reason = _determine_chat_finish_reason(response, body, has_tool_calls)
 
     return _build_chat_response(
-        request_id, model_name, content, thinking, finish_reason, response
+        request_id,
+        model_name,
+        content if content else None,
+        thinking,
+        finish_reason,
+        response,
+        tool_calls,
     )
 
 
