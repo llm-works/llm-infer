@@ -7,7 +7,7 @@ models. It requires the anthropic package to be installed:
 
 Key differences from OpenAI-compatible backends:
 - System messages are passed as a separate parameter, not in messages
-- Thinking mode uses Anthropic's native extended_thinking feature
+- Thinking mode is not yet supported (extended_thinking requires different API structure)
 - Tool calling uses Anthropic's native format
 """
 

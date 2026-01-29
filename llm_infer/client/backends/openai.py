@@ -484,7 +484,7 @@ class OpenAICompatibleBackend(Backend):
                 type="function",
                 function=FunctionCall(
                     name=tc["function"]["name"],
-                    arguments=tc["function"]["arguments"],
+                    arguments=tc["function"].get("arguments") or "",
                 ),
             )
             for tc in raw_tool_calls
@@ -518,16 +518,19 @@ class OpenAICompatibleBackend(Backend):
 
     def _parse_sse_line(self, line: str) -> dict[str, Any] | bool | None:
         """Parse a single SSE line. Returns None for [DONE], False to skip, dict for data."""
-        if not line or not line.startswith("data: "):
+        if not line or not line.startswith("data:"):
             return False
-        data = line[6:]
+        # Per SSE spec, space after colon is optional and stripped if present
+        data = line[5:]
+        if data.startswith(" "):
+            data = data[1:]
         if data == "[DONE]":
             return None
         try:
             result: dict[str, Any] = json.loads(data)
             return result
-        except json.JSONDecodeError:
-            return False
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid SSE JSON: {e}") from e
 
 
 @dataclass
