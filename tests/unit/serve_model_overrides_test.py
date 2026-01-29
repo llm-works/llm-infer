@@ -8,7 +8,7 @@ import pytest
 
 from llm_infer.cli.tools.serve import ServeTool
 from llm_infer.models.config import ModelConfig, ModelsConfig
-from llm_infer.serving.dispatch.config import VLLMConfig
+from llm_infer.serving.dispatch.config import OllamaConfig, VLLMConfig
 
 pytestmark = pytest.mark.unit
 
@@ -18,6 +18,7 @@ class MockEnginesConfig:
     """Mock engines config for testing."""
 
     vllm: VLLMConfig = field(default_factory=VLLMConfig)
+    ollama: OllamaConfig = field(default_factory=OllamaConfig)
 
 
 @dataclass
@@ -65,6 +66,7 @@ class TestApplyModelOverrides:
         tool._apply_model_overrides(config, "embed-model")
 
         assert config.engines.vllm.task == "embed"
+        assert config.engines.ollama.task == "embed"
         mock_lg.debug.assert_called()
 
     def test_applies_max_model_len_override(
