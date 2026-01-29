@@ -647,7 +647,7 @@ def _parse_usage(data: dict[str, Any] | None) -> ChatCompletionUsage | None:
     if data is None:
         return None
     return ChatCompletionUsage(
-        prompt_tokens=data.get("prompt_tokens", 0),
-        completion_tokens=data.get("completion_tokens", 0),
-        total_tokens=data.get("total_tokens", 0),
+        prompt_tokens=data.get("prompt_tokens") or 0,
+        completion_tokens=data.get("completion_tokens") or 0,
+        total_tokens=data.get("total_tokens") or 0,
     )

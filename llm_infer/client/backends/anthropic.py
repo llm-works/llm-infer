@@ -59,7 +59,7 @@ class AnthropicBackend(Backend):
         - System messages should be passed via the `system` parameter,
           not in the messages list.
         - adapter_id is not supported (Anthropic-specific feature).
-        - think mode maps to Anthropic's extended_thinking if available.
+        - think mode is currently not supported (raises NotImplementedError).
     """
 
     def __init__(
@@ -402,7 +402,10 @@ class AnthropicBackend(Backend):
         for tc in msg["tool_calls"]:
             # Parse arguments from JSON string to dict for Anthropic
             args_raw = tc.get("function", {}).get("arguments", "{}")
-            if isinstance(args_raw, str):
+            args_parsed: dict[str, Any]
+            if args_raw is None:
+                args_parsed = {}
+            elif isinstance(args_raw, str):
                 try:
                     args_parsed = json.loads(args_raw) if args_raw else {}
                 except json.JSONDecodeError:
@@ -522,6 +525,11 @@ class AnthropicBackend(Backend):
             return self._process_delta(event, state)
         elif event_type == "content_block_stop":
             self._process_block_stop(event, state)
+        elif event_type == "message_delta":
+            # Capture usage from message_delta events (authoritative source)
+            usage = getattr(event, "usage", None)
+            if usage:
+                state.usage = self._create_usage(usage)
         return None
 
     def _process_delta(self, event: Any, state: _StreamState) -> str | None:
@@ -546,9 +554,12 @@ class AnthropicBackend(Backend):
             state.tool_calls.append(self._create_tool_call(block))
 
     def _finalize_stream_state(self, state: _StreamState, final_message: Any) -> None:
-        """Finalize stream state with usage from final message."""
+        """Finalize stream state with usage and finish reason."""
         if final_message:
-            state.usage = self._create_usage(getattr(final_message, "usage", None))
+            # Prefer usage from message_delta events (already captured in state.usage)
+            # Fall back to final_message.usage only if not captured during streaming
+            if state.usage is None:
+                state.usage = self._create_usage(getattr(final_message, "usage", None))
             state.finish_reason = self._map_stop_reason(final_message.stop_reason)
 
     def _map_stop_reason(self, stop_reason: str | None) -> FinishReason | None:
