@@ -465,7 +465,7 @@ class AnthropicBackend(Backend):
 
         return ChatResponse(
             content="".join(content_parts),
-            usage=self._create_usage(response.usage),
+            usage=self._create_usage(getattr(response, "usage", None)),
             finish_reason=self._map_stop_reason(response.stop_reason),
             model=response.model or model,
             thinking="".join(thinking_parts) if thinking_parts else None,
@@ -500,8 +500,10 @@ class AnthropicBackend(Backend):
             ),
         )
 
-    def _create_usage(self, usage: Any) -> ChatCompletionUsage:
+    def _create_usage(self, usage: Any) -> ChatCompletionUsage | None:
         """Create ChatCompletionUsage from Anthropic usage."""
+        if usage is None:
+            return None
         return ChatCompletionUsage(
             prompt_tokens=usage.input_tokens,
             completion_tokens=usage.output_tokens,
@@ -546,7 +548,7 @@ class AnthropicBackend(Backend):
     def _finalize_stream_state(self, state: _StreamState, final_message: Any) -> None:
         """Finalize stream state with usage from final message."""
         if final_message:
-            state.usage = self._create_usage(final_message.usage)
+            state.usage = self._create_usage(getattr(final_message, "usage", None))
             state.finish_reason = self._map_stop_reason(final_message.stop_reason)
 
     def _map_stop_reason(self, stop_reason: str | None) -> FinishReason | None:

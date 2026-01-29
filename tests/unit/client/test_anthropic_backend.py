@@ -102,6 +102,43 @@ class TestAnthropicBackendMocked:
             assert result[0]["content"][0]["type"] == "tool_result"
             assert result[0]["content"][0]["tool_use_id"] == "call_123"
 
+    def test_convert_assistant_with_tools_parses_arguments(
+        self, mock_anthropic: Any
+    ) -> None:
+        """Test tool call arguments are parsed from JSON strings."""
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+            from llm_infer.client.backends.anthropic import AnthropicBackend
+
+            backend = AnthropicBackend.__new__(AnthropicBackend)
+            backend._anthropic = mock_anthropic
+
+            msg = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"city": "SF"}',
+                        },
+                    },
+                    {
+                        "id": "call_2",
+                        "function": {
+                            "name": "get_temp",
+                            "arguments": "{bad json",
+                        },
+                    },
+                ],
+            }
+            converted = backend._convert_single_message(msg)
+
+            assert converted is not None
+            tool_uses = [b for b in converted["content"] if b["type"] == "tool_use"]
+            assert tool_uses[0]["input"] == {"city": "SF"}
+            assert tool_uses[1]["input"] == {}  # Malformed JSON defaults to empty dict
+
     def test_prepare_request_basic(self, mock_anthropic: Any) -> None:
         """Test basic request kwargs construction."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):

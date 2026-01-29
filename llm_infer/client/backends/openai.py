@@ -225,6 +225,10 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(
                 f"Backend error: {e.response.text}", status_code=e.response.status_code
             ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
 
     def _execute_stream_sync(
         self, url: str, payload: dict[str, Any]
@@ -248,6 +252,10 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(
                 f"Backend error: {e.response.text}", status_code=e.response.status_code
             ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
 
     async def _execute_async(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute async request with error translation."""
@@ -269,6 +277,10 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(
                 f"Backend error: {e.response.text}", status_code=e.response.status_code
             ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
 
     async def _execute_stream_async(
         self, url: str, payload: dict[str, Any]
@@ -294,6 +306,10 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(
                 f"Backend error: {e.response.text}", status_code=e.response.status_code
             ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
 
     # =========================================================================
     # Resource management
