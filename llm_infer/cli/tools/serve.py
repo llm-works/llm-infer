@@ -149,6 +149,7 @@ class ServeTool(Tool):
             return
         if model_cfg.task:
             config.engines.vllm.task = model_cfg.task
+            config.engines.ollama.task = model_cfg.task
             self.lg.debug("model override", extra={"task": model_cfg.task})
         if model_cfg._max_model_len_set:
             config.engines.vllm.max_model_len = model_cfg.max_model_len

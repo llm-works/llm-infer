@@ -75,6 +75,10 @@ models:
       # See: https://github.com/vllm-project/vllm/issues/25991
       enable_prefix_caching: false
 
+  nomic-embed-text:
+    task: embed
+    ollama: nomic-embed-text
+
   # ---------------------------------------------------------------------------
   # Qwen2.5 instruct models
   # ---------------------------------------------------------------------------
