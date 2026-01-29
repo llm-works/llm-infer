@@ -400,6 +400,21 @@ class OpenAICompatibleBackend(Backend):
             return list(messages)
         return [{"role": Role.SYSTEM.value, "content": system}, *messages]
 
+    # Reserved keys that cannot be overridden via kwargs
+    _RESERVED_KEYS = frozenset(
+        {
+            "model",
+            "messages",
+            "temperature",
+            "stream",
+            "max_tokens",
+            "adapter_id",
+            "think",
+            "tools",
+            "tool_choice",
+        }
+    )
+
     def _build_payload(
         self,
         messages: list[dict[str, Any]],
@@ -423,8 +438,9 @@ class OpenAICompatibleBackend(Backend):
         self._add_optional_params(
             payload, max_tokens, adapter_id, think, tools, tool_choice
         )
+        # Add extra kwargs, filtering out reserved keys to prevent override
         for key, value in kwargs.items():
-            if value is not None:
+            if value is not None and key not in self._RESERVED_KEYS:
                 payload[key] = value
         return payload
 
