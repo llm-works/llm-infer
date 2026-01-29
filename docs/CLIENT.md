@@ -6,7 +6,7 @@ operations.
 ## Overview
 
 The `llm_infer.client` module provides a multi-backend client for interacting with LLM APIs. It
-supports both synchronous and asynchronous operations, SSE streaming, and llm-infer specific
+supports both synchronous and asynchronous operations, SSE streaming, and llm-infer-specific
 extensions like LoRA adapters and thinking mode.
 
 **Supported Backends:**
@@ -78,8 +78,9 @@ with LLMClient.openai() as client:
     ):
         print(token, end="", flush=True)
 
-    # Access usage stats after streaming completes
-    print(f"\nTokens: {client.last_response.usage.total_tokens}")
+    # Access usage stats after streaming completes (with null check)
+    if client.last_response and client.last_response.usage:
+        print(f"\nTokens: {client.last_response.usage.total_tokens}")
 
 # Async streaming
 async with LLMClient.openai() as client:
@@ -410,7 +411,7 @@ finally:
 
 ### Streaming Flow
 
-```
+```text
 Client                    Backend                   API
   │                         │                        │
   │─── chat_stream() ──────>│                        │
@@ -427,7 +428,7 @@ Client                    Backend                   API
 
 ### Non-Streaming Flow
 
-```
+```text
 Client                    Backend                   API
   │                         │                        │
   │─── chat_full() ────────>│                        │

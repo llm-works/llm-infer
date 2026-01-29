@@ -24,6 +24,8 @@ class TestAnthropicBackendImport:
 
             # The import itself won't fail, but instantiation will
             # This is because we do lazy import in __init__
+            with pytest.raises(ImportError, match="anthropic"):
+                anthropic_backend.AnthropicBackend()
 
 
 class TestAnthropicBackendMocked:

@@ -347,7 +347,11 @@ class AnthropicBackend(Backend):
         if tool_choice:
             self._apply_tool_choice(request_kwargs, tool_choice)
 
-        _ = think  # Extended thinking requires different API structure
+        if think:
+            raise NotImplementedError(
+                "think mode is not yet supported for Anthropic backend; "
+                "extended_thinking requires different API structure"
+            )
 
         for key, value in kwargs.items():
             if value is not None and key not in ("stream",):
@@ -396,12 +400,21 @@ class AnthropicBackend(Backend):
         if content:
             content_blocks.append({"type": "text", "text": content})
         for tc in msg["tool_calls"]:
+            # Parse arguments from JSON string to dict for Anthropic
+            args_raw = tc.get("function", {}).get("arguments", "{}")
+            if isinstance(args_raw, str):
+                try:
+                    args_parsed = json.loads(args_raw) if args_raw else {}
+                except json.JSONDecodeError:
+                    args_parsed = {}
+            else:
+                args_parsed = args_raw
             content_blocks.append(
                 {
                     "type": "tool_use",
                     "id": tc.get("id", ""),
                     "name": tc.get("function", {}).get("name", ""),
-                    "input": tc.get("function", {}).get("arguments", "{}"),
+                    "input": args_parsed,
                 }
             )
         return {"role": "assistant", "content": content_blocks}

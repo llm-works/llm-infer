@@ -306,7 +306,11 @@ class OpenAICompatibleBackend(Backend):
         return self._async_client
 
     def close(self) -> None:
-        """Close sync HTTP client."""
+        """Close sync HTTP client.
+
+        Note: If async operations were used, call aclose() instead to also
+        close the async client.
+        """
         self._client.close()
 
     async def aclose(self) -> None:
