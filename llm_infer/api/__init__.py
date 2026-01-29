@@ -1,20 +1,20 @@
 """Public API schemas and client for llm-infer.
 
 This module provides clean public exports of OpenAI-compatible schemas and
-a streaming client, enabling downstream projects (proxies, frontends) to
+a multi-backend client, enabling downstream projects (proxies, frontends) to
 import without reaching into internal module paths.
 
 Usage:
     from llm_infer.api import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
 
     # Client usage
-    from llm_infer.api import OpenAIClient, ChatClient, ChatResponse
+    from llm_infer.api import LLMClient, ChatResponse
 
-    client = OpenAIClient(base_url="http://localhost:8000/v1")
-    response = await client.chat([{"role": "user", "content": "Hello"}])
+    with LLMClient.openai(base_url="http://localhost:8000/v1") as client:
+        response = client.chat([{"role": "user", "content": "Hello"}])
 """
 
-from llm_infer.client import ChatClient, ChatResponse, OpenAIClient
+from llm_infer.client import Backend, ChatResponse, LLMClient
 from llm_infer.schemas.openai import (
     ChatCompletionChoice,
     ChatCompletionChunk,
@@ -69,7 +69,7 @@ __all__ = [
     "ModelInfo",
     "ModelList",
     # Client
-    "ChatClient",
+    "Backend",
     "ChatResponse",
-    "OpenAIClient",
+    "LLMClient",
 ]

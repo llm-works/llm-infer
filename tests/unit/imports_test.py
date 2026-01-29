@@ -190,11 +190,11 @@ class TestCircularImportRegression:
         Fixed by moving schemas to llm_infer.schemas.openai (leaf module).
         """
         _run_import_test("""
-from llm_infer.client import ChatClient, ChatResponse, OpenAIClient
-from llm_infer.api import ChatCompletionRequest, OpenAIClient as APIClient
+from llm_infer.client import Backend, ChatResponse, LLMClient
+from llm_infer.api import ChatCompletionRequest, LLMClient as APIClient
 
-assert OpenAIClient is APIClient  # Same class re-exported
-assert ChatClient is not None
+assert LLMClient is APIClient  # Same class re-exported
+assert Backend is not None
 assert ChatResponse is not None
 assert ChatCompletionRequest is not None
 """)
@@ -273,10 +273,10 @@ assert "llm_infer.serving.dispatch.main" in sys.modules
         to call upstream and the streaming utilities to format responses.
         """
         _run_import_test("""
-from llm_infer.client import OpenAIClient
+from llm_infer.client import LLMClient
 from llm_infer.serving.api.openai.streaming import stream_chat_completion_sync
 
-assert OpenAIClient is not None
+assert LLMClient is not None
 assert callable(stream_chat_completion_sync)
 """)
 
@@ -295,7 +295,7 @@ class TestPublicAPIImports:
         import llm_infer.api as api
 
         # Client types that are not Pydantic models
-        client_types = {"ChatClient", "ChatResponse", "OpenAIClient"}
+        client_types = {"Backend", "ChatResponse", "LLMClient"}
 
         for name in api.__all__:
             obj = getattr(api, name)
