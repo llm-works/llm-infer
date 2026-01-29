@@ -13,6 +13,7 @@ Key differences from OpenAI-compatible backends:
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, Any
@@ -482,7 +483,7 @@ class AnthropicBackend(Backend):
                 name=block.name,
                 arguments=block.input
                 if isinstance(block.input, str)
-                else str(block.input),
+                else json.dumps(block.input),
             ),
         )
 
