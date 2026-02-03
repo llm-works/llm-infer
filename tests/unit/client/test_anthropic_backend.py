@@ -4,14 +4,21 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from appinfra.log import Logger
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def mock_lg() -> Logger:
+    """Create a mock logger for testing."""
+    return MagicMock(spec=Logger)
 
 
 class TestAnthropicBackendImport:
     """Test Anthropic backend import behavior."""
 
-    def test_import_error_when_package_missing(self) -> None:
+    def test_import_error_when_package_missing(self, mock_lg: Logger) -> None:
         """Test ImportError raised when anthropic package not installed."""
         with patch.dict("sys.modules", {"anthropic": None}):
             # Need to reimport to trigger the check
@@ -25,7 +32,7 @@ class TestAnthropicBackendImport:
             # The import itself won't fail, but instantiation will
             # This is because we do lazy import in __init__
             with pytest.raises(ImportError, match="anthropic"):
-                anthropic_backend.AnthropicBackend()
+                anthropic_backend.AnthropicBackend(mock_lg)
 
 
 class TestAnthropicBackendMocked:
@@ -264,7 +271,7 @@ class TestAnthropicBackendMocked:
             assert backend._map_stop_reason(None) is None
             assert backend._map_stop_reason("unknown") is None
 
-    def test_from_config(self, mock_anthropic: Any) -> None:
+    def test_from_config(self, mock_anthropic: Any, mock_lg: Logger) -> None:
         """Test creating backend from config."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from llm_infer.client.backends.anthropic import AnthropicBackend
@@ -276,7 +283,7 @@ class TestAnthropicBackendMocked:
                 "timeout": 60.0,
             }
 
-            backend = AnthropicBackend.from_config(config)
+            backend = AnthropicBackend.from_config(mock_lg, config)
 
             assert backend._model == "claude-3-opus"
             assert backend._max_tokens == 2000

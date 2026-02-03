@@ -8,13 +8,17 @@ Usage:
     from llm_infer.api import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
 
     # Client usage
-    from llm_infer.api import LLMClient, ChatResponse
+    from appinfra.log import Logger
+    from llm_infer.api import Factory, ChatResponse
 
-    with LLMClient.openai(base_url="http://localhost:8000/v1") as client:
+    lg = Logger("my-app")
+    factory = Factory(lg)
+
+    with factory.openai(base_url="http://localhost:8000/v1") as client:
         response = client.chat([{"role": "user", "content": "Hello"}])
 """
 
-from llm_infer.client import Backend, ChatResponse, LLMClient
+from llm_infer.client import Backend, ChatResponse, Factory, LLMClient
 from llm_infer.schemas.openai import (
     ChatCompletionChoice,
     ChatCompletionChunk,
@@ -71,5 +75,6 @@ __all__ = [
     # Client
     "Backend",
     "ChatResponse",
+    "Factory",
     "LLMClient",
 ]

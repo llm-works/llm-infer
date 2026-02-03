@@ -295,7 +295,7 @@ class TestPublicAPIImports:
         import llm_infer.api as api
 
         # Client types that are not Pydantic models
-        client_types = {"Backend", "ChatResponse", "LLMClient"}
+        client_types = {"Backend", "ChatResponse", "Factory", "LLMClient"}
 
         for name in api.__all__:
             obj = getattr(api, name)

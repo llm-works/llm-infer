@@ -18,6 +18,8 @@ from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
+
 from llm_infer.client.backends.base import Backend
 from llm_infer.client.exceptions import (
     BackendRequestError,
@@ -64,6 +66,7 @@ class AnthropicBackend(Backend):
 
     def __init__(
         self,
+        lg: Logger,
         model: str = "claude-sonnet-4-20250514",
         api_key: str | None = None,
         max_tokens: int = 4096,
@@ -78,6 +81,7 @@ class AnthropicBackend(Backend):
                 "Install with: pip install llm-infer[anthropic]"
             ) from e
 
+        self._lg = lg
         self._anthropic = anthropic_module
         self._model = model
         self._max_tokens = max_tokens
@@ -305,9 +309,10 @@ class AnthropicBackend(Backend):
     # =========================================================================
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> AnthropicBackend:
+    def from_config(cls, lg: Logger, config: dict[str, Any]) -> AnthropicBackend:
         """Create backend from configuration dict."""
         return cls(
+            lg=lg,
             model=config.get("model", "claude-sonnet-4-20250514"),
             api_key=config.get("api_key"),
             max_tokens=config.get("max_tokens", 4096),

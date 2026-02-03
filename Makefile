@@ -9,7 +9,7 @@ INFRA_DEV_PKG_NAME := llm_infer
 INFRA_DEV_CQ_STRICT := true
 
 # Test coverage threshold (percentage)
-INFRA_PYTEST_COVERAGE_THRESHOLD := 30
+INFRA_PYTEST_COVERAGE_THRESHOLD := 50
 
 # Custom pip config for flashinfer index
 export PIP_CONFIG_FILE := etc/pip.conf

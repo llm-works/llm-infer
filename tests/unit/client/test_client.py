@@ -1,21 +1,31 @@
-"""Unit tests for LLMClient facade."""
+"""Unit tests for LLMClient facade and Factory."""
 
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from appinfra.log import Logger
 
-from llm_infer.client import ChatResponse, LLMClient
+from llm_infer.client import ChatResponse, Factory, LLMClient
 from llm_infer.client.backends import Backend, OpenAICompatibleBackend
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
 
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture
+def mock_lg() -> Logger:
+    """Create a mock logger for testing."""
+    return MagicMock(spec=Logger)
+
+
 class MockBackend(Backend):
     """Mock backend for testing."""
 
-    def __init__(self, responses: list[ChatResponse] | None = None) -> None:
+    def __init__(
+        self, lg: Logger | None = None, responses: list[ChatResponse] | None = None
+    ) -> None:
+        self._lg = lg
         self._responses = iter(responses or [])
         self._last_response: ChatResponse | None = None
         self._closed = False
@@ -55,8 +65,8 @@ class MockBackend(Backend):
         self._aclosed = True
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "MockBackend":
-        return cls()
+    def from_config(cls, lg: Logger, config: dict[str, Any]) -> "MockBackend":
+        return cls(lg=lg)
 
 
 class TestLLMClientInit:
@@ -76,12 +86,13 @@ class TestLLMClientInit:
         assert client._default_model == "gpt-4"
 
 
-class TestLLMClientFactoryMethods:
-    """Test LLMClient factory methods."""
+class TestFactory:
+    """Test Factory methods."""
 
-    def test_openai_creates_openai_backend(self) -> None:
+    def test_openai_creates_openai_backend(self, mock_lg: Logger) -> None:
         """Test openai() creates OpenAI backend."""
-        client = LLMClient.openai(
+        factory = Factory(mock_lg)
+        client = factory.openai(
             base_url="http://test:8000/v1",
             model="test-model",
             api_key="test-key",
@@ -91,19 +102,21 @@ class TestLLMClientFactoryMethods:
         assert client._default_model == "test-model"
         client.close()
 
-    def test_from_config_single_backend(self) -> None:
+    def test_from_config_single_backend(self, mock_lg: Logger) -> None:
         """Test from_config with single backend config."""
+        factory = Factory(mock_lg)
         config = {
             "type": "openai_compatible",
             "base_url": "http://test:8000/v1",
             "model": "test-model",
         }
-        client = LLMClient.from_config(config)
+        client = factory.from_config(config)
         assert isinstance(client.backend, OpenAICompatibleBackend)
         client.close()
 
-    def test_from_config_multi_backend(self) -> None:
+    def test_from_config_multi_backend(self, mock_lg: Logger) -> None:
         """Test from_config with multiple backends."""
+        factory = Factory(mock_lg)
         config = {
             "default": "local",
             "backends": {
@@ -119,13 +132,16 @@ class TestLLMClientFactoryMethods:
                 },
             },
         }
-        client = LLMClient.from_config(config)
+        client = factory.from_config(config)
         assert isinstance(client.backend, OpenAICompatibleBackend)
         assert client._default_model == "local-model"
         client.close()
 
-    def test_from_config_uses_first_backend_if_no_default(self) -> None:
+    def test_from_config_uses_first_backend_if_no_default(
+        self, mock_lg: Logger
+    ) -> None:
         """Test from_config uses first backend when no default specified."""
+        factory = Factory(mock_lg)
         config = {
             "backends": {
                 "first": {
@@ -134,12 +150,13 @@ class TestLLMClientFactoryMethods:
                 },
             },
         }
-        client = LLMClient.from_config(config)
+        client = factory.from_config(config)
         assert isinstance(client.backend, OpenAICompatibleBackend)
         client.close()
 
-    def test_from_config_raises_on_missing_default(self) -> None:
+    def test_from_config_raises_on_missing_default(self, mock_lg: Logger) -> None:
         """Test from_config raises when default backend not found."""
+        factory = Factory(mock_lg)
         config = {
             "default": "missing",
             "backends": {
@@ -147,7 +164,7 @@ class TestLLMClientFactoryMethods:
             },
         }
         with pytest.raises(ValueError, match="missing.*not found"):
-            LLMClient.from_config(config)
+            factory.from_config(config)
 
 
 class TestLLMClientSyncAPI:

@@ -1,12 +1,12 @@
 """OpenAI-compatible Pydantic models for request/response schemas."""
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     """Chat message roles."""
 
     SYSTEM = "system"
@@ -15,7 +15,7 @@ class Role(str, Enum):
     TOOL = "tool"
 
 
-class FinishReason(str, Enum):
+class FinishReason(StrEnum):
     """Reason generation stopped."""
 
     STOP = "stop"
