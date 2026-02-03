@@ -122,7 +122,7 @@ The client supports llm-infer specific extensions for enhanced functionality.
 ### LoRA Adapter Selection
 
 ```python
-with Factory.openai() as client:
+with factory.openai() as client:
     response = client.chat_full(
         messages=[{"role": "user", "content": "Translate to French: Hello"}],
         adapter_id="translation-lora",  # Select LoRA adapter
@@ -134,7 +134,7 @@ with Factory.openai() as client:
 Enable thinking mode to get separated reasoning content:
 
 ```python
-with Factory.openai() as client:
+with factory.openai() as client:
     response = client.chat_full(
         messages=[{"role": "user", "content": "What is 15 * 23?"}],
         think=True,  # Enable thinking mode
@@ -163,7 +163,7 @@ tools = [
     }
 ]
 
-with Factory.openai() as client:
+with factory.openai() as client:
     response = client.chat_full(
         messages=[{"role": "user", "content": "What's the weather in NYC?"}],
         tools=tools,
@@ -179,11 +179,17 @@ with Factory.openai() as client:
 
 ### Factory
 
-Factory class for creating LLMClient instances.
+Factory class for creating LLMClient instances. Requires a `Logger` instance.
 
 ```python
+from appinfra.log import Logger
+from llm_infer.client import Factory
+
+lg = Logger("my-app")
+factory = Factory(lg)
+
 # OpenAI-compatible API
-Factory.openai(
+factory.openai(
     base_url: str = "http://localhost:8000/v1",
     model: str = "default",
     api_key: str | None = None,
@@ -191,7 +197,7 @@ Factory.openai(
 ) -> LLMClient
 
 # Anthropic Claude API
-Factory.anthropic(
+factory.anthropic(
     model: str = "claude-sonnet-4-20250514",
     api_key: str | None = None,
     max_tokens: int = 4096,
@@ -199,10 +205,10 @@ Factory.anthropic(
 ) -> LLMClient
 
 # From configuration dict
-Factory.from_config(config: dict) -> LLMClient
-Factory.from_backend_config(config: dict) -> LLMClient
+factory.from_config(config: dict) -> LLMClient
+factory.from_backend_config(config: dict) -> LLMClient
 
-# Register custom backend
+# Register custom backend (class method)
 Factory.register(name: str, backend_class: type[Backend]) -> None
 ```
 
@@ -285,12 +291,15 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
+from appinfra.log import Logger
 from llm_infer.api import FinishReason
 from llm_infer.client import Factory
 from llm_infer.serving.api.openai.streaming import stream_chat_completion
 
 app = FastAPI()
-client = Factory.openai(base_url="http://backend:8000/v1")
+lg = Logger("proxy")
+factory = Factory(lg)
+client = factory.openai(base_url="http://backend:8000/v1")
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
@@ -352,8 +361,8 @@ class MockBackend(Backend):
         return gen()
 
     @classmethod
-    def from_config(cls, config):
-        return cls([])
+    def from_config(cls, lg: Logger, config: dict) -> "MockBackend":
+        return cls(responses=[])
 
 # Use in tests
 backend = MockBackend(["Hello!", "Goodbye!"])
@@ -364,15 +373,21 @@ assert client.chat([{"role": "user", "content": "Hi"}]) == "Hello!"
 ### With External APIs
 
 ```python
+from appinfra.log import Logger
+from llm_infer.client import Factory
+
+lg = Logger("my-app")
+factory = Factory(lg)
+
 # OpenAI
-client = Factory.openai(
+client = factory.openai(
     base_url="https://api.openai.com/v1",
     api_key="sk-...",
     model="gpt-4",
 )
 
 # Anthropic
-client = Factory.anthropic(
+client = factory.anthropic(
     api_key="sk-ant-...",
     model="claude-sonnet-4-20250514",
 )
@@ -383,6 +398,7 @@ client = Factory.anthropic(
 The client provides a clean exception hierarchy:
 
 ```python
+from appinfra.log import Logger
 from llm_infer.client import (
     Factory,
     BackendError,
@@ -391,7 +407,10 @@ from llm_infer.client import (
     BackendRequestError,
 )
 
-with Factory.openai() as client:
+lg = Logger("my-app")
+factory = Factory(lg)
+
+with factory.openai() as client:
     try:
         response = client.chat(messages=[{"role": "user", "content": "Hello"}])
     except BackendUnavailableError:
@@ -409,16 +428,22 @@ with Factory.openai() as client:
 Always use context managers to ensure proper cleanup:
 
 ```python
+from appinfra.log import Logger
+from llm_infer.client import Factory
+
+lg = Logger("my-app")
+factory = Factory(lg)
+
 # Sync - closes sync HTTP client
-with Factory.openai() as client:
+with factory.openai() as client:
     response = client.chat(messages)
 
 # Async - closes both sync and async HTTP clients
-async with Factory.openai() as client:
+async with factory.openai() as client:
     response = await client.chat_async(messages)
 
 # Manual cleanup if not using context managers
-client = Factory.openai()
+client = factory.openai()
 try:
     response = client.chat(messages)
 finally:
