@@ -2,14 +2,14 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from appinfra.log import Logger
 from appinfra.time import delta_str, start
 
 
-class Event(str, Enum):
+class Event(StrEnum):
     """Request lifecycle events."""
 
     # DEBUG level (~5 per request)
