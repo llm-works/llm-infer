@@ -79,6 +79,12 @@ async with factory.openai(base_url="http://localhost:8000/v1") as client:
 ### Streaming
 
 ```python
+from appinfra.log import Logger
+from llm_infer.client import Factory
+
+lg = Logger("my-app")
+factory = Factory(lg)
+
 # Sync streaming
 with factory.openai() as client:
     for token in client.chat_stream(

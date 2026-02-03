@@ -8,9 +8,13 @@ Usage:
     from llm_infer.api import ChatCompletionRequest, ChatCompletionResponse, ChatMessage
 
     # Client usage
+    from appinfra.log import Logger
     from llm_infer.api import Factory, ChatResponse
 
-    with Factory.openai(base_url="http://localhost:8000/v1") as client:
+    lg = Logger("my-app")
+    factory = Factory(lg)
+
+    with factory.openai(base_url="http://localhost:8000/v1") as client:
         response = client.chat([{"role": "user", "content": "Hello"}])
 """
 
