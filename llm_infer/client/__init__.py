@@ -5,20 +5,30 @@ backends (OpenAI-compatible, Anthropic) with support for both synchronous
 and asynchronous operations.
 
 Quick Start:
-    # OpenAI-compatible (local server)
-    from llm_infer.client import LLMClient
+    from appinfra.log import Logger
+    from llm_infer.client import Factory
 
-    with LLMClient.openai(base_url="http://localhost:8000/v1") as client:
+    lg = Logger("my-app")
+    factory = Factory(lg)
+
+    # OpenAI-compatible (local server)
+    with factory.openai(base_url="http://localhost:8000/v1") as client:
         response = client.chat([{"role": "user", "content": "Hello"}])
         print(response)
 
     # Anthropic Claude
-    async with LLMClient.anthropic() as client:
+    async with factory.anthropic() as client:
         async for token in client.chat_stream_async(messages):
             print(token, end="")
 
+    # From configuration
+    client = factory.from_config({
+        "type": "openai_compatible",
+        "base_url": "http://localhost:8000/v1",
+    })
+
     # With llm-infer extensions
-    with LLMClient.openai() as client:
+    with factory.openai() as client:
         response = client.chat_full(
             messages=[{"role": "user", "content": "Think about this"}],
             think=True,
@@ -45,10 +55,13 @@ from llm_infer.client.exceptions import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
+from llm_infer.client.factory import Factory
 from llm_infer.client.types import ChatResponse
 
 __all__ = [
-    # Main client
+    # Factory (primary entry point)
+    "Factory",
+    # Client facade
     "LLMClient",
     # Response types
     "ChatResponse",

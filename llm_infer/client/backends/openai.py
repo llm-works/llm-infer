@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from appinfra.log import Logger
 
 from llm_infer.client.backends.base import Backend
 from llm_infer.client.exceptions import (
@@ -43,12 +44,14 @@ class OpenAICompatibleBackend(Backend):
 
     def __init__(
         self,
+        lg: Logger,
         base_url: str = "http://localhost:8000/v1",
         model: str = "default",
         api_key: str | None = None,
         timeout: float = 120.0,
     ) -> None:
         """Initialize the backend."""
+        self._lg = lg
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._api_key = api_key
@@ -341,9 +344,10 @@ class OpenAICompatibleBackend(Backend):
     # =========================================================================
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> OpenAICompatibleBackend:
+    def from_config(cls, lg: Logger, config: dict[str, Any]) -> OpenAICompatibleBackend:
         """Create backend from configuration dict."""
         return cls(
+            lg=lg,
             base_url=config.get("base_url", "http://localhost:8000/v1"),
             model=config.get("model", "default"),
             api_key=config.get("api_key"),

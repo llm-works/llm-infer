@@ -15,16 +15,17 @@ extensions like LoRA adapters and thinking mode.
 
 **Public API path:**
 ```python
-from llm_infer.client import LLMClient, ChatResponse, Backend
+from llm_infer.client import Factory, LLMClient, ChatResponse, Backend
 # or
-from llm_infer.api import LLMClient, ChatResponse, Backend
+from llm_infer.api import Factory, LLMClient, ChatResponse, Backend
 ```
 
 ## Available Types
 
 | Type | Kind | Description |
 |------|------|-------------|
-| `LLMClient` | Class | Unified client facade with factory methods |
+| `Factory` | Class | Factory for creating LLMClient instances |
+| `LLMClient` | Class | Unified client facade |
 | `Backend` | ABC | Abstract base class for backend implementations |
 | `OpenAICompatibleBackend` | Class | Backend for OpenAI-compatible APIs |
 | `ChatResponse` | Dataclass | Response with content, usage, thinking, tool_calls |
@@ -38,9 +39,13 @@ from llm_infer.api import LLMClient, ChatResponse, Backend
 ### Sync Usage (Recommended for Scripts)
 
 ```python
-from llm_infer.client import LLMClient
+from appinfra.log import Logger
+from llm_infer.client import Factory
 
-with LLMClient.openai(base_url="http://localhost:8000/v1") as client:
+lg = Logger("my-app")
+factory = Factory(lg)
+
+with factory.openai(base_url="http://localhost:8000/v1") as client:
     # Simple: returns content string
     response = client.chat(
         messages=[{"role": "user", "content": "Hello!"}],
@@ -58,9 +63,13 @@ with LLMClient.openai(base_url="http://localhost:8000/v1") as client:
 ### Async Usage
 
 ```python
-from llm_infer.client import LLMClient
+from appinfra.log import Logger
+from llm_infer.client import Factory
 
-async with LLMClient.openai(base_url="http://localhost:8000/v1") as client:
+lg = Logger("my-app")
+factory = Factory(lg)
+
+async with factory.openai(base_url="http://localhost:8000/v1") as client:
     response = await client.chat_async(
         messages=[{"role": "user", "content": "Hello!"}],
     )
@@ -71,7 +80,7 @@ async with LLMClient.openai(base_url="http://localhost:8000/v1") as client:
 
 ```python
 # Sync streaming
-with LLMClient.openai() as client:
+with factory.openai() as client:
     for token in client.chat_stream(
         messages=[{"role": "user", "content": "Tell me a story"}],
         max_tokens=500,
@@ -83,7 +92,7 @@ with LLMClient.openai() as client:
         print(f"\nTokens: {client.last_response.usage.total_tokens}")
 
 # Async streaming
-async with LLMClient.openai() as client:
+async with factory.openai() as client:
     async for token in client.chat_stream_async(messages):
         print(token, end="", flush=True)
 ```
@@ -91,10 +100,14 @@ async with LLMClient.openai() as client:
 ### Using Anthropic Backend
 
 ```python
-from llm_infer.client import LLMClient
+from appinfra.log import Logger
+from llm_infer.client import Factory
+
+lg = Logger("my-app")
+factory = Factory(lg)
 
 # Requires: pip install llm-infer[anthropic]
-async with LLMClient.anthropic(model="claude-sonnet-4-20250514") as client:
+async with factory.anthropic(model="claude-sonnet-4-20250514") as client:
     response = await client.chat_async(
         messages=[{"role": "user", "content": "Hello!"}],
         system="You are a helpful assistant.",
@@ -109,7 +122,7 @@ The client supports llm-infer specific extensions for enhanced functionality.
 ### LoRA Adapter Selection
 
 ```python
-with LLMClient.openai() as client:
+with Factory.openai() as client:
     response = client.chat_full(
         messages=[{"role": "user", "content": "Translate to French: Hello"}],
         adapter_id="translation-lora",  # Select LoRA adapter
@@ -121,7 +134,7 @@ with LLMClient.openai() as client:
 Enable thinking mode to get separated reasoning content:
 
 ```python
-with LLMClient.openai() as client:
+with Factory.openai() as client:
     response = client.chat_full(
         messages=[{"role": "user", "content": "What is 15 * 23?"}],
         think=True,  # Enable thinking mode
@@ -150,7 +163,7 @@ tools = [
     }
 ]
 
-with LLMClient.openai() as client:
+with Factory.openai() as client:
     response = client.chat_full(
         messages=[{"role": "user", "content": "What's the weather in NYC?"}],
         tools=tools,
@@ -164,15 +177,13 @@ with LLMClient.openai() as client:
 
 ## API Reference
 
-### LLMClient
+### Factory
 
-The main client facade that delegates to backend implementations.
-
-#### Factory Methods
+Factory class for creating LLMClient instances.
 
 ```python
 # OpenAI-compatible API
-LLMClient.openai(
+Factory.openai(
     base_url: str = "http://localhost:8000/v1",
     model: str = "default",
     api_key: str | None = None,
@@ -180,7 +191,7 @@ LLMClient.openai(
 ) -> LLMClient
 
 # Anthropic Claude API
-LLMClient.anthropic(
+Factory.anthropic(
     model: str = "claude-sonnet-4-20250514",
     api_key: str | None = None,
     max_tokens: int = 4096,
@@ -188,9 +199,16 @@ LLMClient.anthropic(
 ) -> LLMClient
 
 # From configuration dict
-LLMClient.from_config(config: dict) -> LLMClient
-LLMClient.from_backend_config(config: dict) -> LLMClient
+Factory.from_config(config: dict) -> LLMClient
+Factory.from_backend_config(config: dict) -> LLMClient
+
+# Register custom backend
+Factory.register(name: str, backend_class: type[Backend]) -> None
 ```
+
+### LLMClient
+
+The client facade that delegates to backend implementations. Create instances using `Factory`.
 
 #### Methods
 
@@ -236,7 +254,7 @@ class ChatResponse:
 
 ### Configuration Format
 
-For `LLMClient.from_config()`:
+For `Factory.from_config()`:
 
 ```yaml
 # Multi-backend configuration
@@ -268,11 +286,11 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
 from llm_infer.api import FinishReason
-from llm_infer.client import LLMClient
+from llm_infer.client import Factory
 from llm_infer.serving.api.openai.streaming import stream_chat_completion
 
 app = FastAPI()
-client = LLMClient.openai(base_url="http://backend:8000/v1")
+client = Factory.openai(base_url="http://backend:8000/v1")
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
@@ -347,14 +365,14 @@ assert client.chat([{"role": "user", "content": "Hi"}]) == "Hello!"
 
 ```python
 # OpenAI
-client = LLMClient.openai(
+client = Factory.openai(
     base_url="https://api.openai.com/v1",
     api_key="sk-...",
     model="gpt-4",
 )
 
 # Anthropic
-client = LLMClient.anthropic(
+client = Factory.anthropic(
     api_key="sk-ant-...",
     model="claude-sonnet-4-20250514",
 )
@@ -366,14 +384,14 @@ The client provides a clean exception hierarchy:
 
 ```python
 from llm_infer.client import (
-    LLMClient,
+    Factory,
     BackendError,
     BackendUnavailableError,
     BackendTimeoutError,
     BackendRequestError,
 )
 
-with LLMClient.openai() as client:
+with Factory.openai() as client:
     try:
         response = client.chat(messages=[{"role": "user", "content": "Hello"}])
     except BackendUnavailableError:
@@ -392,15 +410,15 @@ Always use context managers to ensure proper cleanup:
 
 ```python
 # Sync - closes sync HTTP client
-with LLMClient.openai() as client:
+with Factory.openai() as client:
     response = client.chat(messages)
 
 # Async - closes both sync and async HTTP clients
-async with LLMClient.openai() as client:
+async with Factory.openai() as client:
     response = await client.chat_async(messages)
 
 # Manual cleanup if not using context managers
-client = LLMClient.openai()
+client = Factory.openai()
 try:
     response = client.chat(messages)
 finally:

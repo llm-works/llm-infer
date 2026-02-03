@@ -10,6 +10,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
+from appinfra.log import Logger
+
 from llm_infer.client.types import ChatResponse
 
 
@@ -273,10 +275,11 @@ class Backend(ABC):
 
     @classmethod
     @abstractmethod
-    def from_config(cls, config: dict[str, Any]) -> Backend:
+    def from_config(cls, lg: Logger, config: dict[str, Any]) -> Backend:
         """Create a backend from configuration dict.
 
         Args:
+            lg: Logger instance.
             config: Configuration dictionary with backend-specific settings.
 
         Returns:

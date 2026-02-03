@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from appinfra.log import Logger
 
 from llm_infer.client import (
     BackendRequestError,
@@ -21,12 +22,18 @@ from llm_infer.schemas.openai import FinishReason
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture
+def mock_lg() -> Logger:
+    """Create a mock logger for testing."""
+    return MagicMock(spec=Logger)
+
+
 class TestOpenAICompatibleBackendInit:
     """Test OpenAICompatibleBackend initialization."""
 
-    def test_default_values(self) -> None:
+    def test_default_values(self, mock_lg: Logger) -> None:
         """Test backend initializes with defaults."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
         assert backend._base_url == "http://localhost:8000/v1"
         assert backend._model == "default"
         assert backend._api_key is None
@@ -34,9 +41,10 @@ class TestOpenAICompatibleBackendInit:
         assert backend.last_response is None
         backend.close()
 
-    def test_custom_values(self) -> None:
+    def test_custom_values(self, mock_lg: Logger) -> None:
         """Test backend initializes with custom values."""
         backend = OpenAICompatibleBackend(
+            mock_lg,
             base_url="http://custom:9000/api",
             model="gpt-4",
             api_key="sk-test",
@@ -48,13 +56,13 @@ class TestOpenAICompatibleBackendInit:
         assert backend._timeout == 60.0
         backend.close()
 
-    def test_strips_trailing_slash(self) -> None:
+    def test_strips_trailing_slash(self, mock_lg: Logger) -> None:
         """Test base_url strips trailing slash."""
-        backend = OpenAICompatibleBackend(base_url="http://localhost:8000/v1/")
+        backend = OpenAICompatibleBackend(mock_lg, base_url="http://localhost:8000/v1/")
         assert backend._base_url == "http://localhost:8000/v1"
         backend.close()
 
-    def test_from_config(self) -> None:
+    def test_from_config(self, mock_lg: Logger) -> None:
         """Test creating backend from config dict."""
         config = {
             "base_url": "http://test:8000/v1",
@@ -62,7 +70,7 @@ class TestOpenAICompatibleBackendInit:
             "api_key": "test-key",
             "timeout": 30.0,
         }
-        backend = OpenAICompatibleBackend.from_config(config)
+        backend = OpenAICompatibleBackend.from_config(mock_lg, config)
         assert backend._base_url == "http://test:8000/v1"
         assert backend._model == "test-model"
         assert backend._api_key == "test-key"
@@ -73,23 +81,23 @@ class TestOpenAICompatibleBackendInit:
 class TestOpenAICompatibleBackendHelpers:
     """Test OpenAICompatibleBackend helper methods."""
 
-    def test_build_headers_without_api_key(self) -> None:
+    def test_build_headers_without_api_key(self, mock_lg: Logger) -> None:
         """Test headers without API key."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
         headers = backend._build_headers()
         assert headers == {"Content-Type": "application/json"}
         backend.close()
 
-    def test_build_headers_with_api_key(self) -> None:
+    def test_build_headers_with_api_key(self, mock_lg: Logger) -> None:
         """Test headers include auth when API key set."""
-        backend = OpenAICompatibleBackend(api_key="sk-test")
+        backend = OpenAICompatibleBackend(mock_lg, api_key="sk-test")
         headers = backend._build_headers()
         assert headers["Authorization"] == "Bearer sk-test"
         backend.close()
 
-    def test_build_messages_with_system(self) -> None:
+    def test_build_messages_with_system(self, mock_lg: Logger) -> None:
         """Test messages prepends system prompt."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
         messages = [{"role": "user", "content": "Hello"}]
         result = backend._build_messages(messages, system="You are helpful.")
         assert len(result) == 2
@@ -97,18 +105,18 @@ class TestOpenAICompatibleBackendHelpers:
         assert result[1] == {"role": "user", "content": "Hello"}
         backend.close()
 
-    def test_build_messages_without_system(self) -> None:
+    def test_build_messages_without_system(self, mock_lg: Logger) -> None:
         """Test messages without system prompt."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
         messages = [{"role": "user", "content": "Hello"}]
         result = backend._build_messages(messages, system=None)
         assert len(result) == 1
         assert result[0] == {"role": "user", "content": "Hello"}
         backend.close()
 
-    def test_build_payload_minimal(self) -> None:
+    def test_build_payload_minimal(self, mock_lg: Logger) -> None:
         """Test minimal payload construction."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
         messages = [{"role": "user", "content": "Hi"}]
         payload = backend._build_payload(
             messages=messages,
@@ -129,9 +137,9 @@ class TestOpenAICompatibleBackendHelpers:
         }
         backend.close()
 
-    def test_build_payload_with_llm_infer_extensions(self) -> None:
+    def test_build_payload_with_llm_infer_extensions(self, mock_lg: Logger) -> None:
         """Test payload includes llm-infer extensions."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
         payload = backend._build_payload(
             messages=[],
             model="test",
@@ -191,9 +199,9 @@ class TestParseHelpers:
 class TestOpenAICompatibleBackendChat:
     """Test OpenAICompatibleBackend.chat method."""
 
-    def test_chat_success(self) -> None:
+    def test_chat_success(self, mock_lg: Logger) -> None:
         """Test successful non-streaming chat request."""
-        backend = OpenAICompatibleBackend(base_url="http://test:8000/v1")
+        backend = OpenAICompatibleBackend(mock_lg, base_url="http://test:8000/v1")
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -226,9 +234,9 @@ class TestOpenAICompatibleBackendChat:
         assert backend.last_response == response
         backend.close()
 
-    def test_chat_with_tool_calls(self) -> None:
+    def test_chat_with_tool_calls(self, mock_lg: Logger) -> None:
         """Test chat returns tool calls when present."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -265,9 +273,9 @@ class TestOpenAICompatibleBackendChat:
         assert response.finish_reason == FinishReason.TOOL_CALLS
         backend.close()
 
-    def test_chat_connect_error_raises_unavailable(self) -> None:
+    def test_chat_connect_error_raises_unavailable(self, mock_lg: Logger) -> None:
         """Test connection error raises BackendUnavailableError."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
 
         with patch.object(
             backend._client, "post", side_effect=httpx.ConnectError("refused")
@@ -277,9 +285,9 @@ class TestOpenAICompatibleBackendChat:
 
         backend.close()
 
-    def test_chat_timeout_error_raises_timeout(self) -> None:
+    def test_chat_timeout_error_raises_timeout(self, mock_lg: Logger) -> None:
         """Test timeout error raises BackendTimeoutError."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
 
         with patch.object(
             backend._client, "post", side_effect=httpx.TimeoutException("timeout")
@@ -289,9 +297,9 @@ class TestOpenAICompatibleBackendChat:
 
         backend.close()
 
-    def test_chat_http_error_raises_request_error(self) -> None:
+    def test_chat_http_error_raises_request_error(self, mock_lg: Logger) -> None:
         """Test HTTP error raises BackendRequestError."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
 
         mock_response = MagicMock()
         mock_response.status_code = 400
@@ -312,9 +320,9 @@ class TestOpenAICompatibleBackendChatAsync:
     """Test OpenAICompatibleBackend async methods."""
 
     @pytest.mark.asyncio
-    async def test_chat_async_success(self) -> None:
+    async def test_chat_async_success(self, mock_lg: Logger) -> None:
         """Test successful async chat request."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -345,9 +353,9 @@ class TestOpenAICompatibleBackendChatAsync:
 class TestOpenAICompatibleBackendStream:
     """Test OpenAICompatibleBackend streaming methods."""
 
-    def test_chat_stream_yields_tokens(self) -> None:
+    def test_chat_stream_yields_tokens(self, mock_lg: Logger) -> None:
         """Test streaming yields tokens correctly."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
 
         sse_lines = [
             'data: {"choices": [{"delta": {"role": "assistant"}}]}',
@@ -380,17 +388,17 @@ class TestOpenAICompatibleBackendStream:
 class TestOpenAICompatibleBackendResourceManagement:
     """Test resource management."""
 
-    def test_context_manager_closes_client(self) -> None:
+    def test_context_manager_closes_client(self, mock_lg: Logger) -> None:
         """Test context manager closes sync client."""
-        with OpenAICompatibleBackend() as backend:
+        with OpenAICompatibleBackend(mock_lg) as backend:
             assert backend._client is not None
 
         # After exit, client should be closed (though we can't easily verify)
 
     @pytest.mark.asyncio
-    async def test_async_context_manager_closes_clients(self) -> None:
+    async def test_async_context_manager_closes_clients(self, mock_lg: Logger) -> None:
         """Test async context manager closes both clients."""
-        async with OpenAICompatibleBackend() as backend:
+        async with OpenAICompatibleBackend(mock_lg) as backend:
             # Force async client creation
             _ = backend._get_async_client()
             assert backend._async_client is not None
@@ -399,9 +407,9 @@ class TestOpenAICompatibleBackendResourceManagement:
         assert backend._async_client is None
 
     @pytest.mark.asyncio
-    async def test_lazy_async_client_creation(self) -> None:
+    async def test_lazy_async_client_creation(self, mock_lg: Logger) -> None:
         """Test async client is created lazily."""
-        backend = OpenAICompatibleBackend()
+        backend = OpenAICompatibleBackend(mock_lg)
         assert backend._async_client is None
 
         client = backend._get_async_client()
