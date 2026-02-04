@@ -355,6 +355,9 @@ class RequestHandler(ABC):
             params["tools"] = request.tools
         if request.tool_choice is not None:
             params["tool_choice"] = request.tool_choice
+        # Structured output support
+        if request.response_format is not None:
+            params["response_format"] = request.response_format
         return params
 
     def _parse_generate_result(

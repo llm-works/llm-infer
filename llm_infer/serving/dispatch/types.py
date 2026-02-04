@@ -42,6 +42,8 @@ class Request:
     tool_choice: str | dict[str, Any] | None = (
         None  # "auto", "none", "required", or object
     )
+    # Structured output support
+    response_format: dict[str, Any] | None = None  # {"type": "json_object"} or schema
 
 
 @dataclass

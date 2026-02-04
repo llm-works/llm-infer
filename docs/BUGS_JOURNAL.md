@@ -1346,3 +1346,84 @@ and
 cleaning up resources prematurely. This is especially tricky with streaming APIs where the resource
 (the HTTP connection) needs to stay open for the duration of iteration.
 
+
+### 17. Ollama Structured Output Echoes Schema Structure
+
+**Date:** 2026-02-04
+
+**File:** `llm_infer/engines/ollama.py`
+
+**Problem:** When using `response_format` with Ollama, models echoed back the schema wrapper
+structure instead of returning flat data objects.
+
+**Symptom:**
+```json
+// Schema requested fields: passed, reason
+// Expected output:
+{"passed": true, "reason": "The content is accurate."}
+
+// Actual output - model echoed the wrapper structure:
+{"name": "VerifyResult", "description": "Result from VERIFY verb.", "schema": {"passed": true, "reason": "..."}}
+```
+
+**Initial diagnosis (incorrect):** We initially thought this was an Ollama/model issue with
+structured output and implemented a two-layer defense:
+1. Add `additionalProperties: false` to schemas
+2. Inject system guidance to prevent echoing
+
+**Actual root cause:** Customer prompt design issue. The customer was using `json_object` mode
+(basic JSON, no schema enforcement) while putting the **OpenAI schema wrapper format** directly
+in the prompt text:
+
+```text
+Respond with valid JSON matching this schema:
+{
+  "name": "VerifyResult",
+  "description": "Result from VERIFY verb.",
+  "schema": { "type": "object", "properties": {...} }
+}
+```
+
+The model correctly interpreted this as a template to fill in, echoing the structure back. This
+is expected model behavior, not a bug.
+
+**Resolution:**
+
+1. **Reverted the system guidance injection** - The `_inject_json_guidance()` workaround was
+   fighting against explicit user instructions in the prompt. You cannot server-side fix bad
+   prompts.
+
+2. **Kept the `additionalProperties: false` workaround** - This is still valid for proper
+   `json_schema` mode usage, ensuring strict schema compliance per OpenAI spec.
+
+**Proper usage patterns:**
+
+**Option A: Use `json_schema` mode with schema in `response_format`** (recommended):
+```json
+{
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "VerifyResult",
+      "schema": {"type": "object", "properties": {...}}
+    }
+  }
+}
+```
+Don't put the schema in the prompt text - let the API handle it.
+
+**Option B: Put raw schema in prompt with `json_object` mode**:
+```text
+Respond with JSON matching: {"type": "object", "properties": {"passed": {"type": "boolean"}}}
+```
+Use only the raw JSON Schema, not the OpenAI wrapper format with `name`/`description`/`schema` keys.
+
+**Files changed:**
+- `llm_infer/engines/ollama.py` - Reverted `_inject_json_guidance()`, kept `additionalProperties`
+  workaround in `_extract_ollama_format()`
+
+**Insight:** Server-side code should not try to "fix" bad user inputs. The OpenAI wrapper format
+(`{name, description, schema}`) is intended for the `response_format.json_schema` parameter, not
+for prompt text. When users put it in prompts, models naturally echo that structure back. The
+proper fix is user education, not server-side prompt manipulation.
+

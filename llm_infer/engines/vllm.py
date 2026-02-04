@@ -589,6 +589,7 @@ class VLLMEngine:
         lora_request: LoRARequest | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> str:
         """Generate text completion (blocking).
 
@@ -606,6 +607,7 @@ class VLLMEngine:
             lora_request: Optional vLLM LoRARequest for adapter inference
             tools: Tool definitions (not supported, accepted for interface compat)
             tool_choice: Tool choice (not supported, accepted for interface compat)
+            response_format: Structured output format (json_object or json_schema)
 
         Returns:
             Generated text
@@ -625,6 +627,7 @@ class VLLMEngine:
             top_k=top_k,
             repetition_penalty=repetition_penalty,
             stop_sequences=stop_sequences,
+            response_format=response_format,
         )
 
         # Generate using sync API
@@ -670,6 +673,7 @@ class VLLMEngine:
         lora_request: LoRARequest | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> VLLMStreamingIterator:
         """Generate text with true token-by-token streaming.
 
@@ -679,6 +683,7 @@ class VLLMEngine:
         Args:
             tools: Tool definitions (not supported, accepted for interface compat)
             tool_choice: Tool choice (not supported, accepted for interface compat)
+            response_format: Structured output format (json_object or json_schema)
 
         Returns:
             VLLMStreamingIterator that yields token strings and has
@@ -695,6 +700,7 @@ class VLLMEngine:
             top_k=top_k,
             repetition_penalty=repetition_penalty,
             stop_sequences=stop_sequences,
+            response_format=response_format,
         )
 
         # Generate unique request ID for this streaming request
@@ -739,6 +745,20 @@ class VLLMEngine:
         else:
             return prompt
 
+    def _extract_guided_json(
+        self, response_format: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Extract guided_json schema from response_format for vLLM."""
+        if response_format is None:
+            return None
+        fmt_type = response_format.get("type")
+        if fmt_type == "json_object":
+            return {"type": "object"}
+        elif fmt_type == "json_schema":
+            schema = response_format.get("json_schema", {}).get("schema", {})
+            return schema if schema else None
+        return None
+
     def _create_sampling_params(
         self,
         max_tokens: int,
@@ -747,6 +767,7 @@ class VLLMEngine:
         top_k: int,
         repetition_penalty: float,
         stop_sequences: list[str] | None,
+        response_format: dict[str, Any] | None = None,
     ) -> SamplingParams:
         """Create vLLM SamplingParams."""
         _check_vllm_available()
@@ -757,14 +778,12 @@ class VLLMEngine:
             "top_p": top_p,
             "repetition_penalty": repetition_penalty,
         }
-
-        # top_k: vLLM uses -1 for disabled, we use 0
         if top_k > 0:
             kwargs["top_k"] = top_k
-
-        # Stop sequences
         if stop_sequences:
             kwargs["stop"] = stop_sequences
+        if guided_json := self._extract_guided_json(response_format):
+            kwargs["guided_json"] = guided_json
 
         return SamplingParams(**kwargs)
 
