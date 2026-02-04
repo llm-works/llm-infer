@@ -176,7 +176,7 @@ class SAIAAdapter(SAIABackend):
         stop_reason = response.finish_reason.value if response.finish_reason else None
 
         return AgentResponse(
-            content=response.content,
+            content=response.content or "",
             tool_calls=tool_calls,
             stop_reason=stop_reason,
             input_tokens=input_tokens,
