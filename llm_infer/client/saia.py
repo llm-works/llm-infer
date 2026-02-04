@@ -100,7 +100,7 @@ class SAIAAdapter(SAIABackend):
             return {
                 "role": "tool",
                 "tool_call_id": msg.tool_call_id,
-                "content": msg.content,
+                "content": msg.content or "",
             }
 
         if msg.role == "assistant" and msg.tool_calls:
@@ -120,7 +120,7 @@ class SAIAAdapter(SAIABackend):
                 ],
             }
 
-        return {"role": msg.role, "content": msg.content}
+        return {"role": msg.role, "content": msg.content or ""}
 
     def _convert_tools(self, tools: list[ToolDef]) -> list[dict[str, Any]]:
         """Convert SAIA tool definitions to llm-infer format."""
