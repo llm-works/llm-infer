@@ -25,6 +25,9 @@ dependencies = [
 anthropic = [
     "anthropic>=0.47.0,<1.0.0",
 ]
+saia = [
+    "llm-saia",
+]
 cuda = [
     "flashinfer-python>=0.2.0,<1.0.0",
     "pynvml>=11.0.0,<13.0.0",  # Device-level GPU stats for vLLM backend
