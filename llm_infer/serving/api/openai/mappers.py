@@ -88,7 +88,10 @@ def response_format_to_dict(
         return None
     if response_format.type == "text":
         return None  # Text is default, no need to pass
-    return response_format.model_dump(exclude_none=True, by_alias=True)
+    result: dict[str, Any] = response_format.model_dump(
+        exclude_none=True, by_alias=True
+    )
+    return result
 
 
 def generate_tool_call_id() -> str:

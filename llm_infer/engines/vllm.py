@@ -27,6 +27,7 @@ _VLLM_ERROR: str | None = None
 
 try:
     from vllm import LLM, SamplingParams
+    from vllm.sampling_params import StructuredOutputsParams
 
     _VLLM_AVAILABLE = True
 except ImportError as e:
@@ -784,7 +785,7 @@ class VLLMEngine:
         if stop_sequences:
             kwargs["stop"] = stop_sequences
         if guided_json := self._extract_guided_json(response_format):
-            kwargs["guided_json"] = guided_json
+            kwargs["structured_outputs"] = StructuredOutputsParams(json=guided_json)
 
         return SamplingParams(**kwargs)
 
