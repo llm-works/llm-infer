@@ -564,6 +564,7 @@ class OllamaEngine:
         messages: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> str | dict[str, Any]:
         """Generate text completion (blocking).
 
@@ -580,6 +581,7 @@ class OllamaEngine:
             messages: Chat messages (alternative to prompt).
             tools: List of tool definitions for function calling.
             tool_choice: Controls tool usage ("auto", "none", "required", or specific).
+            response_format: Structured output format (json_object or json_schema).
 
         Returns:
             Generated text string, or dict with "content" and "tool_calls" when
@@ -596,6 +598,7 @@ class OllamaEngine:
                 stop_sequences=stop_sequences,
                 tools=tools,
                 tool_choice=tool_choice,
+                response_format=response_format,
             )
 
         payload = self._build_generate_payload(
@@ -607,6 +610,7 @@ class OllamaEngine:
             repetition_penalty=repetition_penalty,
             stop_sequences=stop_sequences,
             stream=False,
+            response_format=response_format,
         )
         data = self._post_json("/api/generate", payload, "generate")
         result: str = data.get("response", "")
@@ -624,10 +628,12 @@ class OllamaEngine:
         tools: list[dict[str, Any]] | None,
         tool_choice: str | dict[str, Any] | None,
         stream: bool,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build payload for /api/chat endpoint."""
         # Convert OpenAI-format messages to Ollama format (tool_call_id -> tool_name)
         ollama_messages = _convert_messages_to_ollama_format(messages)
+
         payload: dict[str, Any] = {
             "model": self._config.model,
             "messages": ollama_messages,
@@ -644,6 +650,8 @@ class OllamaEngine:
             payload["tools"] = tools
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
+        if fmt := self._extract_ollama_format(response_format):
+            payload["format"] = fmt
         return payload
 
     def _generate_chat(
@@ -657,6 +665,7 @@ class OllamaEngine:
         stop_sequences: list[str] | None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> str | dict[str, Any]:
         """Generate using chat API.
 
@@ -675,6 +684,7 @@ class OllamaEngine:
             tools,
             tool_choice,
             stream=False,
+            response_format=response_format,
         )
         data = self._post_json("/api/chat", payload, "chat")
         message = data.get("message", {})
@@ -694,6 +704,7 @@ class OllamaEngine:
         repetition_penalty: float,
         stop_sequences: list[str] | None,
         stream: bool,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build payload for /api/generate endpoint."""
         payload: dict[str, Any] = {
@@ -714,6 +725,9 @@ class OllamaEngine:
 
         if self._config.keep_alive:
             payload["keep_alive"] = self._config.keep_alive
+
+        if fmt := self._extract_ollama_format(response_format):
+            payload["format"] = fmt
 
         return payload
 
@@ -745,6 +759,38 @@ class OllamaEngine:
 
         return options
 
+    def _extract_ollama_format(
+        self, response_format: dict[str, Any] | None
+    ) -> str | dict[str, Any] | None:
+        """Convert response_format to Ollama's format parameter.
+
+        Ollama supports:
+        - "json" for basic JSON output
+        - JSON Schema dict for schema-based output
+        """
+        if response_format is None:
+            return None
+        fmt_type = response_format.get("type")
+        if fmt_type == "json_object":
+            return "json"
+        elif fmt_type == "json_schema":
+            schema = response_format.get("json_schema", {}).get("schema", {})
+            if schema:
+                # Workaround for Ollama structured output issues:
+                # JSON Schema allows extra properties by default, so models may output
+                # fields not in the schema. Setting additionalProperties=false enforces
+                # strict compliance. See: https://github.com/ollama/ollama/issues/10001
+                # and https://github.com/ollama/ollama/issues/7978
+                schema = dict(schema)  # Don't mutate original
+                if (
+                    schema.get("type") == "object"
+                    and "additionalProperties" not in schema
+                ):
+                    schema["additionalProperties"] = False
+                return schema
+            return "json"
+        return None
+
     def _build_chat_stream_payload(
         self,
         messages: list[dict[str, Any]],
@@ -756,6 +802,7 @@ class OllamaEngine:
         stop_sequences: list[str] | None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build payload for streaming chat endpoint."""
         return self._build_chat_payload(
@@ -769,6 +816,7 @@ class OllamaEngine:
             tools,
             tool_choice,
             stream=True,
+            response_format=response_format,
         )
 
     def generate_stream_sync(
@@ -785,6 +833,7 @@ class OllamaEngine:
         messages: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> OllamaStreamingIterator:
         """Generate text with streaming."""
         if messages:
@@ -798,6 +847,7 @@ class OllamaEngine:
                 stop_sequences,
                 tools,
                 tool_choice,
+                response_format,
             )
             return OllamaStreamingIterator(self._lg, self._client, "/api/chat", payload)
 
@@ -810,6 +860,7 @@ class OllamaEngine:
             repetition_penalty,
             stop_sequences,
             stream=True,
+            response_format=response_format,
         )
         return OllamaStreamingIterator(self._lg, self._client, "/api/generate", payload)
 

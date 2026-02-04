@@ -11,6 +11,7 @@ from llm_infer.schemas.openai import (
     ChatMessage,
     CompletionRequest,
     FinishReason,
+    ResponseFormat,
     Role,
     Tool,
     ToolChoice,
@@ -76,6 +77,20 @@ def tool_choice_to_dict(
         return tool_choice
     # ToolChoiceObject - model_dump returns dict[str, Any]
     result: dict[str, Any] = tool_choice.model_dump(exclude_none=True)
+    return result
+
+
+def response_format_to_dict(
+    response_format: ResponseFormat | None,
+) -> dict[str, Any] | None:
+    """Convert ResponseFormat to dict for internal/backend use."""
+    if response_format is None:
+        return None
+    if response_format.type == "text":
+        return None  # Text is default, no need to pass
+    result: dict[str, Any] = response_format.model_dump(
+        exclude_none=True, by_alias=True
+    )
     return result
 
 
@@ -244,6 +259,7 @@ def chat_request_to_internal(
         adapter_id=body.adapter_id,
         tools=tools_to_dict(body.tools),
         tool_choice=tool_choice_to_dict(body.tool_choice),
+        response_format=response_format_to_dict(body.response_format),
     )
 
 

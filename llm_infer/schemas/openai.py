@@ -81,6 +81,46 @@ class ToolCall(BaseModel):
 
 
 # =============================================================================
+# Response Format Types (Structured Output)
+# =============================================================================
+
+
+class JSONSchema(BaseModel):
+    """JSON Schema definition for structured output."""
+
+    name: str = Field(..., description="Name for the schema")
+    description: str | None = Field(None, description="Optional description")
+    schema_: dict[str, Any] = Field(
+        ..., alias="schema", description="JSON Schema object"
+    )
+    strict: bool | None = Field(None, description="Enable strict schema adherence")
+
+
+class ResponseFormatText(BaseModel):
+    """Response format for unstructured text (default)."""
+
+    type: Literal["text"] = "text"
+
+
+class ResponseFormatJSONObject(BaseModel):
+    """Response format for valid JSON output (no schema enforcement)."""
+
+    type: Literal["json_object"] = "json_object"
+
+
+class ResponseFormatJSONSchema(BaseModel):
+    """Response format for JSON with strict schema enforcement."""
+
+    type: Literal["json_schema"] = "json_schema"
+    json_schema: JSONSchema
+
+
+ResponseFormat = (
+    ResponseFormatText | ResponseFormatJSONObject | ResponseFormatJSONSchema
+)
+
+
+# =============================================================================
 # Chat Messages
 # =============================================================================
 
@@ -138,6 +178,13 @@ class ChatCompletionRequest(BaseModel):
         None,
         description="Controls tool use: 'auto' (default), 'none', 'required', "
         "or specific tool",
+    )
+
+    # Structured output
+    response_format: ResponseFormat | None = Field(
+        None,
+        description="Controls output format: 'text' (default), 'json_object' "
+        "(valid JSON), or 'json_schema' (strict schema enforcement)",
     )
 
     # Accepted but ignored (for SDK compatibility)
