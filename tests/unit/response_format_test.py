@@ -379,8 +379,8 @@ class TestVLLMGuidedJsonExtraction:
         elif fmt_type == "json_schema":
             json_schema = response_format.get("json_schema", {})
             schema = json_schema.get("schema", {})
-            if schema:
-                return schema
+            # Fall back to basic object schema for empty schema (consistent with Ollama)
+            return schema if schema else {"type": "object"}
         return None
 
     def test_none_returns_none(self) -> None:
@@ -402,15 +402,15 @@ class TestVLLMGuidedJsonExtraction:
         )
         assert result == schema
 
-    def test_json_schema_empty_returns_none(self) -> None:
-        """Test json_schema with empty schema returns None."""
+    def test_json_schema_empty_falls_back_to_object(self) -> None:
+        """Test json_schema with empty schema falls back to basic object schema."""
         result = self._extract_guided_json(
             {
                 "type": "json_schema",
                 "json_schema": {"name": "test", "schema": {}},
             }
         )
-        assert result is None
+        assert result == {"type": "object"}
 
     def test_text_returns_none(self) -> None:
         """Test text type returns None."""

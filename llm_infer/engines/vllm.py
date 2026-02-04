@@ -756,7 +756,8 @@ class VLLMEngine:
             return {"type": "object"}
         elif fmt_type == "json_schema":
             schema = response_format.get("json_schema", {}).get("schema", {})
-            return schema if schema else None
+            # Fall back to basic object schema for empty schema (consistent with Ollama)
+            return schema if schema else {"type": "object"}
         return None
 
     def _create_sampling_params(
