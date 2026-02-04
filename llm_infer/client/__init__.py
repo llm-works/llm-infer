@@ -74,3 +74,11 @@ __all__ = [
     "BackendTimeoutError",
     "BackendUnavailableError",
 ]
+
+# Optional SAIA integration (requires: pip install llm-infer[saia])
+try:
+    from llm_infer.client.saia import SAIAAdapter  # noqa: F401
+
+    __all__.append("SAIAAdapter")
+except ImportError:
+    pass
