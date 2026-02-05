@@ -156,7 +156,9 @@ class ChatCompletionRequest(BaseModel):
     """POST /v1/chat/completions request body."""
 
     model: str = Field(
-        ..., description="Model to use (accepted but ignored internally)"
+        ...,
+        description="Model to use. Use 'default' or 'auto' to use the loaded model. "
+        "Server ignores this value and uses its loaded model.",
     )
     messages: list[ChatMessage] = Field(..., min_length=1)
 
@@ -302,7 +304,9 @@ class CompletionRequest(BaseModel):
     """POST /v1/completions request body (legacy endpoint)."""
 
     model: str = Field(
-        ..., description="Model to use (accepted but ignored internally)"
+        ...,
+        description="Model to use. Use 'default' or 'auto' to use the loaded model. "
+        "Server ignores this value and uses its loaded model.",
     )
     prompt: str | list[str] = Field(...)
 
@@ -412,7 +416,9 @@ class EmbeddingRequest(BaseModel):
     """POST /v1/embeddings request body."""
 
     model: str = Field(
-        ..., description="Model to use (accepted but ignored internally)"
+        ...,
+        description="Model to use. Use 'default' or 'auto' to use the loaded model. "
+        "Server ignores this value and uses its loaded model.",
     )
     input: str | list[str] = Field(..., description="Text(s) to embed")
     encoding_format: Literal["float"] = Field(
