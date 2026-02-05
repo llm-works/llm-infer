@@ -95,12 +95,15 @@ def __getattr__(name: str) -> Any:
         import importlib
 
         module = importlib.import_module(module_name, __name__)
-        return getattr(module, attr_name)
+        value = getattr(module, attr_name)
+        globals()[name] = value  # Cache to avoid future __getattr__ calls
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _parse_dtype(dtype_str: str) -> Any:
     """Parse dtype string to torch dtype."""
+    _require_runtime_deps()
     import torch
 
     return {
