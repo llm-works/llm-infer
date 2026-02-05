@@ -62,9 +62,23 @@ experiment with, understand, and deploy efficient models.
 ## Installation
 
 ```bash
-git clone https://github.com/serendip-ml/inference.git
-cd inference
-pip install -e .
+# API client only (lightweight, ~50MB)
+pip install llm-infer
+
+# With local inference (includes torch, ~2GB)
+pip install llm-infer[runtime]
+
+# With specific backends
+pip install llm-infer[anthropic]        # Anthropic Claude
+pip install llm-infer[runtime,cuda]     # Local inference + GPU optimization
+```
+
+### Development Install
+
+```bash
+git clone https://github.com/serendip-ml/llm-infer.git
+cd llm-infer
+pip install -e ".[dev,runtime]"
 ```
 
 ### Environment Setup

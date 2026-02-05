@@ -63,10 +63,10 @@ jobs:
           # Install CPU-only torch first to avoid CUDA dependencies
           # Use --extra-index-url to keep PyPI for torch's deps (networkx, etc.)
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
-          # Install llm-saia from GitHub (not yet on PyPI)
-          python -m pip install git+https://github.com/serendip-ml/llm-saia.git@81f443369dd4b733d3ca16e51062d18edc1b67e4
-          # Install package with dev dependencies (flashinfer is now optional)
-          python -m pip install -e ".[dev]"
+          # Install llm-saia from GitHub (not yet on PyPI, intentionally unpinned during development)
+          python -m pip install git+https://github.com/serendip-ml/llm-saia.git@develop
+          # Install package with dev and runtime dependencies
+          python -m pip install -e ".[dev,runtime]"
 
       - name: Run unit tests
         run: python -m pytest tests/ -m unit -v --tb=short
@@ -93,10 +93,10 @@ jobs:
           # Install CPU-only torch first to avoid CUDA dependencies
           # Use --extra-index-url to keep PyPI for torch's deps (networkx, etc.)
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
-          # Install llm-saia from GitHub (not yet on PyPI)
-          python -m pip install git+https://github.com/serendip-ml/llm-saia.git@81f443369dd4b733d3ca16e51062d18edc1b67e4
-          # Install package with dev dependencies (flashinfer is now optional)
-          python -m pip install -e ".[dev]"
+          # Install llm-saia from GitHub (not yet on PyPI, intentionally unpinned during development)
+          python -m pip install git+https://github.com/serendip-ml/llm-saia.git@develop
+          # Install package with dev and runtime dependencies
+          python -m pip install -e ".[dev,runtime]"
 
       - name: Run tests with coverage
         run: python -m pytest tests/ -m unit --cov=llm_infer --cov-report=xml --cov-report=term

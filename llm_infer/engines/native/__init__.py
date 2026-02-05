@@ -84,8 +84,32 @@ def _build_engine_config(config: dict[str, Any]) -> tuple[EngineConfig, str]:
     return engine_cfg, model_path
 
 
+def _require_runtime_deps() -> None:
+    """Check that local inference dependencies are installed."""
+    missing = []
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        missing.append("torch")
+    try:
+        import transformers  # noqa: F401
+    except ImportError:
+        missing.append("transformers")
+    try:
+        import safetensors  # noqa: F401
+    except ImportError:
+        missing.append("safetensors")
+
+    if missing:
+        raise ImportError(
+            f"Local inference requires: {', '.join(missing)}. "
+            "Install with: pip install llm-infer[runtime]"
+        )
+
+
 def create_native_engine(lg: Logger, config: dict[str, Any]) -> InferenceEngine:
     """Create native inference engine from config dictionary."""
+    _require_runtime_deps()
     from ...serving.dispatch.main import ProgressTracker
 
     engine_cfg, _ = _build_engine_config(config)
