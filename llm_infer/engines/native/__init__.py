@@ -15,18 +15,16 @@ from typing import TYPE_CHECKING, Any
 from appinfra.log import Logger
 
 if TYPE_CHECKING:
-    from .engine import InferenceEngine
-
-from .config import EngineConfig
-from .engine import InferenceEngine, StreamingResult
-from .generation import run_decode, run_prefill
-from .model import (
-    ModelArchitecture,
-    TransformerConfig,
-    TransformerModel,
-    get_architecture,
-)
-from .scheduler import Request, RequestState, Scheduler
+    from .config import EngineConfig
+    from .engine import InferenceEngine, StreamingResult
+    from .generation import run_decode, run_prefill
+    from .model import (
+        ModelArchitecture,
+        TransformerConfig,
+        TransformerModel,
+        get_architecture,
+    )
+    from .scheduler import Request, RequestState, Scheduler
 
 __all__ = [
     # Factory
@@ -49,9 +47,63 @@ __all__ = [
     "Scheduler",
 ]
 
+# Lazy import mapping: attribute name -> (module, name)
+_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
+    "EngineConfig": (".config", "EngineConfig"),
+    "InferenceEngine": (".engine", "InferenceEngine"),
+    "StreamingResult": (".engine", "StreamingResult"),
+    "run_decode": (".generation", "run_decode"),
+    "run_prefill": (".generation", "run_prefill"),
+    "ModelArchitecture": (".model", "ModelArchitecture"),
+    "TransformerConfig": (".model", "TransformerConfig"),
+    "TransformerModel": (".model", "TransformerModel"),
+    "get_architecture": (".model", "get_architecture"),
+    "Request": (".scheduler", "Request"),
+    "RequestState": (".scheduler", "RequestState"),
+    "Scheduler": (".scheduler", "Scheduler"),
+}
+
+
+def _require_runtime_deps() -> None:
+    """Check that local inference dependencies are installed."""
+    missing = []
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        missing.append("torch")
+    try:
+        import transformers  # noqa: F401
+    except ImportError:
+        missing.append("transformers")
+    try:
+        import safetensors  # noqa: F401
+    except ImportError:
+        missing.append("safetensors")
+
+    if missing:
+        raise ImportError(
+            f"Local inference requires: {', '.join(missing)}. "
+            "Install with: pip install llm-infer[runtime]"
+        )
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy-load exports to defer torch import until actually needed."""
+    if name in _LAZY_IMPORTS:
+        _require_runtime_deps()
+        module_name, attr_name = _LAZY_IMPORTS[name]
+        import importlib
+
+        module = importlib.import_module(module_name, __name__)
+        value = getattr(module, attr_name)
+        globals()[name] = value  # Cache to avoid future __getattr__ calls
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 def _parse_dtype(dtype_str: str) -> Any:
     """Parse dtype string to torch dtype."""
+    _require_runtime_deps()
     import torch
 
     return {
@@ -63,6 +115,9 @@ def _parse_dtype(dtype_str: str) -> Any:
 
 def _build_engine_config(config: dict[str, Any]) -> tuple[EngineConfig, str]:
     """Build EngineConfig from config dict. Returns (engine_config, model_path)."""
+    from .config import EngineConfig
+    from .model import TransformerConfig
+
     model_path = config.get("model", {}).get("path", "")
     backends = config.get("backends", {})
     engine = config.get("engine", {})
@@ -86,7 +141,9 @@ def _build_engine_config(config: dict[str, Any]) -> tuple[EngineConfig, str]:
 
 def create_native_engine(lg: Logger, config: dict[str, Any]) -> InferenceEngine:
     """Create native inference engine from config dictionary."""
+    _require_runtime_deps()
     from ...serving.dispatch.main import ProgressTracker
+    from .engine import InferenceEngine
 
     engine_cfg, _ = _build_engine_config(config)
     on_progress = ProgressTracker(lg)
