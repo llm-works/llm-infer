@@ -100,8 +100,8 @@ paths:
 ### Requirements
 
 - Python >= 3.11
-- PyTorch >= 2.0
-- CUDA-capable GPU (compute capability 8.0+ recommended)
+- PyTorch >= 2.0 (only for local inference with `[runtime]`)
+- CUDA-capable GPU (compute capability 8.0+ recommended, only for local inference)
 
 ## Quick Start
 
@@ -186,8 +186,8 @@ llm_infer/
 ## Development
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
+# Install dev dependencies (includes runtime for tests)
+pip install -e ".[dev,runtime]"
 
 # Run tests
 make test
