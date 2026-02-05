@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 from llm_saia.core.backend import (
     AgentResponse,
+    Backend,
     Message,
-    SAIABackend,
     ToolDef,
 )
 from llm_saia.core.backend import (
@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from llm_infer.client.client import LLMClient
 
 
-class SAIAAdapter(SAIABackend):
-    """Adapter that wraps LLMClient to implement SAIABackend.
+class SAIAAdapter(Backend):
+    """Adapter that wraps LLMClient to implement llm-saia Backend.
 
     This allows any LLMClient (or subclass like LearnClient) to be used
     with the llm-saia verb vocabulary.
