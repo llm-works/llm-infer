@@ -8,7 +8,7 @@ import pytest
 
 from llm_infer.cli.tools.serve import ServeTool
 from llm_infer.models.config import ModelConfig, ModelsConfig
-from llm_infer.serving.dispatch.config import OllamaConfig, VLLMConfig
+from llm_infer.serving.dispatch.config import OllamaConfig, VLLMConfig, VLLMServerConfig
 
 pytestmark = pytest.mark.unit
 
@@ -18,6 +18,7 @@ class MockEnginesConfig:
     """Mock engines config for testing."""
 
     vllm: VLLMConfig = field(default_factory=VLLMConfig)
+    vllm_server: VLLMServerConfig = field(default_factory=VLLMServerConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
 
 

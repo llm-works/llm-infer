@@ -5,16 +5,17 @@ models: !include './models.yaml'
 
 # Backend configuration
 # Multi-level backend selection for flexibility in inference optimization:
-# - engine: Full inference engine (native | vllm | ollama)
+# - engine: Full inference engine (native | vllm | vllm-server | ollama)
 # - model: Model implementation (native | gptqmodel) - only if engine=native
 # - linear: Kernel implementation (pytorch | marlin) - only if model=native
 #
 # Higher levels override lower levels:
 # - engine=vllm → uses engines.vllm config, ignores model/linear settings
+# - engine=vllm-server → connects to vllm serve subprocess, ignores model/linear
 # - engine=ollama → connects to Ollama server, ignores model/linear settings
 # - engine=native, model=gptqmodel → ignores linear setting
 backends:
-  engine: vllm        # native | vllm | ollama
+  engine: vllm        # native | vllm | vllm-server | ollama
   model: native       # native | gptqmodel
   linear: marlin      # pytorch | marlin
 
@@ -27,6 +28,9 @@ engines:
 
   # vLLM engine - production-grade with continuous batching, PagedAttention
   vllm: !include './vllm.yaml'
+
+  # vLLM server engine - connects to `vllm serve` subprocess
+  vllm_server: !include './vllm-server.yaml'
 
   # Ollama engine - connects to running Ollama server
   ollama: !include './ollama.yaml'

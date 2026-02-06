@@ -172,10 +172,52 @@ class OllamaEngineFactory(EngineFactory):
         return 1
 
 
+class VLLMServerEngineFactory(EngineFactory):
+    """Factory for vLLM server-backed inference engine.
+
+    Connects to a `vllm serve` process via OpenAI-compatible HTTP API.
+    Like OllamaEngineFactory, resolves model path and creates the engine.
+    """
+
+    def _validate_model_path(self, config: InferenceConfig) -> None:
+        """Validate model path is set."""
+        if config.models.path is None:
+            raise ValueError(
+                "models.path is required for vllm-server engine "
+                "(set via config, --model-path, or MODEL_PATH)"
+            )
+
+    def create(
+        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
+    ) -> Any:
+        try:
+            from ...engines.vllm_server import VLLMServerEngine
+        except ImportError as e:
+            raise ImportError(
+                "vLLM server engine requested (backends.engine=vllm-server) "
+                "but httpx is not installed. "
+                "Install with: pip install httpx"
+            ) from e
+
+        self._validate_model_path(config)
+        vllm_server_cfg = replace(
+            config.engines.vllm_server, model_path=str(config.models.path)
+        )
+        return VLLMServerEngine(lg, vllm_server_cfg)
+
+    def warmup_enabled(self, config: InferenceConfig) -> bool:
+        return config.engines.vllm_server.warmup
+
+    def max_batch_size(self, config: InferenceConfig) -> int:
+        # Server handles batching internally
+        return 1
+
+
 # Engine factory registry
 ENGINE_FACTORIES: dict[str, EngineFactory] = {
     "native": NativeEngineFactory(),
     "vllm": VLLMEngineFactory(),
+    "vllm-server": VLLMServerEngineFactory(),
     "ollama": OllamaEngineFactory(),
 }
 

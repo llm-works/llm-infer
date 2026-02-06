@@ -48,14 +48,14 @@ class BackendsConfig:
     """Backend selection configuration.
 
     Multi-level backend selection for flexibility in inference optimization:
-    - engine: Full inference engine (native | vllm | ollama)
+    - engine: Full inference engine (native | vllm | vllm-server | ollama)
     - model: Model implementation (native | gptqmodel) - only if engine=native
     - linear: Kernel implementation (pytorch | marlin) - only if model=native
 
     Higher levels override lower levels.
     """
 
-    engine: str = "native"  # native | vllm | ollama
+    engine: str = "native"  # native | vllm | vllm-server | ollama
     model: str = "native"  # native | gptqmodel
     linear: str = "pytorch"  # pytorch | marlin
 
@@ -261,6 +261,71 @@ class VLLMConfig:
 
 
 @dataclass
+class VLLMServerConfig:
+    """vLLM server engine configuration.
+
+    Configuration for the vllm-server backend, which connects to a `vllm serve`
+    process via its OpenAI-compatible HTTP API. The server can be auto-started
+    as a subprocess (like Ollama) or connected to externally.
+    """
+
+    # Model path (set at runtime, not in YAML config)
+    model_path: str = ""
+
+    # Task mode: "generate" for LLM, "embed" for embedding models
+    task: str = "generate"
+
+    # Server connection/management
+    host: str = "http://localhost"
+    port: int = 8100  # Different from API port (8000) and Ollama (11434)
+    auto_start: bool = True
+    binary_path: str = "vllm"
+    timeout: int = 300  # Request timeout in seconds
+    startup_timeout: int = 300  # Server startup timeout (vllm is slow to load)
+
+    # Served model name (alias for API requests, None = use model directory name)
+    served_model_name: str | None = None
+
+    # vLLM engine settings (passed as CLI flags to `vllm serve`)
+    gpu_memory_utilization: float = 0.95
+    max_model_len: int | None = None
+    max_num_seqs: int = 16
+    tensor_parallel_size: int = 1
+    enforce_eager: bool = False
+    dtype: str = "auto"
+    quantization: str | None = None
+    trust_remote_code: bool = True
+    enable_prefix_caching: bool = True
+
+    # Tool calling
+    tool_call_parser: str = "hermes"  # hermes, llama, mistral, etc.
+
+    # Warmup
+    warmup: bool = True
+
+    @classmethod
+    def from_dict(
+        cls, data: dict[str, Any], model_path: str = ""
+    ) -> "VLLMServerConfig":
+        """Create config from dictionary (vllm_server section of config file).
+
+        Args:
+            data: Dictionary with vllm-server config values.
+            model_path: Path to model weights.
+
+        Returns:
+            VLLMServerConfig instance with values from dict, defaults for missing keys.
+        """
+        from dataclasses import fields
+
+        kwargs: dict[str, Any] = {"model_path": model_path}
+        for f in fields(cls):
+            if f.name != "model_path" and f.name in data:
+                kwargs[f.name] = data[f.name]
+        return cls(**kwargs)
+
+
+@dataclass
 class EnginesConfig:
     """Engine configurations container.
 
@@ -271,6 +336,7 @@ class EnginesConfig:
     native: NativeEngineConfig = field(default_factory=NativeEngineConfig)
     vllm: VLLMConfig = field(default_factory=VLLMConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
+    vllm_server: VLLMServerConfig = field(default_factory=VLLMServerConfig)
 
 
 @dataclass
@@ -414,12 +480,20 @@ class InferenceConfig:
         return OllamaConfig.from_dict(data)
 
     @classmethod
+    def _parse_vllm_server_config(cls, data: dict[str, Any]) -> VLLMServerConfig:
+        """Parse vLLM server engine configuration."""
+        return VLLMServerConfig.from_dict(data)
+
+    @classmethod
     def _parse_engines_config(cls, engines_data: dict[str, Any]) -> EnginesConfig:
         """Parse engines configuration section."""
         return EnginesConfig(
             native=cls._parse_native_config(engines_data.get("native", {}) or {}),
             vllm=cls._parse_vllm_config(engines_data.get("vllm", {}) or {}),
             ollama=cls._parse_ollama_config(engines_data.get("ollama", {}) or {}),
+            vllm_server=cls._parse_vllm_server_config(
+                engines_data.get("vllm_server", {}) or {}
+            ),
         )
 
     def apply_env_overrides(self) -> "InferenceConfig":
