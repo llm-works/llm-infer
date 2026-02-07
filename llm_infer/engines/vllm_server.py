@@ -480,6 +480,20 @@ class VLLMServerEngine:
         result: dict[str, Any] = response.json()
         return result
 
+    def _parse_completion_response(self, data: dict[str, Any]) -> str | dict[str, Any]:
+        """Extract content, tool_calls, and usage from a chat completions response."""
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
+        content: str = message.get("content") or ""
+        tool_calls = message.get("tool_calls")
+        usage = data.get("usage", {})
+
+        if tool_calls:
+            return {"content": content, "tool_calls": tool_calls, "usage": usage}
+        if usage:
+            return {"content": content, "usage": usage}
+        return content
+
     def generate(
         self,
         prompt: str,
@@ -519,19 +533,7 @@ class VLLMServerEngine:
             payload["repetition_penalty"] = repetition_penalty
 
         data = self._post_chat_completions(payload)
-        choice = data.get("choices", [{}])[0]
-        message = choice.get("message", {})
-        content: str = message.get("content") or ""
-        tool_calls = message.get("tool_calls")
-        usage = data.get("usage", {})
-
-        if tool_calls:
-            return {
-                "content": content,
-                "tool_calls": tool_calls,
-                "usage": usage,
-            }
-        return content
+        return self._parse_completion_response(data)
 
     def generate_stream_sync(
         self,
