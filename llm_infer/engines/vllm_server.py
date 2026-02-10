@@ -76,7 +76,11 @@ class VLLMServerStreamingIterator:
             "POST", self._url, json=self._payload
         )
         self._response = self._stream_context.__enter__()
-        self._response.raise_for_status()
+        try:
+            self._response.raise_for_status()
+        except Exception:
+            self._cleanup()
+            raise
         self._line_iter = self._response.iter_lines()
 
     def __iter__(self) -> Iterator[str]:
@@ -236,7 +240,15 @@ class VLLMServerEngine:
         self._config = config
         self._process: subprocess.Popen[bytes] | None = None
         self._owns_process = False
-        self._base_url = f"{config.host}:{config.port}"
+        # Parse and normalize host to avoid double-port issues
+        from urllib.parse import urlparse
+
+        parsed = urlparse(
+            config.host if "://" in config.host else f"http://{config.host}"
+        )
+        scheme = parsed.scheme or "http"
+        hostname = parsed.hostname or parsed.netloc.split(":")[0]
+        self._base_url = f"{scheme}://{hostname}:{config.port}"
         self._model_name = config.served_model_name or Path(config.model_path).name
         self._adapter_paths: dict[str, str] = {}  # adapter_name -> filesystem_path
 
@@ -601,7 +613,11 @@ class VLLMServerEngine:
         # NOTE: Unlike vllm (Python API) which loads adapters dynamically, vllm-server
         # requires adapters to be registered at startup via --lora-modules. Adapters
         # created after server startup will return 404 errors until server is restarted.
-        model_name = lora_request.lora_name if lora_request else self._model_name
+        model_name = (
+            lora_request.lora_name
+            if lora_request and hasattr(lora_request, "lora_name")
+            else self._model_name
+        )
 
         payload: dict[str, Any] = {
             "model": model_name,
@@ -644,7 +660,8 @@ class VLLMServerEngine:
 
     def _parse_completion_response(self, data: dict[str, Any]) -> str | dict[str, Any]:
         """Extract content, tool_calls, and usage from a chat completions response."""
-        choice = data.get("choices", [{}])[0]
+        choices = data.get("choices") or [{}]
+        choice = choices[0] if choices else {}
         message = choice.get("message", {})
         content: str = message.get("content") or ""
         tool_calls = message.get("tool_calls")
