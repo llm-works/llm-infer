@@ -198,6 +198,7 @@ class VLLMServerStreamingIterator:
         if self._line_iter is None:
             self._start_stream()
             assert self._line_iter is not None
+        line = ""  # Initialize before try block for exception handler
         try:
             while True:
                 line = next(self._line_iter)
