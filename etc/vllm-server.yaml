@@ -23,6 +23,13 @@ dtype: auto                   # auto, float16, bfloat16, float32
 trust_remote_code: true
 enable_prefix_caching: true
 
+# LoRA/QLoRA adapter support
+lora:
+  enabled: true              # Enable LoRA adapter support
+  max_loras: 4               # Maximum concurrent adapters in GPU memory
+  max_lora_rank: 64          # Maximum LoRA rank supported
+  base_path: !include "../.env.yaml#paths.adapters"
+
 # Tool calling
 tool_call_parser: hermes      # hermes, llama, mistral, etc.
 

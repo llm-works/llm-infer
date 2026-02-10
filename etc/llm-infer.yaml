@@ -15,7 +15,7 @@ models: !include './models.yaml'
 # - engine=ollama → connects to Ollama server, ignores model/linear settings
 # - engine=native, model=gptqmodel → ignores linear setting
 backends:
-  engine: vllm        # native | vllm | vllm-server | ollama
+  engine: vllm-server # native | vllm | vllm-server | ollama
   model: native       # native | gptqmodel
   linear: marlin      # pytorch | marlin
 

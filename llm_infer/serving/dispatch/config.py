@@ -55,7 +55,7 @@ class BackendsConfig:
     Higher levels override lower levels.
     """
 
-    engine: str = "native"  # native | vllm | vllm-server | ollama
+    engine: str = "vllm-server"  # native | vllm | vllm-server | ollama
     model: str = "native"  # native | gptqmodel
     linear: str = "pytorch"  # pytorch | marlin
 
@@ -296,6 +296,9 @@ class VLLMServerConfig:
     quantization: str | None = None
     trust_remote_code: bool = True
     enable_prefix_caching: bool = True
+
+    # LoRA settings
+    lora: LoRAConfig = field(default_factory=LoRAConfig)
 
     # Tool calling
     tool_call_parser: str = "hermes"  # hermes, llama, mistral, etc.

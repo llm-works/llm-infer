@@ -227,6 +227,11 @@ class VLLMServerEngine:
         self._owns_process = False
         self._base_url = f"{config.host}:{config.port}"
         self._model_name = config.served_model_name or Path(config.model_path).name
+        self._adapter_paths: dict[str, str] = {}  # adapter_name -> filesystem_path
+
+        # Scan for adapters if LoRA is enabled (before starting server)
+        if config.lora.enabled and config.lora.base_path:
+            self._scan_adapters(Path(config.lora.base_path))
 
         # HTTP client with configured timeout
         self._client = httpx.Client(
@@ -246,6 +251,89 @@ class VLLMServerEngine:
             raise
 
     # -------------------------------------------------------------------------
+    # LoRA adapter scanning
+    # -------------------------------------------------------------------------
+
+    def _load_adapter_config(self, config_path: Path) -> dict[str, Any] | None:
+        """Load and parse adapter config.yaml file.
+
+        Returns config dict if successful, None if failed.
+        """
+        try:
+            import yaml
+
+            with open(config_path) as f:
+                return yaml.safe_load(f) or {}
+        except Exception as e:
+            self._lg.warning(
+                "failed to load adapter config",
+                extra={"path": str(config_path), "exception": e},
+            )
+            return None
+
+    def _validate_adapter_base_path(self, base_path: Path) -> bool:
+        """Validate adapter base path exists and is a directory.
+
+        Returns True if valid, False otherwise (logs warnings).
+        """
+        if not base_path.exists():
+            self._lg.warning(
+                "LoRA adapter base_path does not exist",
+                extra={"base_path": str(base_path)},
+            )
+            return False
+        if not base_path.is_dir():
+            self._lg.warning(
+                "LoRA adapter base_path is not a directory",
+                extra={"base_path": str(base_path)},
+            )
+            return False
+        return True
+
+    def _process_adapter_dir(self, entry: Path) -> None:
+        """Process a single adapter directory and register if enabled."""
+        config_path = entry / "config.yaml"
+        if not config_path.exists():
+            return
+
+        config = self._load_adapter_config(config_path)
+        if config is None:
+            return
+
+        enabled = config.get("enabled", False)
+        self._lg.debug(
+            "checked adapter config",
+            extra={"adapter": entry.name, "enabled": enabled, "path": str(entry)},
+        )
+        if enabled:
+            self._adapter_paths[entry.name] = str(entry)
+            self._lg.info(
+                "found LoRA adapter",
+                extra={"adapter": entry.name, "path": str(entry)},
+            )
+
+    def _scan_adapters(self, base_path: Path) -> None:
+        """Scan for available LoRA adapters in base_path.
+
+        Looks for subdirectories with config.yaml that have enabled: true.
+        Stores adapter names and paths for use in --lora-modules flag.
+        """
+        self._lg.debug(
+            "scanning for LoRA adapters", extra={"base_path": str(base_path)}
+        )
+        if not self._validate_adapter_base_path(base_path):
+            return
+
+        for entry in base_path.iterdir():
+            if entry.is_dir():
+                self._process_adapter_dir(entry)
+
+        self._lg.info(
+            "adapter scan complete (vllm-server engine)",
+            extra={"count": len(self._adapter_paths)},
+        )
+
+    # -------------------------------------------------------------------------
     # Server lifecycle
     # -------------------------------------------------------------------------
 
@@ -258,15 +346,9 @@ class VLLMServerEngine:
         except httpx.HTTPError:
             return False
 
-    def _build_serve_command(self) -> list[str]:
-        """Build the `vllm serve` command from config."""
+    def _add_engine_flags(self, cmd: list[str]) -> None:
+        """Add vLLM engine configuration flags to command."""
         cfg = self._config
-        cmd = [cfg.binary_path, "serve", cfg.model_path]
-
-        cmd.extend(["--port", str(cfg.port)])
-        cmd.extend(["--served-model-name", self._model_name])
-
-        # Engine settings
         cmd.extend(["--gpu-memory-utilization", str(cfg.gpu_memory_utilization)])
         cmd.extend(["--max-num-seqs", str(cfg.max_num_seqs)])
         cmd.extend(["--tensor-parallel-size", str(cfg.tensor_parallel_size)])
@@ -283,9 +365,40 @@ class VLLMServerEngine:
         if cfg.enable_prefix_caching:
             cmd.append("--enable-prefix-caching")
 
+    def _add_lora_flags(self, cmd: list[str]) -> None:
+        """Add LoRA configuration flags to command."""
+        cfg = self._config
+        if not (cfg.lora.enabled and cfg.task != "embed"):
+            return
+
+        cmd.append("--enable-lora")
+        cmd.extend(["--max-loras", str(cfg.lora.max_loras)])
+        cmd.extend(["--max-lora-rank", str(cfg.lora.max_lora_rank)])
+
+        # Pre-register all scanned adapters
+        if self._adapter_paths:
+            for adapter_name, adapter_path in self._adapter_paths.items():
+                cmd.extend(["--lora-modules", f"{adapter_name}={adapter_path}"])
+            self._lg.info(
+                "pre-registering LoRA adapters",
+                extra={"count": len(self._adapter_paths)},
+            )
+
+    def _build_serve_command(self) -> list[str]:
+        """Build the `vllm serve` command from config."""
+        cfg = self._config
+        cmd = [cfg.binary_path, "serve", cfg.model_path]
+
+        cmd.extend(["--port", str(cfg.port)])
+        cmd.extend(["--served-model-name", self._model_name])
+
+        self._add_engine_flags(cmd)
+
         # Tool calling
         cmd.append("--enable-auto-tool-choice")
         cmd.extend(["--tool-call-parser", cfg.tool_call_parser])
+
+        self._add_lora_flags(cmd)
 
         return cmd
 
@@ -415,34 +528,16 @@ class VLLMServerEngine:
     # InferenceEngineProtocol: Generation
     # -------------------------------------------------------------------------
 
-    def _build_payload(
+    def _add_optional_params(
         self,
-        messages: list[dict[str, Any]] | None,
-        prompt: str,
-        max_tokens: int,
-        temperature: float,
-        top_p: float,
+        payload: dict[str, Any],
         stop_sequences: list[str] | None,
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | None,
+        response_format: dict[str, Any] | None,
         stream: bool,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        response_format: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Build OpenAI-compatible chat completions payload."""
-        if messages:
-            api_messages = list(messages)
-        else:
-            api_messages = [{"role": "user", "content": prompt}]
-
-        payload: dict[str, Any] = {
-            "model": self._model_name,
-            "messages": api_messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "top_p": top_p,
-            "stream": stream,
-        }
-
+    ) -> None:
+        """Add optional parameters to payload."""
         if stop_sequences:
             payload["stop"] = stop_sequences
         if tools:
@@ -453,6 +548,41 @@ class VLLMServerEngine:
             payload["response_format"] = response_format
         if stream:
             payload["stream_options"] = {"include_usage": True}
+
+    def _build_payload(
+        self,
+        messages: list[dict[str, Any]] | None,
+        prompt: str,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_sequences: list[str] | None,
+        stream: bool,
+        lora_request: Any | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build OpenAI-compatible chat completions payload."""
+        api_messages = (
+            list(messages) if messages else [{"role": "user", "content": prompt}]
+        )
+
+        # For LoRA: use adapter name as model field (pre-registered at server startup)
+        model_name = lora_request.lora_name if lora_request else self._model_name
+
+        payload: dict[str, Any] = {
+            "model": model_name,
+            "messages": api_messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "stream": stream,
+        }
+
+        self._add_optional_params(
+            payload, stop_sequences, tools, tool_choice, response_format, stream
+        )
 
         return payload
 
@@ -506,11 +636,15 @@ class VLLMServerEngine:
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
         messages: list[dict[str, Any]] | None = None,
+        lora_request: Any | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> str | dict[str, Any]:
         """Generate text completion (blocking).
+
+        Args:
+            lora_request: LoRA adapter request (uses adapter name as model field).
 
         Returns:
             Generated text string, or dict with "content" and "tool_calls" when
@@ -524,6 +658,7 @@ class VLLMServerEngine:
             top_p=top_p,
             stop_sequences=stop_sequences,
             stream=False,
+            lora_request=lora_request,
             tools=tools,
             tool_choice=tool_choice,
             response_format=response_format,
@@ -547,6 +682,7 @@ class VLLMServerEngine:
         stop_sequences: list[str] | None = None,
         context: RequestContext | None = None,
         messages: list[dict[str, Any]] | None = None,
+        lora_request: Any | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
@@ -560,6 +696,7 @@ class VLLMServerEngine:
             top_p=top_p,
             stop_sequences=stop_sequences,
             stream=True,
+            lora_request=lora_request,
             tools=tools,
             tool_choice=tool_choice,
             response_format=response_format,
