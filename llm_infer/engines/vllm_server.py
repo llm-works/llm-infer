@@ -502,6 +502,7 @@ class VLLMServerEngine:
             self._lg.warning("vllm server did not stop gracefully, force killing")
             try:
                 os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
+                self._process.wait(timeout=5)  # Reap zombie process
             except ProcessLookupError:
                 pass  # Already dead, fine
             except PermissionError as e:
@@ -715,6 +716,8 @@ class VLLMServerEngine:
         # Add optional params that vLLM supports via extra_body
         if repetition_penalty != 1.0:
             payload["repetition_penalty"] = repetition_penalty
+        if top_k > 0:
+            payload["top_k"] = top_k
 
         data = self._post_chat_completions(payload)
         return self._parse_completion_response(data)
@@ -752,6 +755,8 @@ class VLLMServerEngine:
         )
         if repetition_penalty != 1.0:
             payload["repetition_penalty"] = repetition_penalty
+        if top_k > 0:
+            payload["top_k"] = top_k
 
         return VLLMServerStreamingIterator(
             self._lg, self._client, "/v1/chat/completions", payload
