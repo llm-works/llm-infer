@@ -8,7 +8,7 @@ import pytest
 
 from llm_infer.cli.tools.serve import ServeTool
 from llm_infer.models.config import ModelConfig, ModelsConfig
-from llm_infer.serving.dispatch.config import OllamaConfig, VLLMConfig
+from llm_infer.serving.dispatch.config import OllamaConfig, VLLMConfig, VLLMServerConfig
 
 pytestmark = pytest.mark.unit
 
@@ -18,6 +18,7 @@ class MockEnginesConfig:
     """Mock engines config for testing."""
 
     vllm: VLLMConfig = field(default_factory=VLLMConfig)
+    vllm_server: VLLMServerConfig = field(default_factory=VLLMServerConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
 
 
@@ -66,6 +67,7 @@ class TestApplyModelOverrides:
         tool._apply_model_overrides(config, "embed-model")
 
         assert config.engines.vllm.task == "embed"
+        assert config.engines.vllm_server.task == "embed"
         assert config.engines.ollama.task == "embed"
         mock_lg.debug.assert_called()
 
@@ -82,6 +84,7 @@ class TestApplyModelOverrides:
         tool._apply_model_overrides(config, "test-model")
 
         assert config.engines.vllm.max_model_len == 1024
+        assert config.engines.vllm_server.max_model_len == 1024
 
     def test_applies_vllm_overrides(
         self,
@@ -94,6 +97,8 @@ class TestApplyModelOverrides:
 
         assert config_with_model.engines.vllm.enable_prefix_caching is False
         assert config_with_model.engines.vllm.gpu_memory_utilization == 0.5
+        assert config_with_model.engines.vllm_server.enable_prefix_caching is False
+        assert config_with_model.engines.vllm_server.gpu_memory_utilization == 0.5
 
     def test_warns_on_unknown_vllm_key(
         self, serve_tool: tuple[ServeTool, MagicMock]
@@ -160,6 +165,13 @@ class TestApplyModelOverrides:
         assert config.engines.vllm.enable_prefix_caching is False
         assert config.engines.vllm.enforce_eager is True
         assert config.engines.vllm.tensor_parallel_size == 2
+        # Verify vllm_server gets the same overrides
+        assert config.engines.vllm_server.task == "embed"
+        assert config.engines.vllm_server.gpu_memory_utilization == 0.8
+        assert config.engines.vllm_server.max_num_seqs == 128
+        assert config.engines.vllm_server.enable_prefix_caching is False
+        assert config.engines.vllm_server.enforce_eager is True
+        assert config.engines.vllm_server.tensor_parallel_size == 2
         mock_lg.warning.assert_not_called()
 
 

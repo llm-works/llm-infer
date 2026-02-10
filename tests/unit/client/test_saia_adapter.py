@@ -153,7 +153,7 @@ class TestSAIAAdapterResponseConversion:
         assert isinstance(result, AgentResponse)
         assert result.content == "Hello!"
         assert result.tool_calls == []
-        assert result.stop_reason == "stop"
+        assert result.finish_reason == "stop"
         assert result.input_tokens == 10
         assert result.output_tokens == 5
 
@@ -181,7 +181,7 @@ class TestSAIAAdapterResponseConversion:
         assert result.tool_calls[0].id == "call_123"
         assert result.tool_calls[0].name == "get_weather"
         assert result.tool_calls[0].arguments == {"city": "NYC"}
-        assert result.stop_reason == "tool_calls"
+        assert result.finish_reason == "tool_calls"
 
     def test_convert_response_no_usage(self, mock_client: MagicMock) -> None:
         """Test response conversion when usage is None."""
@@ -200,7 +200,7 @@ class TestSAIAAdapterResponseConversion:
 
         result = adapter._convert_response(response)
 
-        assert result.stop_reason is None
+        assert result.finish_reason is None
 
 
 class TestSAIAAdapterToolArgumentParsing:

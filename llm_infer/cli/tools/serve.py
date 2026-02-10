@@ -52,7 +52,7 @@ class ServeTool(Tool):
         )
         parser.add_argument(
             "--engine",
-            choices=["native", "vllm", "ollama"],
+            choices=["native", "vllm", "vllm-server", "ollama"],
             help="Inference engine backend",
         )
         parser.add_argument(
@@ -149,17 +149,25 @@ class ServeTool(Tool):
             return
         if model_cfg.task:
             config.engines.vllm.task = model_cfg.task
+            config.engines.vllm_server.task = model_cfg.task
             config.engines.ollama.task = model_cfg.task
             self.lg.debug("model override", extra={"task": model_cfg.task})
         if model_cfg._max_model_len_set:
             config.engines.vllm.max_model_len = model_cfg.max_model_len
+            config.engines.vllm_server.max_model_len = model_cfg.max_model_len
             self.lg.debug(
                 "model override", extra={"max_model_len": model_cfg.max_model_len}
             )
-        # Apply model-specific vLLM overrides
+        # Apply model-specific vLLM overrides (to both vllm and vllm_server)
         for key, value in model_cfg.vllm.items():
+            applied = False
             if hasattr(config.engines.vllm, key):
                 setattr(config.engines.vllm, key, value)
+                applied = True
+            if hasattr(config.engines.vllm_server, key):
+                setattr(config.engines.vllm_server, key, value)
+                applied = True
+            if applied:
                 self.lg.debug("model vllm override", extra={key: value})
             else:
                 self.lg.warning(

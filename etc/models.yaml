@@ -126,6 +126,7 @@ models:
 
   qwen3-4b-instruct-2507-awq:
     <<: *qwen_think
+    max_model_len: 8192
 
   qwen3-4b-instruct-w4a16:
     <<: *qwen_think

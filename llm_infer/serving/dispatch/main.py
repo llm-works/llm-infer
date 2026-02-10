@@ -235,9 +235,16 @@ class BootSequence:
         self._handler = create_handler(self._lg, self._engine, self._config)
         self._lg.info("handler created", extra={"type": self._config.dispatch.handler})
 
-        # Configure LoRA if enabled
-        lora_cfg = self._config.engines.vllm.lora
-        if lora_cfg.enabled and lora_cfg.base_path:
+        # Configure LoRA if enabled (use engine-specific config)
+        engine_type = self._config.backends.engine
+        if engine_type == "vllm":
+            lora_cfg = self._config.engines.vllm.lora
+        elif engine_type == "vllm-server":
+            lora_cfg = self._config.engines.vllm_server.lora
+        else:
+            lora_cfg = None
+
+        if lora_cfg and lora_cfg.enabled and lora_cfg.base_path:
             self._handler.set_lora_base_path(lora_cfg.base_path)
 
             # Initialize adapter manager and scan for adapters
@@ -266,9 +273,12 @@ class BootSequence:
             )
         else:
             output = self._engine.generate("Say hello", max_tokens=8)
+            # Handle both str and dict responses (some engines include usage data)
+            text = output["content"] if isinstance(output, dict) else output
+            # Limit split to first 100 chars for token counting (warmup output is tiny anyway)
             self._lg.info(
                 "warmup complete",
-                extra={"after": since(t0), "tokens": len(output.split())},
+                extra={"after": since(t0), "tokens": len(text[:100].split())},
             )
 
     def mark_ready(self) -> None:

@@ -362,21 +362,33 @@ class RequestHandler(ABC):
 
     def _parse_generate_result(
         self, result: str | dict[str, Any]
-    ) -> tuple[str, list[dict[str, Any]] | None]:
-        """Parse engine generate result, extracting content and tool_calls."""
+    ) -> tuple[str, list[dict[str, Any]] | None, dict[str, Any] | None]:
+        """Parse engine generate result, extracting content, tool_calls, and usage."""
         if isinstance(result, dict):
-            return result.get("content", ""), result.get("tool_calls")
-        return result, None
+            return (
+                result.get("content", ""),
+                result.get("tool_calls"),
+                result.get("usage"),
+            )
+        return result, None, None
 
     def _build_success_response(
         self,
         request: Request,
         result_text: str,
         tool_calls: list[dict[str, Any]] | None,
+        usage: dict[str, Any] | None = None,
     ) -> Response:
-        """Build successful response with token counts."""
-        prompt_tokens = self.engine.count_tokens(request.prompt)
-        completion_tokens = self.engine.count_tokens(result_text)
+        """Build successful response with token counts.
+
+        Uses engine-reported usage when available, falls back to estimation.
+        """
+        if usage:
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+        else:
+            prompt_tokens = self.engine.count_tokens(request.prompt)
+            completion_tokens = self.engine.count_tokens(result_text)
         if request.context:
             request.context.mark(
                 Event.COMPLETE,
@@ -398,8 +410,8 @@ class RequestHandler(ABC):
             result = self.engine.generate(**self._build_engine_params(request))
             if request.context:
                 request.context.mark(Event.DECODED)
-            result_text, tool_calls = self._parse_generate_result(result)
-            return self._build_success_response(request, result_text, tool_calls)
+            result_text, tool_calls, usage = self._parse_generate_result(result)
+            return self._build_success_response(request, result_text, tool_calls, usage)
         except AdapterError as e:
             if self._lg:
                 self._lg.warning(

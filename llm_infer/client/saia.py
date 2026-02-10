@@ -173,12 +173,12 @@ class SAIAAdapter(Backend):
             input_tokens = response.usage.prompt_tokens
             output_tokens = response.usage.completion_tokens
 
-        stop_reason = response.finish_reason.value if response.finish_reason else None
+        finish_reason = response.finish_reason.value if response.finish_reason else None
 
         return AgentResponse(
             content=response.content or "",
             tool_calls=tool_calls,
-            stop_reason=stop_reason,
+            finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
