@@ -172,10 +172,19 @@ The system supports multiple engine backends:
 - Full visibility into inference pipeline
 - FlashInfer for optimized attention
 
-**vLLM Engine** (for production)
+**vLLM Engine** (for production, Python API)
 - Production-grade with PagedAttention
 - Continuous batching
 - Tensor parallelism support
+- **LoRA support:** Dynamic adapter loading at inference time
+
+**vLLM Server Engine** (for production, HTTP API)
+- Connects to `vllm serve` subprocess via OpenAI-compatible HTTP API
+- Process isolation and language-agnostic interface
+- Auto-starts and manages vLLM server lifecycle
+- **LoRA limitation:** Adapters must be pre-registered at server startup via `--lora-modules`
+  - Cannot load adapters created after server startup (requires server restart)
+  - Use native `vllm` engine for dynamic adapter use cases (e.g., e2e tests)
 
 **Ollama Engine** (for local development)
 - Uses Ollama for model management and inference
@@ -186,7 +195,7 @@ The system supports multiple engine backends:
 Select via configuration:
 ```yaml
 backends:
-  engine: native  # or vllm, ollama
+  engine: native  # or vllm, vllm-server, ollama
 ```
 
 ## Request Lifecycle

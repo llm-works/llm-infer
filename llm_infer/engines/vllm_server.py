@@ -7,6 +7,13 @@ server as a subprocess and stop it on shutdown.
 The vllm-server engine delegates chat templating, tokenization, tool call parsing,
 and structured output to the vLLM server, avoiding the need to reimplement these
 in Python.
+
+LoRA Limitation:
+    Unlike the native vllm engine (Python API) which loads LoRA adapters dynamically
+    at inference time, vllm-server requires adapters to be pre-registered at server
+    startup via --lora-modules. Adapters created after server startup will fail with
+    404 errors until the server is restarted. Use the native vllm engine for dynamic
+    adapter use cases (e.g., e2e tests creating temporary adapters).
 """
 
 from __future__ import annotations
@@ -239,15 +246,24 @@ class VLLMServerEngine:
             timeout=httpx.Timeout(config.timeout, connect=10.0),
         )
 
+        self._initialize_connection()
+
+    def _initialize_connection(self) -> None:
+        """Initialize server connection, starting server if needed."""
         try:
-            if config.auto_start and not self._is_server_running():
+            if self._config.auto_start and not self._is_server_running():
                 self._start_server()
 
             self._verify_connection()
         except Exception:
             self._client.close()
             if self._owns_process:
-                self._stop_server()
+                try:
+                    self._stop_server()
+                except Exception as cleanup_err:
+                    self._lg.warning(
+                        "cleanup failed during init", extra={"exception": cleanup_err}
+                    )
             raise
 
     # -------------------------------------------------------------------------
@@ -437,6 +453,9 @@ class VLLMServerEngine:
                     f"Check stderr output above for details."
                 )
             if self._is_server_running():
+                # Double-check process didn't die immediately after responding
+                if self._process is not None and self._process.poll() is not None:
+                    raise RuntimeError("vllm server died after startup")
                 self._lg.info("vllm server is ready")
                 return
             time.sleep(2.0)  # vllm startup is slow, no need to poll aggressively
@@ -456,8 +475,10 @@ class VLLMServerEngine:
 
         try:
             os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+        except ProcessLookupError:
+            pass  # Already dead, fine
+        except PermissionError as e:
+            self._lg.warning("failed to terminate vllm server", extra={"exception": e})
 
         try:
             self._process.wait(timeout=15)
@@ -465,8 +486,12 @@ class VLLMServerEngine:
             self._lg.warning("vllm server did not stop gracefully, force killing")
             try:
                 os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            except ProcessLookupError:
+                pass  # Already dead, fine
+            except PermissionError as e:
+                self._lg.error(
+                    "failed to force kill vllm server", extra={"exception": e}
+                )
 
         self._process = None
 
@@ -517,7 +542,7 @@ class VLLMServerEngine:
         return list(range(len(text) // 4))
 
     def decode_tokens(self, tokens: list[int]) -> str:
-        """Decode not supported via server — return empty string."""
+        """Decode not implemented for server engine — return empty string."""
         return ""
 
     def build_stop_token_ids(self, stop_sequences: list[str] | None) -> set[int]:
@@ -569,6 +594,9 @@ class VLLMServerEngine:
         )
 
         # For LoRA: use adapter name as model field (pre-registered at server startup)
+        # NOTE: Unlike vllm (Python API) which loads adapters dynamically, vllm-server
+        # requires adapters to be registered at startup via --lora-modules. Adapters
+        # created after server startup will return 404 errors until server is restarted.
         model_name = lora_request.lora_name if lora_request else self._model_name
 
         payload: dict[str, Any] = {

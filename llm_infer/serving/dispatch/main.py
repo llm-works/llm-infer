@@ -275,9 +275,10 @@ class BootSequence:
             output = self._engine.generate("Say hello", max_tokens=8)
             # Handle both str and dict responses (some engines include usage data)
             text = output["content"] if isinstance(output, dict) else output
+            # Limit split to first 100 chars for token counting (warmup output is tiny anyway)
             self._lg.info(
                 "warmup complete",
-                extra={"after": since(t0), "tokens": len(text.split())},
+                extra={"after": since(t0), "tokens": len(text[:100].split())},
             )
 
     def mark_ready(self) -> None:
