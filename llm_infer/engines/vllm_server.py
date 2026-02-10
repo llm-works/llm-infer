@@ -622,7 +622,7 @@ class VLLMServerEngine:
             msg: str = response.json().get("message", response.text)
             return msg
         except Exception:
-            return response.text
+            return str(response.text)
 
     def _post_chat_completions(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST to /v1/chat/completions with error handling."""
