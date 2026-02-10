@@ -323,7 +323,16 @@ class VLLMServerConfig:
 
         kwargs: dict[str, Any] = {"model_path": model_path}
         for f in fields(cls):
-            if f.name != "model_path" and f.name in data:
+            if f.name == "lora" and "lora" in data:
+                # Parse lora config using existing helper
+                lora_data = data["lora"] or {}
+                kwargs["lora"] = LoRAConfig(
+                    enabled=lora_data.get("enabled", False),
+                    max_loras=lora_data.get("max_loras", 4),
+                    max_lora_rank=lora_data.get("max_lora_rank", 64),
+                    base_path=lora_data.get("base_path"),
+                )
+            elif f.name != "model_path" and f.name in data:
                 kwargs[f.name] = data[f.name]
         return cls(**kwargs)
 
@@ -378,7 +387,7 @@ class InferenceConfig:
         return cls(
             models=ModelsConfig.from_dict(data.get("models", {}) or {}),
             backends=BackendsConfig(
-                engine=backends.get("engine", "native"),
+                engine=backends.get("engine", "vllm-server"),
                 model=backends.get("model", "native"),
                 linear=backends.get("linear", "pytorch"),
             ),

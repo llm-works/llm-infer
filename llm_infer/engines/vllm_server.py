@@ -76,6 +76,7 @@ class VLLMServerStreamingIterator:
             "POST", self._url, json=self._payload
         )
         self._response = self._stream_context.__enter__()
+        self._response.raise_for_status()
         self._line_iter = self._response.iter_lines()
 
     def __iter__(self) -> Iterator[str]:
@@ -183,11 +184,13 @@ class VLLMServerStreamingIterator:
 
         choice = choices[0]
         delta = choice.get("delta", {})
-        if choice.get("finish_reason"):
-            self._handle_completion(data)
+        # Accumulate tool call deltas before handling completion
+        # to ensure final chunk's deltas are included
         if tc_deltas := delta.get("tool_calls"):
             for tc_delta in tc_deltas:
                 self._accumulate_tool_call_delta(tc_delta)
+        if choice.get("finish_reason"):
+            self._handle_completion(data)
 
         content: str = delta.get("content") or ""
         return content if content else None
