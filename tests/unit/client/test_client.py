@@ -208,10 +208,10 @@ class TestFactory:
         with pytest.raises(ValueError, match="No enabled backends"):
             factory.from_config(config)
 
-    def test_from_config_falls_back_to_first_enabled_if_default_disabled(
+    def test_from_config_raises_if_default_backend_disabled(
         self, mock_lg: Logger
     ) -> None:
-        """Test from_config uses first enabled backend if default is disabled."""
+        """Test from_config raises when specified default is disabled."""
         factory = Factory(mock_lg)
         config = {
             "default": "disabled",
@@ -227,9 +227,8 @@ class TestFactory:
                 },
             },
         }
-        router = factory.from_config(config)
-        assert router.default == "enabled"
-        router.close()
+        with pytest.raises(ValueError, match="Default backend 'disabled' not found"):
+            factory.from_config(config)
 
     def test_from_config_with_discover_models_false(self, mock_lg: Logger) -> None:
         """Test from_config skips model discovery when disabled."""

@@ -225,7 +225,12 @@ class Factory:
         if not clients:
             raise ValueError("No enabled backends in config")
 
-        if not default_name or default_name not in clients:
+        if default_name and default_name not in clients:
+            self._close_clients_safely(clients)
+            raise ValueError(
+                f"Default backend '{default_name}' not found in enabled backends"
+            )
+        if not default_name:
             default_name = next(iter(clients.keys()))
 
         try:
