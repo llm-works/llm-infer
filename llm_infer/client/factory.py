@@ -32,7 +32,7 @@ Example:
 from __future__ import annotations
 
 import importlib
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.log import Logger
 
@@ -40,6 +40,9 @@ from llm_infer.client.backends.base import Backend
 from llm_infer.client.backends.openai import OpenAICompatibleBackend
 from llm_infer.client.client import LLMClient
 from llm_infer.client.router import LLMRouter
+
+if TYPE_CHECKING:
+    from appinfra.rate_limit import Backoff, RateLimiter
 
 
 class Factory:
@@ -150,6 +153,11 @@ class Factory:
 
         Multi-backend (with default selection and routing):
             default: backend_name
+            rate_limit:              # Optional: rate limiting for all backends
+              per_minute: 60
+              backoff:
+                base: 1.0
+                max: 60
             backends:
               backend_name:
                 enabled: true        # Optional, defaults to true
@@ -172,6 +180,12 @@ class Factory:
             discovered models). If the same model appears in multiple backends,
             raises ValueError.
 
+        Rate limiting:
+            When rate_limit is specified, each client is configured with:
+            - per_minute: Maximum requests per minute
+            - backoff.base: Initial backoff delay in seconds (default: 1.0)
+            - backoff.max: Maximum backoff delay in seconds (default: 60.0)
+
         Args:
             config: Configuration dictionary.
             discover_models: If True, query backends for available models
@@ -185,22 +199,28 @@ class Factory:
                 config models not found in backend, or model conflict detected.
         """
         backends_config = config.get("backends", {})
+        rate_limit_config = config.get("rate_limit")
 
         if not backends_config:
-            return self._create_single_backend_router(config, discover_models)
+            return self._create_single_backend_router(
+                config, discover_models, rate_limit_config
+            )
 
         return self._create_multi_backend_router(
-            backends_config, config.get("default"), discover_models
+            backends_config, config.get("default"), discover_models, rate_limit_config
         )
 
     def _create_single_backend_router(
-        self, config: dict[str, Any], discover_models: bool
+        self,
+        config: dict[str, Any],
+        discover_models: bool,
+        rate_limit_config: dict[str, Any] | None = None,
     ) -> LLMRouter:
         """Create router wrapping a single backend config.
 
         On failure during model discovery or router init, closes client before re-raising.
         """
-        client = self._create_client(config)
+        client = self._create_client(config, rate_limit_config)
         try:
             name = "default"
             model_to_backend = self._discover_models_for_backend(
@@ -216,12 +236,15 @@ class Factory:
         backends_config: dict[str, dict[str, Any]],
         default_name: str | None,
         discover_models: bool,
+        rate_limit_config: dict[str, Any] | None = None,
     ) -> LLMRouter:
         """Create router from multi-backend config.
 
         On failure during model routing, closes all clients before re-raising.
         """
-        clients, backend_configs = self._create_enabled_clients(backends_config)
+        clients, backend_configs = self._create_enabled_clients(
+            backends_config, rate_limit_config
+        )
         if not clients:
             raise ValueError("No enabled backends in config")
 
@@ -243,7 +266,9 @@ class Factory:
             raise
 
     def _create_enabled_clients(
-        self, backends_config: dict[str, dict[str, Any]]
+        self,
+        backends_config: dict[str, dict[str, Any]],
+        rate_limit_config: dict[str, Any] | None = None,
     ) -> tuple[dict[str, LLMClient], dict[str, dict[str, Any]]]:
         """Create clients for all enabled backends.
 
@@ -254,7 +279,7 @@ class Factory:
         try:
             for name, config in backends_config.items():
                 if config.get("enabled", True):
-                    clients[name] = self._create_client(config)
+                    clients[name] = self._create_client(config, rate_limit_config)
                     configs[name] = config
         except Exception:
             self._close_clients_safely(clients)
@@ -360,17 +385,61 @@ class Factory:
                     "Error closing client during cleanup", extra={"exception": e}
                 )
 
-    def _create_client(self, config: dict[str, Any]) -> LLMClient:
+    def _create_rate_limiter(
+        self, rate_limit_config: dict[str, Any] | None
+    ) -> tuple[RateLimiter | None, Backoff | None]:
+        """Create rate limiter and backoff instances from config.
+
+        Args:
+            rate_limit_config: Rate limit configuration with per_minute and backoff.
+
+        Returns:
+            Tuple of (rate_limiter, backoff), either or both may be None.
+        """
+        if rate_limit_config is None:
+            return None, None
+
+        from appinfra.rate_limit import Backoff, RateLimiter
+
+        rate_limiter: RateLimiter | None = None
+        backoff: Backoff | None = None
+
+        per_minute = rate_limit_config.get("per_minute")
+        if per_minute is not None:
+            rate_limiter = RateLimiter(self._lg, per_minute=per_minute)
+
+        backoff_config = rate_limit_config.get("backoff")
+        if backoff_config is not None:
+            backoff = Backoff(
+                self._lg,
+                base=backoff_config.get("base", 1.0),
+                max_delay=backoff_config.get("max", 60.0),
+            )
+
+        return rate_limiter, backoff
+
+    def _create_client(
+        self,
+        config: dict[str, Any],
+        rate_limit_config: dict[str, Any] | None = None,
+    ) -> LLMClient:
         """Create single LLMClient from backend configuration.
 
         Args:
             config: Backend configuration with 'type' key.
+            rate_limit_config: Optional rate limit configuration.
 
         Returns:
             Configured LLMClient instance.
         """
         backend = self.create_backend(config)
-        return LLMClient(backend=backend, default_model=config.get("model"))
+        rate_limiter, backoff = self._create_rate_limiter(rate_limit_config)
+        return LLMClient(
+            backend=backend,
+            default_model=config.get("model"),
+            rate_limiter=rate_limiter,
+            backoff=backoff,
+        )
 
     def from_backend_config(self, config: dict[str, Any]) -> LLMClient:
         """Create LLMClient from single backend configuration.

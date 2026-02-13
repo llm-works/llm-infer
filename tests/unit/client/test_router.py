@@ -341,3 +341,72 @@ class TestLLMRouterResourceManagement:
             assert router.clients == {"main": client}
 
         assert backend._aclosed
+
+
+class TestLLMRouterCanCall:
+    """Test LLMRouter.can_call() method."""
+
+    def test_can_call_delegates_to_default_client(self, mock_lg: Logger) -> None:
+        """Test can_call() delegates to default client."""
+        backend = MockBackend()
+        client = LLMClient(backend=backend)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        # Client has no rate limiting, should return True
+        assert router.can_call() is True
+
+    def test_can_call_delegates_to_specified_backend(self, mock_lg: Logger) -> None:
+        """Test can_call(backend=...) delegates to specified client."""
+        from appinfra.rate_limit import RateLimiter
+
+        backend_a = MockBackend()
+        backend_b = MockBackend()
+
+        # Client A has rate limiting
+        rate_limiter = RateLimiter(mock_lg, per_minute=60)
+        import time
+
+        rate_limiter.last_t = time.time()  # Simulate recent call
+
+        client_a = LLMClient(backend=backend_a, rate_limiter=rate_limiter)
+        client_b = LLMClient(backend=backend_b)  # No rate limiting
+
+        router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
+
+        # Default (a) should be rate limited
+        assert router.can_call() is False
+        # Backend b should be allowed
+        assert router.can_call(backend="b") is True
+
+    def test_can_call_with_model_routing(self, mock_lg: Logger) -> None:
+        """Test can_call(model=...) uses model routing."""
+        from appinfra.rate_limit import Backoff
+
+        backend_a = MockBackend()
+        backend_b = MockBackend()
+
+        # Client B has backoff active
+        backoff = Backoff(mock_lg, base=10.0)
+        client_a = LLMClient(backend=backend_a)
+        client_b = LLMClient(backend=backend_b, backoff=backoff)
+
+        import time
+
+        client_b._backoff_until = time.time() + 10  # Active backoff
+
+        model_routing = {"model-a": "a", "model-b": "b"}
+        router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a", model_routing)
+
+        # Model-a routes to client_a (no backoff)
+        assert router.can_call(model="model-a") is True
+        # Model-b routes to client_b (has backoff)
+        assert router.can_call(model="model-b") is False
+
+    def test_can_call_raises_on_unknown_backend(self, mock_lg: Logger) -> None:
+        """Test can_call raises ValueError for unknown backend."""
+        backend = MockBackend()
+        client = LLMClient(backend=backend)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        with pytest.raises(ValueError, match="Backend 'unknown' not found"):
+            router.can_call(backend="unknown")
