@@ -1,94 +1,137 @@
-"""Single-backend LLM client.
+"""Multi-backend router for LLMClient.
 
-This module provides the LLMClient class that wraps a single backend.
-For multi-backend routing, use LLMRouter.
+LLMRouter routes requests to named LLMClient instances, enabling multi-backend
+support with runtime backend selection.
 
-For client creation, use Factory:
+Example:
     from appinfra.log import Logger
     from llm_infer.client import Factory
 
     lg = Logger("my-app")
-    factory = Factory(lg)
+    config = {
+        "default": "local",
+        "backends": {
+            "local": {"type": "openai_compatible", "base_url": "http://localhost:8000/v1"},
+            "openai": {"type": "openai", "base_url": "https://api.openai.com/v1"},
+        },
+    }
+    router = Factory(lg).from_config(config)
 
-    # Quick start with OpenAI-compatible server
-    with factory.openai(base_url="http://localhost:8000/v1") as client:
-        response = client.chat([{"role": "user", "content": "Hello"}])
-        print(response)
+    # Use default backend
+    response = router.chat(messages)
 
-    # Async streaming with Anthropic
-    async with factory.anthropic() as client:
-        async for token in client.chat_stream_async(messages):
-            print(token, end="")
-
-    # Multi-backend config returns LLMRouter
-    router = factory.from_config(config)
-    router.chat(messages, backend="openai")  # Route to specific backend
+    # Route to specific backend
+    response = router.chat(messages, backend="openai")
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+import types
+from collections.abc import AsyncIterator, Iterator, Mapping
 from typing import Any, Self
 
-from llm_infer.client.backends import Backend
+from appinfra.log import Logger
+
+from llm_infer.client.client import LLMClient
 from llm_infer.client.types import ChatResponse
 
 
-class LLMClient:
-    """Single-backend LLM client with sync/async support.
+class LLMRouter:
+    """Multi-backend router - routes requests to named LLMClients.
 
-    This client wraps a single backend and provides a consistent interface
-    for chat completions. For multi-backend routing, use LLMRouter.
-
-    The client delegates all operations to an underlying Backend instance,
-    which handles the actual API communication.
-
-    Create instances using Factory:
-        from appinfra.log import Logger
-        from llm_infer.client import Factory
-
-        lg = Logger("my-app")
-        factory = Factory(lg)
-
-        # Sync
-        with factory.openai() as client:
-            response = client.chat(messages)
-
-        # Async
-        async with factory.anthropic() as client:
-            response = await client.chat_async(messages)
+    The router holds multiple LLMClient instances and routes requests based on
+    the `backend` parameter. Each client can have its own configuration,
+    throttling, and connection state.
 
     Attributes:
-        backend: The underlying backend instance.
+        clients: Dictionary mapping backend names to LLMClient instances.
+        default: Name of the default backend.
     """
 
     def __init__(
         self,
-        backend: Backend,
-        default_model: str | None = None,
+        lg: Logger,
+        clients: dict[str, LLMClient],
+        default: str,
+        model_to_backend: dict[str, str] | None = None,
     ) -> None:
-        """Initialize the client with a backend.
+        """Initialize the router with named clients.
 
         Args:
-            backend: The backend to use for API calls.
-            default_model: Default model to use if not specified per-request.
+            lg: Logger instance.
+            clients: Dictionary mapping backend names to LLMClient instances.
+            default: Name of the default backend to use when not specified.
+            model_to_backend: Optional mapping from model ID to backend name
+                for intelligent model-based routing.
+
+        Raises:
+            ValueError: If default backend is not in clients dict.
         """
-        self._backend = backend
-        self._default_model = default_model
+        self._lg = lg
+        self._clients = clients
+        self._default = default
+        self._model_to_backend = model_to_backend or {}
+
+        if default not in clients:
+            raise ValueError(f"Default backend '{default}' not in clients")
+
+        # Validate model routing references valid backends
+        for model, backend_name in self._model_to_backend.items():
+            if backend_name not in clients:
+                raise ValueError(
+                    f"Model '{model}' routes to unknown backend '{backend_name}'"
+                )
 
     @property
-    def backend(self) -> Backend:
-        """The underlying backend instance."""
-        return self._backend
+    def clients(self) -> Mapping[str, LLMClient]:
+        """Dictionary mapping backend names to LLMClient instances (read-only)."""
+        return types.MappingProxyType(self._clients)
 
     @property
-    def last_response(self) -> ChatResponse | None:
-        """Last response with usage stats.
+    def default(self) -> str:
+        """Name of the default backend."""
+        return self._default
 
-        This is populated after both streaming and non-streaming requests,
-        providing access to usage statistics and metadata.
+    @property
+    def models(self) -> Mapping[str, str]:
+        """Mapping from model ID to backend name (read-only)."""
+        return types.MappingProxyType(self._model_to_backend)
+
+    def get_client(
+        self, backend: str | None = None, model: str | None = None
+    ) -> LLMClient:
+        """Get the client for the specified backend or model.
+
+        Resolution priority:
+            1. Explicit backend name
+            2. Model-based lookup (if model is in the routing table)
+            3. Default backend
+
+        Args:
+            backend: Backend name (highest priority).
+            model: Model ID for model-based routing.
+
+        Returns:
+            The LLMClient for the resolved backend.
+
+        Raises:
+            ValueError: If explicit backend is not found.
         """
-        return self._backend.last_response
+        # Priority 1: Explicit backend
+        if backend is not None:
+            if backend not in self._clients:
+                available = list(self._clients.keys())
+                raise ValueError(
+                    f"Backend '{backend}' not found. Available: {available}"
+                )
+            return self._clients[backend]
+
+        # Priority 2: Model-based routing
+        if model is not None and model in self._model_to_backend:
+            return self._clients[self._model_to_backend[model]]
+
+        # Priority 3: Default
+        return self._clients[self._default]
 
     # =========================================================================
     # Sync API
@@ -105,12 +148,10 @@ class LLMClient:
         think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Send a chat completion request and return content (sync).
-
-        This is the simple API that returns just the generated text.
-        For full response with usage stats, use chat_full().
 
         Args:
             messages: List of chat messages.
@@ -122,12 +163,13 @@ class LLMClient:
             think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            backend: Backend to route to (uses default if not specified).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
             Generated text content.
         """
-        response = self.chat_full(
+        return self.get_client(backend, model).chat(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -139,7 +181,6 @@ class LLMClient:
             tool_choice=tool_choice,
             **kwargs,
         )
-        return response.content
 
     def chat_full(
         self,
@@ -152,6 +193,7 @@ class LLMClient:
         think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request and return full response (sync).
@@ -166,14 +208,15 @@ class LLMClient:
             think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            backend: Backend to route to (uses default if not specified).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        return self._backend.chat(
+        return self.get_client(backend, model).chat_full(
             messages=messages,
-            model=model or self._default_model,
+            model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             system=system,
@@ -195,12 +238,10 @@ class LLMClient:
         think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Stream chat completion tokens (sync).
-
-        Yields tokens as they arrive. After iteration, access last_response
-        for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -212,14 +253,15 @@ class LLMClient:
             think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            backend: Backend to route to (uses default if not specified).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
             String tokens as they arrive.
         """
-        yield from self._backend.chat_stream(
+        yield from self.get_client(backend, model).chat_stream(
             messages=messages,
-            model=model or self._default_model,
+            model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             system=system,
@@ -245,6 +287,7 @@ class LLMClient:
         think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> str:
         """Send a chat completion request and return content (async).
@@ -259,12 +302,13 @@ class LLMClient:
             think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            backend: Backend to route to (uses default if not specified).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
             Generated text content.
         """
-        response = await self.chat_full_async(
+        return await self.get_client(backend, model).chat_async(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -276,7 +320,6 @@ class LLMClient:
             tool_choice=tool_choice,
             **kwargs,
         )
-        return response.content
 
     async def chat_full_async(
         self,
@@ -289,6 +332,7 @@ class LLMClient:
         think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request and return full response (async).
@@ -303,14 +347,15 @@ class LLMClient:
             think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            backend: Backend to route to (uses default if not specified).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        return await self._backend.chat_async(
+        return await self.get_client(backend, model).chat_full_async(
             messages=messages,
-            model=model or self._default_model,
+            model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             system=system,
@@ -332,12 +377,10 @@ class LLMClient:
         think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream chat completion tokens (async).
-
-        Yields tokens as they arrive. After iteration, access last_response
-        for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -349,14 +392,15 @@ class LLMClient:
             think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            backend: Backend to route to (uses default if not specified).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
             String tokens as they arrive.
         """
-        async for token in self._backend.chat_stream_async(
+        async for token in self.get_client(backend, model).chat_stream_async(
             messages=messages,
-            model=model or self._default_model,
+            model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             system=system,
@@ -373,12 +417,20 @@ class LLMClient:
     # =========================================================================
 
     def close(self) -> None:
-        """Close sync resources."""
-        self._backend.close()
+        """Close all clients (sync resources)."""
+        for client in self._clients.values():
+            try:
+                client.close()
+            except Exception as e:
+                self._lg.warning("Error closing client", extra={"exception": e})
 
     async def aclose(self) -> None:
-        """Close all resources (sync and async)."""
-        await self._backend.aclose()
+        """Close all clients (async resources)."""
+        for client in self._clients.values():
+            try:
+                await client.aclose()
+            except Exception as e:
+                self._lg.warning("Error closing client", extra={"exception": e})
 
     def __enter__(self) -> Self:
         """Enter sync context manager."""

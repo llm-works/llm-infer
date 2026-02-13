@@ -1,0 +1,33 @@
+# Multi-backend LLM client configuration
+#
+# Usage:
+#   python client.py                           # Interactive chat with default backend
+#   python client.py --backend openai          # Use specific backend
+#   python client.py --model gpt-4o            # Route by model name
+#   python client.py "What is Python?"         # Single question mode
+
+default: local
+
+backends:
+  local:
+    type: openai_compatible
+    base_url: http://localhost:8000/v1
+    # models:                    # Optional: restrict to specific models
+    #   - llama-3.1-8b
+    #   - qwen-2.5-7b
+
+  # openai:
+  #   enabled: false             # Set to true and add OPENAI_API_KEY env var
+  #   type: openai
+  #   base_url: https://api.openai.com/v1
+  #   api_key: ${OPENAI_API_KEY}
+  #   models:
+  #     - gpt-4o
+  #     - gpt-4o-mini
+
+  # anthropic:
+  #   enabled: false             # Set to true and add ANTHROPIC_API_KEY env var
+  #   type: anthropic
+  #   api_key: ${ANTHROPIC_API_KEY}
+  #   models:
+  #     - claude-sonnet-4-20250514

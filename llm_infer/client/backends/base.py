@@ -223,6 +223,29 @@ class Backend(ABC):
         ...
 
     # =========================================================================
+    # Model discovery
+    # =========================================================================
+
+    def list_models(self) -> list[str]:
+        """List available models from this backend.
+
+        Returns a list of model IDs that this backend can serve. Used by
+        LLMRouter for intelligent model-based routing.
+
+        Default implementation returns empty list. Backends that support
+        model discovery (e.g., OpenAI-compatible via /v1/models) should
+        override this method.
+
+        Returns:
+            List of model ID strings.
+
+        Raises:
+            BackendUnavailableError: Backend is unreachable.
+            BackendRequestError: Backend returned an error.
+        """
+        return []
+
+    # =========================================================================
     # Resource management
     # =========================================================================
 
