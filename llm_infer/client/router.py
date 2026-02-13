@@ -133,6 +133,24 @@ class LLMRouter:
         # Priority 3: Default
         return self._clients[self._default]
 
+    def can_call(self, backend: str | None = None, model: str | None = None) -> bool:
+        """Check if a call is allowed for the specified backend (non-blocking).
+
+        Delegates to the appropriate client's can_call() method based on
+        backend/model routing.
+
+        Args:
+            backend: Backend name (highest priority).
+            model: Model ID for model-based routing.
+
+        Returns:
+            True if a call is allowed, False if rate limited or in backoff.
+
+        Raises:
+            ValueError: If explicit backend is not found.
+        """
+        return self.get_client(backend, model).can_call()
+
     # =========================================================================
     # Sync API
     # =========================================================================

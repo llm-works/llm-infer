@@ -454,3 +454,360 @@ class TestLLMClientDefaultModel:
 
         call_kwargs = backend.chat.call_args.kwargs
         assert call_kwargs["model"] == "gpt-3.5"
+
+
+class TestLLMClientRateLimiting:
+    """Test rate limiting and backoff functionality."""
+
+    def test_can_call_returns_true_without_rate_limiting(self) -> None:
+        """Test can_call returns True when no rate limiting configured."""
+        backend = MockBackend()
+        client = LLMClient(backend=backend)
+        assert client.can_call() is True
+
+    def test_can_call_returns_true_when_rate_limit_allows(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test can_call returns True when rate limit allows."""
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = RateLimiter(mock_lg, per_minute=60)
+        backend = MockBackend()
+        client = LLMClient(backend=backend, rate_limiter=rate_limiter)
+
+        assert client.can_call() is True
+
+    def test_can_call_returns_false_when_rate_limited(self, mock_lg: Logger) -> None:
+        """Test can_call returns False when rate limit exceeded."""
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = RateLimiter(mock_lg, per_minute=60)
+        # Simulate a recent call by setting last_t
+        import time
+
+        rate_limiter.last_t = time.time()
+
+        backend = MockBackend()
+        client = LLMClient(backend=backend, rate_limiter=rate_limiter)
+
+        # Should be rate limited (less than 1 second since last call)
+        assert client.can_call() is False
+
+    def test_can_call_returns_false_during_backoff(self, mock_lg: Logger) -> None:
+        """Test can_call returns False during backoff period."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=10.0)  # 10 second base
+        backend = MockBackend()
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Manually set backoff state
+        import time
+
+        client._backoff_until = time.time() + 10  # 10 seconds from now
+
+        assert client.can_call() is False
+
+    def test_can_call_returns_true_after_backoff_expires(self, mock_lg: Logger) -> None:
+        """Test can_call returns True after backoff period expires."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=1.0)
+        backend = MockBackend()
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Set backoff in the past
+        import time
+
+        client._backoff_until = time.time() - 1  # 1 second ago
+
+        assert client.can_call() is True
+
+    def test_chat_resets_backoff_on_success(self, mock_lg: Logger) -> None:
+        """Test successful chat resets backoff state."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=1.0)
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(responses=[response])
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Set some backoff state
+        import time
+
+        client._backoff_until = time.time() + 10
+        backoff._attempts = 3
+
+        # Make a successful call
+        client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        # Backoff should be reset
+        assert client._backoff_until is None
+        assert backoff.attempts == 0
+
+    def test_chat_sets_backoff_on_unavailable_error(self, mock_lg: Logger) -> None:
+        """Test chat sets backoff on BackendUnavailableError."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendUnavailableError
+
+        backoff = Backoff(mock_lg, base=1.0, jitter=False)
+        backend = MagicMock(spec=Backend)
+        backend.chat.side_effect = BackendUnavailableError("Connection refused")
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        with pytest.raises(BackendUnavailableError):
+            client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        # Backoff should be set
+        assert client._backoff_until is not None
+        assert backoff.attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_chat_async_resets_backoff_on_success(self, mock_lg: Logger) -> None:
+        """Test successful async chat resets backoff state."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=1.0)
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(responses=[response])
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Set some backoff state
+        import time
+
+        client._backoff_until = time.time() + 10
+        backoff._attempts = 3
+
+        # Make a successful async call
+        await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
+
+        # Backoff should be reset
+        assert client._backoff_until is None
+        assert backoff.attempts == 0
+
+    @pytest.mark.asyncio
+    async def test_chat_async_sets_backoff_on_unavailable_error(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test async chat sets backoff on BackendUnavailableError."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendUnavailableError
+
+        backoff = Backoff(mock_lg, base=1.0, jitter=False)
+        backend = MagicMock(spec=Backend)
+        backend.chat_async.side_effect = BackendUnavailableError("Connection refused")
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        with pytest.raises(BackendUnavailableError):
+            await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
+
+        # Backoff should be set
+        assert client._backoff_until is not None
+        assert backoff.attempts == 1
+
+    def test_chat_stream_resets_backoff_on_success(self, mock_lg: Logger) -> None:
+        """Test successful streaming chat resets backoff state."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=1.0)
+        backend = MagicMock(spec=Backend)
+        backend.chat_stream.return_value = iter(["Hello", " world"])
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Set some backoff state
+        import time
+
+        client._backoff_until = time.time() + 10
+        backoff._attempts = 3
+
+        # Consume the stream
+        tokens = list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        # Backoff should be reset
+        assert tokens == ["Hello", " world"]
+        assert client._backoff_until is None
+        assert backoff.attempts == 0
+
+    def test_chat_stream_sets_backoff_on_unavailable_error(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test streaming chat sets backoff on BackendUnavailableError."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendUnavailableError
+
+        backoff = Backoff(mock_lg, base=1.0, jitter=False)
+        backend = MagicMock(spec=Backend)
+        backend.chat_stream.side_effect = BackendUnavailableError("Connection refused")
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        with pytest.raises(BackendUnavailableError):
+            list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        # Backoff should be set
+        assert client._backoff_until is not None
+        assert backoff.attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_async_resets_backoff_on_success(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test successful async streaming chat resets backoff state."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=1.0)
+        backend = MagicMock(spec=Backend)
+
+        async def mock_stream(*args: Any, **kwargs: Any):
+            for token in ["Hello", " world"]:
+                yield token
+
+        backend.chat_stream_async.return_value = mock_stream()
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Set some backoff state
+        import time
+
+        client._backoff_until = time.time() + 10
+        backoff._attempts = 3
+
+        # Consume the stream
+        tokens = [
+            token
+            async for token in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            )
+        ]
+
+        # Backoff should be reset
+        assert tokens == ["Hello", " world"]
+        assert client._backoff_until is None
+        assert backoff.attempts == 0
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_async_sets_backoff_on_unavailable_error(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test async streaming chat sets backoff on BackendUnavailableError."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendUnavailableError
+
+        backoff = Backoff(mock_lg, base=1.0, jitter=False)
+        backend = MagicMock(spec=Backend)
+        backend.chat_stream_async.side_effect = BackendUnavailableError(
+            "Connection refused"
+        )
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        with pytest.raises(BackendUnavailableError):
+            async for _ in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                pass
+
+        # Backoff should be set
+        assert client._backoff_until is not None
+        assert backoff.attempts == 1
+
+
+class TestFactoryRateLimitConfig:
+    """Test Factory rate limit configuration parsing."""
+
+    def test_from_config_creates_rate_limiter(self, mock_lg: Logger) -> None:
+        """Test from_config creates rate limiter from config."""
+        factory = Factory(mock_lg)
+        config = {
+            "rate_limit": {"per_minute": 30},
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        # Check that client has rate limiter
+        client = router.get_client()
+        assert client._rate_limiter is not None
+        assert client._rate_limiter.per_minute == 30
+        router.close()
+
+    def test_from_config_creates_backoff(self, mock_lg: Logger) -> None:
+        """Test from_config creates backoff from config."""
+        factory = Factory(mock_lg)
+        config = {
+            "rate_limit": {
+                "backoff": {"base": 2.0, "max": 120.0},
+            },
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        # Check that client has backoff
+        client = router.get_client()
+        assert client._backoff is not None
+        assert client._backoff.base == 2.0
+        assert client._backoff.max_delay == 120.0
+        router.close()
+
+    def test_from_config_without_rate_limit(self, mock_lg: Logger) -> None:
+        """Test from_config without rate_limit creates client without rate limiting."""
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        client = router.get_client()
+        assert client._rate_limiter is None
+        assert client._backoff is None
+        router.close()
+
+    def test_from_config_rate_limit_applies_to_all_backends(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test rate_limit config applies to all backends."""
+        factory = Factory(mock_lg)
+        config = {
+            "rate_limit": {"per_minute": 30, "backoff": {"base": 2.0}},
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "remote": {
+                    "type": "openai_compatible",
+                    "base_url": "http://remote:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        # Both clients should have rate limiters
+        local_client = router.get_client(backend="local")
+        remote_client = router.get_client(backend="remote")
+        assert local_client._rate_limiter is not None
+        assert remote_client._rate_limiter is not None
+        assert local_client._backoff is not None
+        assert remote_client._backoff is not None
+        router.close()
