@@ -1,4 +1,4 @@
-"""Factory for creating LLMClient instances.
+"""Factory for creating LLMClient and LLMRouter instances.
 
 This module provides the Factory class that handles:
 - Backend registration and lookup
@@ -12,11 +12,11 @@ Example:
     lg = Logger("my-app")
     factory = Factory(lg)
 
-    # Direct factory methods
+    # Direct factory methods - return LLMClient (single backend)
     client = factory.openai(base_url="http://localhost:8000/v1")
     client = factory.anthropic(model="claude-sonnet-4-20250514")
 
-    # From configuration
+    # From configuration - returns LLMRouter (multi-backend support)
     config = {
         "default": "local",
         "backends": {
@@ -24,7 +24,9 @@ Example:
             "cloud": {"type": "anthropic", "model": "claude-sonnet-4-20250514"},
         },
     }
-    client = factory.from_config(config)
+    router = factory.from_config(config)
+    router.chat(messages)                    # Uses default backend
+    router.chat(messages, backend="cloud")   # Routes to specific backend
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from appinfra.log import Logger
 from llm_infer.client.backends.base import Backend
 from llm_infer.client.backends.openai import OpenAICompatibleBackend
 from llm_infer.client.client import LLMClient
+from llm_infer.client.router import LLMRouter
 
 
 class Factory:
@@ -138,51 +141,195 @@ class Factory:
         backend_class = self._ensure_registered(backend_type)
         return backend_class.from_config(self._lg, config)
 
-    def from_config(self, config: dict[str, Any]) -> LLMClient:
-        """Create LLMClient from configuration dict.
+    def from_config(
+        self, config: dict[str, Any], discover_models: bool = True
+    ) -> LLMRouter:
+        """Create LLMRouter from configuration dict.
 
         Supports two formats:
 
-        Multi-backend (with default selection):
+        Multi-backend (with default selection and routing):
             default: backend_name
             backends:
               backend_name:
+                enabled: true        # Optional, defaults to true
                 type: openai_compatible
                 base_url: http://localhost:8000/v1
+                models:              # Optional: restrict to these models
+                  - llama-3.1-8b
               another:
+                enabled: false       # Disabled backends are skipped
                 type: anthropic
 
-        Single-backend (no wrapper):
+        Single-backend (wrapped in router for consistent API):
             type: openai_compatible
             base_url: http://localhost:8000/v1
 
+        Model-based routing:
+            When discover_models=True (default), the factory queries each backend
+            for available models and builds a routing table. If config specifies
+            a `models` list, only those models are allowed (validated against
+            discovered models). If the same model appears in multiple backends,
+            raises ValueError.
+
         Args:
             config: Configuration dictionary.
+            discover_models: If True, query backends for available models
+                and enable model-based routing. Defaults to True.
+
+        Returns:
+            Configured LLMRouter instance with all enabled backends.
+
+        Raises:
+            ValueError: If configuration is invalid, no backends are enabled,
+                config models not found in backend, or model conflict detected.
+        """
+        backends_config = config.get("backends", {})
+
+        if not backends_config:
+            return self._create_single_backend_router(config, discover_models)
+
+        return self._create_multi_backend_router(
+            backends_config, config.get("default"), discover_models
+        )
+
+    def _create_single_backend_router(
+        self, config: dict[str, Any], discover_models: bool
+    ) -> LLMRouter:
+        """Create router wrapping a single backend config."""
+        client = self._create_client(config)
+        name = "default"
+        model_to_backend = self._discover_models_for_backend(
+            name, client, config, discover_models
+        )
+        return LLMRouter(self._lg, {name: client}, name, model_to_backend)
+
+    def _create_multi_backend_router(
+        self,
+        backends_config: dict[str, dict[str, Any]],
+        default_name: str | None,
+        discover_models: bool,
+    ) -> LLMRouter:
+        """Create router from multi-backend config."""
+        clients, backend_configs = self._create_enabled_clients(backends_config)
+        if not clients:
+            raise ValueError("No enabled backends in config")
+
+        if not default_name or default_name not in clients:
+            default_name = next(iter(clients.keys()))
+
+        model_to_backend = self._build_model_routing(
+            clients, backend_configs, discover_models
+        )
+        return LLMRouter(self._lg, clients, default_name, model_to_backend)
+
+    def _create_enabled_clients(
+        self, backends_config: dict[str, dict[str, Any]]
+    ) -> tuple[dict[str, LLMClient], dict[str, dict[str, Any]]]:
+        """Create clients for all enabled backends."""
+        clients: dict[str, LLMClient] = {}
+        configs: dict[str, dict[str, Any]] = {}
+        for name, config in backends_config.items():
+            if config.get("enabled", True):
+                clients[name] = self._create_client(config)
+                configs[name] = config
+        return clients, configs
+
+    def _build_model_routing(
+        self,
+        clients: dict[str, LLMClient],
+        backend_configs: dict[str, dict[str, Any]],
+        discover_models: bool,
+    ) -> dict[str, str]:
+        """Build model-to-backend routing table.
+
+        Args:
+            clients: Backend name to client mapping.
+            backend_configs: Backend name to config mapping.
+            discover_models: Whether to query backends for models.
+
+        Returns:
+            Mapping from model ID to backend name.
+
+        Raises:
+            ValueError: If config model not in backend, or model conflict.
+        """
+        model_to_backend: dict[str, str] = {}
+
+        for name, client in clients.items():
+            config = backend_configs[name]
+            models = self._discover_models_for_backend(
+                name, client, config, discover_models
+            )
+
+            for model, backend_name in models.items():
+                if model in model_to_backend:
+                    conflict = model_to_backend[model]
+                    raise ValueError(
+                        f"Model '{model}' found in multiple backends: "
+                        f"'{conflict}' and '{backend_name}'"
+                    )
+                model_to_backend[model] = backend_name
+
+        return model_to_backend
+
+    def _discover_models_for_backend(
+        self,
+        name: str,
+        client: LLMClient,
+        config: dict[str, Any],
+        discover_models: bool,
+    ) -> dict[str, str]:
+        """Discover and validate models for a single backend."""
+        config_models: list[str] | None = config.get("models")
+
+        if not discover_models:
+            if config_models:
+                return {model: name for model in config_models}
+            return {}
+
+        discovered = self._query_backend_models(name, client)
+        if config_models:
+            self._validate_config_models(name, config_models, discovered)
+            return {model: name for model in config_models}
+
+        return {model: name for model in discovered}
+
+    def _query_backend_models(self, name: str, client: LLMClient) -> set[str]:
+        """Query backend for available models."""
+        try:
+            return set(client.backend.list_models())
+        except Exception as e:
+            self._lg.warning(
+                f"Failed to discover models from backend '{name}'",
+                extra={"exception": e},
+            )
+            return set()
+
+    def _validate_config_models(
+        self, name: str, config_models: list[str], discovered: set[str]
+    ) -> None:
+        """Validate config models exist in discovered set."""
+        if not discovered:
+            return  # Can't validate if discovery failed
+        missing = set(config_models) - discovered
+        if missing:
+            raise ValueError(
+                f"Backend '{name}' config specifies models not available: "
+                f"{sorted(missing)}. Available: {sorted(discovered)}"
+            )
+
+    def _create_client(self, config: dict[str, Any]) -> LLMClient:
+        """Create single LLMClient from backend configuration.
+
+        Args:
+            config: Backend configuration with 'type' key.
 
         Returns:
             Configured LLMClient instance.
-
-        Raises:
-            ValueError: If configuration is invalid.
         """
-        backends_config = config.get("backends", {})
-        default_name = config.get("default")
-
-        if not backends_config:
-            # Single backend config (no "backends" wrapper)
-            return self.from_backend_config(config)
-
-        if not default_name:
-            # Use first backend as default
-            default_name = next(iter(backends_config.keys()))
-
-        if default_name not in backends_config:
-            raise ValueError(f"Default backend '{default_name}' not found in backends")
-
-        backend_config = backends_config[default_name]
-        backend = self.create_backend(backend_config)
-
-        return LLMClient(backend=backend, default_model=backend_config.get("model"))
+        backend = self.create_backend(config)
+        return LLMClient(backend=backend, default_model=config.get("model"))
 
     def from_backend_config(self, config: dict[str, Any]) -> LLMClient:
         """Create LLMClient from single backend configuration.

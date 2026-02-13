@@ -11,21 +11,27 @@ Quick Start:
     lg = Logger("my-app")
     factory = Factory(lg)
 
-    # OpenAI-compatible (local server)
+    # Single backend - returns LLMClient
     with factory.openai(base_url="http://localhost:8000/v1") as client:
         response = client.chat([{"role": "user", "content": "Hello"}])
         print(response)
 
-    # Anthropic Claude
+    # Multi-backend config - returns LLMRouter
+    config = {
+        "default": "local",
+        "backends": {
+            "local": {"type": "openai_compatible", "base_url": "http://localhost:8000/v1"},
+            "openai": {"type": "openai", "base_url": "https://api.openai.com/v1"},
+        },
+    }
+    with factory.from_config(config) as router:
+        response = router.chat(messages)                    # Uses default
+        response = router.chat(messages, backend="openai")  # Routes to OpenAI
+
+    # Async with Anthropic
     async with factory.anthropic() as client:
         async for token in client.chat_stream_async(messages):
             print(token, end="")
-
-    # From configuration
-    client = factory.from_config({
-        "type": "openai_compatible",
-        "base_url": "http://localhost:8000/v1",
-    })
 
     # With llm-infer extensions
     with factory.openai() as client:
@@ -36,6 +42,11 @@ Quick Start:
         )
         print(response.content)
         print(response.thinking)  # Separated thinking content
+
+Classes:
+    - LLMClient: Single-backend client
+    - LLMRouter: Multi-backend router with backend selection
+    - Factory: Creates clients and routers from config
 
 Backends:
     - OpenAICompatibleBackend: Works with OpenAI, llm-infer, vLLM, Ollama
@@ -56,6 +67,7 @@ from llm_infer.client.exceptions import (
     BackendUnavailableError,
 )
 from llm_infer.client.factory import Factory
+from llm_infer.client.router import LLMRouter
 from llm_infer.client.types import ChatResponse
 
 __all__ = [
@@ -63,6 +75,8 @@ __all__ = [
     "Factory",
     # Client facade
     "LLMClient",
+    # Router (multi-backend)
+    "LLMRouter",
     # Response types
     "ChatResponse",
     # Backend base class

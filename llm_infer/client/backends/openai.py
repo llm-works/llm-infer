@@ -206,6 +206,34 @@ class OpenAICompatibleBackend(Backend):
         self._last_response = state.to_response(model or self._model)
 
     # =========================================================================
+    # Model discovery
+    # =========================================================================
+
+    def list_models(self) -> list[str]:
+        """List available models from this backend via /v1/models endpoint."""
+        url = f"{self._base_url}/models"
+        try:
+            resp = self._client.get(url, headers=self._build_headers())
+            resp.raise_for_status()
+            data = resp.json()
+            models: list[str] = [m["id"] for m in data.get("data", [])]
+            return models
+        except httpx.ConnectError as e:
+            raise BackendUnavailableError(
+                f"Failed to connect to {self._base_url}"
+            ) from e
+        except httpx.TimeoutException as e:
+            raise BackendTimeoutError(
+                f"Request timed out after {self._timeout}s"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise BackendRequestError(
+                f"Backend error: {e.response.text}", status_code=e.response.status_code
+            ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+
+    # =========================================================================
     # Request execution
     # =========================================================================
 

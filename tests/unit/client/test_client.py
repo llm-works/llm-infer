@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client import ChatResponse, Factory, LLMClient
+from llm_infer.client import ChatResponse, Factory, LLMClient, LLMRouter
 from llm_infer.client.backends import Backend, OpenAICompatibleBackend
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
 
@@ -102,20 +102,22 @@ class TestFactory:
         assert client._default_model == "test-model"
         client.close()
 
-    def test_from_config_single_backend(self, mock_lg: Logger) -> None:
-        """Test from_config with single backend config."""
+    def test_from_config_single_backend_returns_router(self, mock_lg: Logger) -> None:
+        """Test from_config with single backend config returns router."""
         factory = Factory(mock_lg)
         config = {
             "type": "openai_compatible",
             "base_url": "http://test:8000/v1",
             "model": "test-model",
         }
-        client = factory.from_config(config)
-        assert isinstance(client.backend, OpenAICompatibleBackend)
-        client.close()
+        router = factory.from_config(config)
+        assert isinstance(router, LLMRouter)
+        assert router.default == "default"
+        assert "default" in router.clients
+        router.close()
 
-    def test_from_config_multi_backend(self, mock_lg: Logger) -> None:
-        """Test from_config with multiple backends."""
+    def test_from_config_multi_backend_returns_router(self, mock_lg: Logger) -> None:
+        """Test from_config with multiple backends returns router."""
         factory = Factory(mock_lg)
         config = {
             "default": "local",
@@ -132,10 +134,12 @@ class TestFactory:
                 },
             },
         }
-        client = factory.from_config(config)
-        assert isinstance(client.backend, OpenAICompatibleBackend)
-        assert client._default_model == "local-model"
-        client.close()
+        router = factory.from_config(config)
+        assert isinstance(router, LLMRouter)
+        assert router.default == "local"
+        assert "local" in router.clients
+        assert "remote" in router.clients
+        router.close()
 
     def test_from_config_uses_first_backend_if_no_default(
         self, mock_lg: Logger
@@ -150,21 +154,115 @@ class TestFactory:
                 },
             },
         }
-        client = factory.from_config(config)
-        assert isinstance(client.backend, OpenAICompatibleBackend)
-        client.close()
+        router = factory.from_config(config)
+        assert isinstance(router, LLMRouter)
+        assert router.default == "first"
+        router.close()
 
-    def test_from_config_raises_on_missing_default(self, mock_lg: Logger) -> None:
-        """Test from_config raises when default backend not found."""
+    def test_from_config_skips_disabled_backends(self, mock_lg: Logger) -> None:
+        """Test from_config skips backends with enabled=false."""
         factory = Factory(mock_lg)
         config = {
-            "default": "missing",
+            "default": "local",
             "backends": {
-                "local": {"type": "openai_compatible"},
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "disabled": {
+                    "enabled": False,
+                    "type": "openai_compatible",
+                    "base_url": "http://disabled:8000/v1",
+                },
             },
         }
-        with pytest.raises(ValueError, match="missing.*not found"):
+        router = factory.from_config(config)
+        assert "local" in router.clients
+        assert "disabled" not in router.clients
+        router.close()
+
+    def test_from_config_enabled_defaults_to_true(self, mock_lg: Logger) -> None:
+        """Test from_config treats missing enabled as true."""
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "no_enabled_key": {
+                    "type": "openai_compatible",
+                    "base_url": "http://test:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config)
+        assert "no_enabled_key" in router.clients
+        router.close()
+
+    def test_from_config_raises_on_no_enabled_backends(self, mock_lg: Logger) -> None:
+        """Test from_config raises when all backends disabled."""
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "a": {"enabled": False, "type": "openai_compatible"},
+                "b": {"enabled": False, "type": "openai_compatible"},
+            },
+        }
+        with pytest.raises(ValueError, match="No enabled backends"):
             factory.from_config(config)
+
+    def test_from_config_falls_back_to_first_enabled_if_default_disabled(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test from_config uses first enabled backend if default is disabled."""
+        factory = Factory(mock_lg)
+        config = {
+            "default": "disabled",
+            "backends": {
+                "disabled": {
+                    "enabled": False,
+                    "type": "openai_compatible",
+                    "base_url": "http://disabled:8000/v1",
+                },
+                "enabled": {
+                    "type": "openai_compatible",
+                    "base_url": "http://enabled:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config)
+        assert router.default == "enabled"
+        router.close()
+
+    def test_from_config_with_discover_models_false(self, mock_lg: Logger) -> None:
+        """Test from_config skips model discovery when disabled."""
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+        assert router.models == {}
+        router.close()
+
+    def test_from_config_uses_config_models_without_discovery(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test from_config uses config models list when discovery disabled."""
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                    "models": ["llama-3.1-8b", "qwen-2.5-7b"],
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+        assert router.models == {"llama-3.1-8b": "local", "qwen-2.5-7b": "local"}
+        router.close()
 
 
 class TestLLMClientSyncAPI:
