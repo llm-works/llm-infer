@@ -419,12 +419,18 @@ class LLMRouter:
     def close(self) -> None:
         """Close all clients (sync resources)."""
         for client in self._clients.values():
-            client.close()
+            try:
+                client.close()
+            except Exception as e:
+                self._lg.warning("Error closing client", extra={"exception": e})
 
     async def aclose(self) -> None:
         """Close all clients (async resources)."""
         for client in self._clients.values():
-            await client.aclose()
+            try:
+                await client.aclose()
+            except Exception as e:
+                self._lg.warning("Error closing client", extra={"exception": e})
 
     def __enter__(self) -> Self:
         """Enter sync context manager."""

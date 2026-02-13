@@ -232,11 +232,11 @@ class Factory:
             model_to_backend = self._build_model_routing(
                 clients, backend_configs, discover_models
             )
+            return LLMRouter(self._lg, clients, default_name, model_to_backend)
         except Exception:
             for client in clients.values():
                 client.close()
             raise
-        return LLMRouter(self._lg, clients, default_name, model_to_backend)
 
     def _create_enabled_clients(
         self, backends_config: dict[str, dict[str, Any]]

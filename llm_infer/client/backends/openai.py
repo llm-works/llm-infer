@@ -232,6 +232,8 @@ class OpenAICompatibleBackend(Backend):
             ) from e
         except httpx.RequestError as e:
             raise BackendRequestError(f"Transport error: {e}") from e
+        except (json.JSONDecodeError, KeyError) as e:
+            raise BackendRequestError(f"Invalid models response: {e}") from e
 
     # =========================================================================
     # Request execution
