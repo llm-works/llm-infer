@@ -210,7 +210,10 @@ class Factory:
         default_name: str | None,
         discover_models: bool,
     ) -> LLMRouter:
-        """Create router from multi-backend config."""
+        """Create router from multi-backend config.
+
+        On failure during model routing, closes all clients before re-raising.
+        """
         clients, backend_configs = self._create_enabled_clients(backends_config)
         if not clients:
             raise ValueError("No enabled backends in config")
@@ -218,21 +221,34 @@ class Factory:
         if not default_name or default_name not in clients:
             default_name = next(iter(clients.keys()))
 
-        model_to_backend = self._build_model_routing(
-            clients, backend_configs, discover_models
-        )
+        try:
+            model_to_backend = self._build_model_routing(
+                clients, backend_configs, discover_models
+            )
+        except Exception:
+            for client in clients.values():
+                client.close()
+            raise
         return LLMRouter(self._lg, clients, default_name, model_to_backend)
 
     def _create_enabled_clients(
         self, backends_config: dict[str, dict[str, Any]]
     ) -> tuple[dict[str, LLMClient], dict[str, dict[str, Any]]]:
-        """Create clients for all enabled backends."""
+        """Create clients for all enabled backends.
+
+        On failure, closes any already-created clients before re-raising.
+        """
         clients: dict[str, LLMClient] = {}
         configs: dict[str, dict[str, Any]] = {}
-        for name, config in backends_config.items():
-            if config.get("enabled", True):
-                clients[name] = self._create_client(config)
-                configs[name] = config
+        try:
+            for name, config in backends_config.items():
+                if config.get("enabled", True):
+                    clients[name] = self._create_client(config)
+                    configs[name] = config
+        except Exception:
+            for client in clients.values():
+                client.close()
+            raise
         return clients, configs
 
     def _build_model_routing(
@@ -311,7 +327,12 @@ class Factory:
     ) -> None:
         """Validate config models exist in discovered set."""
         if not discovered:
-            return  # Can't validate if discovery failed
+            # Can't validate if discovery failed - warn and trust config
+            self._lg.warning(
+                f"Backend '{name}' model discovery failed; "
+                f"trusting config models without validation: {config_models}"
+            )
+            return
         missing = set(config_models) - discovered
         if missing:
             raise ValueError(

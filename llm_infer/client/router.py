@@ -74,6 +74,13 @@ class LLMRouter:
         if default not in clients:
             raise ValueError(f"Default backend '{default}' not in clients")
 
+        # Validate model routing references valid backends
+        for model, backend_name in self._model_to_backend.items():
+            if backend_name not in clients:
+                raise ValueError(
+                    f"Model '{model}' routes to unknown backend '{backend_name}'"
+                )
+
     @property
     def clients(self) -> dict[str, LLMClient]:
         """Dictionary mapping backend names to LLMClient instances."""

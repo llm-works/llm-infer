@@ -94,6 +94,17 @@ class TestLLMRouterInit:
         ):
             LLMRouter(mock_lg, {"a": client_a}, "missing")
 
+    def test_init_raises_if_model_routes_to_unknown_backend(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test router raises if model routing references unknown backend."""
+        client_a = make_client()
+        model_to_backend = {"model-x": "unknown"}
+        with pytest.raises(
+            ValueError, match="Model 'model-x' routes to unknown backend 'unknown'"
+        ):
+            LLMRouter(mock_lg, {"a": client_a}, "a", model_to_backend)
+
 
 class TestLLMRouterRouting:
     """Test LLMRouter routing behavior."""

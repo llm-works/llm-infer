@@ -34,15 +34,29 @@ def get_config(tool: Any) -> dict[str, Any]:
     return cast(dict[str, Any], tool.app.config.to_dict())
 
 
-def _get_response(
+def _print_response(
     router: LLMRouter,
     messages: list[dict[str, Any]],
     backend: str | None,
     model: str | None,
     stream: bool,
+    prefix: str = "",
 ) -> str:
-    """Get response from router, optionally streaming to stdout."""
-    print("\nAssistant: ", end="", flush=True)
+    """Print response from router, optionally streaming to stdout.
+
+    Args:
+        router: The LLMRouter to use.
+        messages: Chat messages to send.
+        backend: Backend to route to.
+        model: Model to use.
+        stream: Whether to stream the response.
+        prefix: Optional prefix to print before response.
+
+    Returns:
+        The response text.
+    """
+    if prefix:
+        print(prefix, end="", flush=True)
     if stream:
         response_text = ""
         for token in router.chat_stream(messages, backend=backend, model=model):
@@ -82,7 +96,9 @@ def chat_interactive(
             continue
 
         messages.append({"role": "user", "content": user_input})
-        response_text = _get_response(router, messages, backend, model, stream)
+        response_text = _print_response(
+            router, messages, backend, model, stream, prefix="\nAssistant: "
+        )
         messages.append({"role": "assistant", "content": response_text})
 
 
@@ -99,18 +115,13 @@ def chat(self):
     with Factory(self.lg).from_config(config) as router:
         if self.args.question:
             messages = [{"role": "user", "content": self.args.question}]
-            if self.args.stream:
-                for token in router.chat_stream(
-                    messages, backend=self.args.backend, model=self.args.model
-                ):
-                    print(token, end="", flush=True)
-                print()
-            else:
-                print(
-                    router.chat(
-                        messages, backend=self.args.backend, model=self.args.model
-                    )
-                )
+            _print_response(
+                router,
+                messages,
+                self.args.backend,
+                self.args.model,
+                self.args.stream,
+            )
         else:
             chat_interactive(
                 router, self.args.backend, self.args.model, self.args.stream
