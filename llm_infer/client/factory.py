@@ -234,8 +234,7 @@ class Factory:
             )
             return LLMRouter(self._lg, clients, default_name, model_to_backend)
         except Exception:
-            for client in clients.values():
-                client.close()
+            self._close_clients_safely(clients)
             raise
 
     def _create_enabled_clients(
@@ -253,8 +252,7 @@ class Factory:
                     clients[name] = self._create_client(config)
                     configs[name] = config
         except Exception:
-            for client in clients.values():
-                client.close()
+            self._close_clients_safely(clients)
             raise
         return clients, configs
 
@@ -346,6 +344,16 @@ class Factory:
                 f"Backend '{name}' config specifies models not available: "
                 f"{sorted(missing)}. Available: {sorted(discovered)}"
             )
+
+    def _close_clients_safely(self, clients: dict[str, LLMClient]) -> None:
+        """Close all clients, handling individual failures gracefully."""
+        for client in clients.values():
+            try:
+                client.close()
+            except Exception as e:
+                self._lg.warning(
+                    "Error closing client during cleanup", extra={"exception": e}
+                )
 
     def _create_client(self, config: dict[str, Any]) -> LLMClient:
         """Create single LLMClient from backend configuration.
