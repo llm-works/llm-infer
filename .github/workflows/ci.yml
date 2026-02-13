@@ -63,6 +63,8 @@ jobs:
           # Install CPU-only torch first to avoid CUDA dependencies
           # Use --extra-index-url to keep PyPI for torch's deps (networkx, etc.)
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
+          # Install appinfra from develop branch (not yet released features)
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
           # Install llm-saia from GitHub (not yet on PyPI, intentionally unpinned during development)
           python -m pip install git+https://github.com/serendip-ml/llm-saia.git@develop
           # Install package with dev and runtime dependencies
@@ -93,6 +95,8 @@ jobs:
           # Install CPU-only torch first to avoid CUDA dependencies
           # Use --extra-index-url to keep PyPI for torch's deps (networkx, etc.)
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
+          # Install appinfra from develop branch (not yet released features)
+          python -m pip install "git+https://github.com/serendip-ml/appinfra.git@develop"
           # Install llm-saia from GitHub (not yet on PyPI, intentionally unpinned during development)
           python -m pip install git+https://github.com/serendip-ml/llm-saia.git@develop
           # Install package with dev and runtime dependencies
