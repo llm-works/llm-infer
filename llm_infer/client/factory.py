@@ -196,13 +196,20 @@ class Factory:
     def _create_single_backend_router(
         self, config: dict[str, Any], discover_models: bool
     ) -> LLMRouter:
-        """Create router wrapping a single backend config."""
+        """Create router wrapping a single backend config.
+
+        On failure during model discovery or router init, closes client before re-raising.
+        """
         client = self._create_client(config)
-        name = "default"
-        model_to_backend = self._discover_models_for_backend(
-            name, client, config, discover_models
-        )
-        return LLMRouter(self._lg, {name: client}, name, model_to_backend)
+        try:
+            name = "default"
+            model_to_backend = self._discover_models_for_backend(
+                name, client, config, discover_models
+            )
+            return LLMRouter(self._lg, {name: client}, name, model_to_backend)
+        except Exception:
+            client.close()
+            raise
 
     def _create_multi_backend_router(
         self,

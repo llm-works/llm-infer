@@ -26,7 +26,8 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+import types
+from collections.abc import AsyncIterator, Iterator, Mapping
 from typing import Any, Self
 
 from appinfra.log import Logger
@@ -82,9 +83,9 @@ class LLMRouter:
                 )
 
     @property
-    def clients(self) -> dict[str, LLMClient]:
-        """Dictionary mapping backend names to LLMClient instances."""
-        return self._clients
+    def clients(self) -> Mapping[str, LLMClient]:
+        """Dictionary mapping backend names to LLMClient instances (read-only)."""
+        return types.MappingProxyType(self._clients)
 
     @property
     def default(self) -> str:
@@ -92,9 +93,9 @@ class LLMRouter:
         return self._default
 
     @property
-    def models(self) -> dict[str, str]:
-        """Mapping from model ID to backend name."""
-        return self._model_to_backend
+    def models(self) -> Mapping[str, str]:
+        """Mapping from model ID to backend name (read-only)."""
+        return types.MappingProxyType(self._model_to_backend)
 
     def get_client(
         self, backend: str | None = None, model: str | None = None
