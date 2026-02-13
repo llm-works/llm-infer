@@ -120,11 +120,8 @@ class LLMClient:
             return False
 
         # Check rate limit (without consuming slot)
-        if self._rate_limiter is not None:
-            delay = 60.0 / self._rate_limiter.per_minute
-            if self._rate_limiter.last_t is not None:
-                if time.time() - self._rate_limiter.last_t < delay:
-                    return False
+        if self._rate_limiter is not None and not self._rate_limiter.can_proceed():
+            return False
 
         return True
 
@@ -259,6 +256,10 @@ class LLMClient:
     ) -> Iterator[str]:
         """Stream chat completion tokens (sync).
 
+        Automatically manages backoff state:
+        - Resets backoff on successful completion
+        - Sets exponential backoff on BackendUnavailableError
+
         Yields tokens as they arrive. After iteration, access last_response
         for usage statistics.
 
@@ -277,18 +278,25 @@ class LLMClient:
         Yields:
             String tokens as they arrive.
         """
-        yield from self._backend.chat_stream(
-            messages=messages,
-            model=model or self._default_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system=system,
-            adapter_id=adapter_id,
-            think=think,
-            tools=tools,
-            tool_choice=tool_choice,
-            **kwargs,
-        )
+        # Can't use yield from - need try/except for backoff and _handle_success() after
+        try:
+            for token in self._backend.chat_stream(  # noqa: UP028
+                messages=messages,
+                model=model or self._default_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system=system,
+                adapter_id=adapter_id,
+                think=think,
+                tools=tools,
+                tool_choice=tool_choice,
+                **kwargs,
+            ):
+                yield token
+            self._handle_success()
+        except BackendUnavailableError:
+            self._handle_unavailable()
+            raise
 
     # =========================================================================
     # Async API
@@ -406,6 +414,10 @@ class LLMClient:
     ) -> AsyncIterator[str]:
         """Stream chat completion tokens (async).
 
+        Automatically manages backoff state:
+        - Resets backoff on successful completion
+        - Sets exponential backoff on BackendUnavailableError
+
         Yields tokens as they arrive. After iteration, access last_response
         for usage statistics.
 
@@ -424,19 +436,24 @@ class LLMClient:
         Yields:
             String tokens as they arrive.
         """
-        async for token in self._backend.chat_stream_async(
-            messages=messages,
-            model=model or self._default_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system=system,
-            adapter_id=adapter_id,
-            think=think,
-            tools=tools,
-            tool_choice=tool_choice,
-            **kwargs,
-        ):
-            yield token
+        try:
+            async for token in self._backend.chat_stream_async(
+                messages=messages,
+                model=model or self._default_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system=system,
+                adapter_id=adapter_id,
+                think=think,
+                tools=tools,
+                tool_choice=tool_choice,
+                **kwargs,
+            ):
+                yield token
+            self._handle_success()
+        except BackendUnavailableError:
+            self._handle_unavailable()
+            raise
 
     # =========================================================================
     # Resource management

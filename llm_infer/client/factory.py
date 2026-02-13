@@ -181,8 +181,10 @@ class Factory:
             raises ValueError.
 
         Rate limiting:
-            When rate_limit is specified, each client is configured with:
-            - per_minute: Maximum requests per minute
+            When rate_limit is specified, each backend gets its own rate limiter
+            instance. With 2 backends at per_minute=30, total capacity is 60 req/min
+            (30 to each backend). Configuration options:
+            - per_minute: Maximum requests per minute per backend
             - backoff.base: Initial backoff delay in seconds (default: 1.0)
             - backoff.max: Maximum backoff delay in seconds (default: 60.0)
 

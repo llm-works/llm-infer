@@ -609,6 +609,115 @@ class TestLLMClientRateLimiting:
         assert client._backoff_until is not None
         assert backoff.attempts == 1
 
+    def test_chat_stream_resets_backoff_on_success(self, mock_lg: Logger) -> None:
+        """Test successful streaming chat resets backoff state."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=1.0)
+        backend = MagicMock(spec=Backend)
+        backend.chat_stream.return_value = iter(["Hello", " world"])
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Set some backoff state
+        import time
+
+        client._backoff_until = time.time() + 10
+        backoff._attempts = 3
+
+        # Consume the stream
+        tokens = list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        # Backoff should be reset
+        assert tokens == ["Hello", " world"]
+        assert client._backoff_until is None
+        assert backoff.attempts == 0
+
+    def test_chat_stream_sets_backoff_on_unavailable_error(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test streaming chat sets backoff on BackendUnavailableError."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendUnavailableError
+
+        backoff = Backoff(mock_lg, base=1.0, jitter=False)
+        backend = MagicMock(spec=Backend)
+        backend.chat_stream.side_effect = BackendUnavailableError("Connection refused")
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        with pytest.raises(BackendUnavailableError):
+            list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        # Backoff should be set
+        assert client._backoff_until is not None
+        assert backoff.attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_async_resets_backoff_on_success(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test successful async streaming chat resets backoff state."""
+        from appinfra.rate_limit import Backoff
+
+        backoff = Backoff(mock_lg, base=1.0)
+        backend = MagicMock(spec=Backend)
+
+        async def mock_stream(*args: Any, **kwargs: Any):
+            for token in ["Hello", " world"]:
+                yield token
+
+        backend.chat_stream_async.return_value = mock_stream()
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        # Set some backoff state
+        import time
+
+        client._backoff_until = time.time() + 10
+        backoff._attempts = 3
+
+        # Consume the stream
+        tokens = [
+            token
+            async for token in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            )
+        ]
+
+        # Backoff should be reset
+        assert tokens == ["Hello", " world"]
+        assert client._backoff_until is None
+        assert backoff.attempts == 0
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_async_sets_backoff_on_unavailable_error(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test async streaming chat sets backoff on BackendUnavailableError."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendUnavailableError
+
+        backoff = Backoff(mock_lg, base=1.0, jitter=False)
+        backend = MagicMock(spec=Backend)
+        backend.chat_stream_async.side_effect = BackendUnavailableError(
+            "Connection refused"
+        )
+
+        client = LLMClient(backend=backend, backoff=backoff)
+
+        with pytest.raises(BackendUnavailableError):
+            async for _ in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                pass
+
+        # Backoff should be set
+        assert client._backoff_until is not None
+        assert backoff.attempts == 1
+
 
 class TestFactoryRateLimitConfig:
     """Test Factory rate limit configuration parsing."""
