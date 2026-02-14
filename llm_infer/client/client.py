@@ -27,16 +27,22 @@ For client creation, use Factory:
 
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import AsyncIterator, Iterator
-from typing import TYPE_CHECKING, Any, Self
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any, Self, TypeVar
+
+from appinfra.log import Logger
+from appinfra.rate_limit import Backoff, RateLimiter
 
 from llm_infer.client.backends import Backend
-from llm_infer.client.exceptions import BackendUnavailableError
+from llm_infer.client.exceptions import BackendRequestError, BackendUnavailableError
 from llm_infer.client.types import ChatResponse
 
-if TYPE_CHECKING:
-    from appinfra.rate_limit import Backoff, RateLimiter
+# Transient HTTP status codes that should trigger retry
+TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 529})
+
+T = TypeVar("T")
 
 
 class LLMClient:
@@ -69,24 +75,31 @@ class LLMClient:
 
     def __init__(
         self,
+        lg: Logger,
         backend: Backend,
         default_model: str | None = None,
         rate_limiter: RateLimiter | None = None,
         backoff: Backoff | None = None,
+        timeout: float = 0,
     ) -> None:
         """Initialize the client with a backend.
 
         Args:
+            lg: Logger instance.
             backend: The backend to use for API calls.
             default_model: Default model to use if not specified per-request.
             rate_limiter: Optional rate limiter for throttling requests.
-            backoff: Optional backoff controller for handling unavailability.
+            backoff: Optional backoff for retrying transient errors. Retries on
+                connection failures and HTTP 429/502/503/529 with exponential delay.
+            timeout: Total timeout in seconds for retry attempts. 0 = retry forever.
+                Only used when backoff is configured.
         """
+        self._lg = lg
         self._backend = backend
         self._default_model = default_model
         self._rate_limiter = rate_limiter
         self._backoff = backoff
-        self._backoff_until: float | None = None
+        self._timeout = timeout
 
     @property
     def backend(self) -> Backend:
@@ -105,9 +118,7 @@ class LLMClient:
     def can_call(self) -> bool:
         """Check if a call is allowed (non-blocking).
 
-        Returns False if:
-        - Rate limited (exceeded per_minute)
-        - In backoff period (after BackendUnavailableError)
+        Returns False if rate limited (exceeded per_minute).
 
         This is an informational check that doesn't consume rate limit slots.
         Use this in event loops to skip cycles when the backend is unavailable.
@@ -115,27 +126,107 @@ class LLMClient:
         Returns:
             True if a call is allowed, False otherwise.
         """
-        # Check backoff first (takes priority)
-        if self._backoff_until is not None and time.time() < self._backoff_until:
-            return False
-
-        # Check rate limit (without consuming slot)
         if self._rate_limiter is not None and not self._rate_limiter.can_proceed():
             return False
-
         return True
 
-    def _handle_success(self) -> None:
-        """Reset backoff state after successful call."""
-        if self._backoff is not None:
-            self._backoff.reset()
-            self._backoff_until = None
+    def _is_transient_error(self, exc: Exception) -> bool:
+        """Check if exception is a transient error that should be retried."""
+        if isinstance(exc, BackendUnavailableError):
+            return True
+        if isinstance(exc, BackendRequestError):
+            return exc.status_code in TRANSIENT_STATUS_CODES
+        return False
 
-    def _handle_unavailable(self) -> None:
-        """Set exponential backoff after backend unavailable error."""
-        if self._backoff is not None:
-            delay = self._backoff.next_delay()
-            self._backoff_until = time.time() + delay
+    def _call_with_retry(self, fn: Callable[[], T]) -> T:
+        """Execute fn with retry on transient errors.
+
+        Retries on connection failures and HTTP 429/502/503/529 with exponential
+        backoff. Only active when backoff is configured.
+
+        Args:
+            fn: Function to call.
+
+        Returns:
+            Result of fn.
+
+        Raises:
+            BackendUnavailableError: If connection fails and retries exhausted.
+            BackendRequestError: If transient HTTP error and retries exhausted,
+                or non-transient error.
+        """
+        if self._backoff is None:
+            return fn()
+
+        self._backoff.reset()
+        start_time = time.time()
+
+        while True:
+            try:
+                result = fn()
+                self._backoff.reset()  # Reset on success
+                return result
+            except (BackendUnavailableError, BackendRequestError) as e:
+                if not self._is_transient_error(e):
+                    raise
+
+                # Check timeout (0 = no timeout)
+                elapsed = time.time() - start_time
+                if self._timeout > 0 and elapsed >= self._timeout:
+                    raise
+
+                delay = self._backoff.next_delay()
+                status = e.status_code if isinstance(e, BackendRequestError) else None
+                self._lg.warning(
+                    "transient error, retrying",
+                    extra={"status_code": status, "delay": delay, "elapsed": elapsed},
+                )
+                time.sleep(delay)
+
+    async def _call_with_retry_async(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """Execute async fn with retry on transient errors.
+
+        Retries on connection failures and HTTP 429/502/503/529 with exponential
+        backoff. Only active when backoff is configured.
+
+        Args:
+            fn: Async function to call.
+
+        Returns:
+            Result of fn.
+
+        Raises:
+            BackendUnavailableError: If connection fails and retries exhausted.
+            BackendRequestError: If transient HTTP error and retries exhausted,
+                or non-transient error.
+        """
+        if self._backoff is None:
+            return await fn()
+
+        self._backoff.reset()
+        start_time = time.time()
+
+        while True:
+            try:
+                result = await fn()
+                self._backoff.reset()  # Reset on success
+                return result
+            except (BackendUnavailableError, BackendRequestError) as e:
+                if not self._is_transient_error(e):
+                    raise
+
+                # Check timeout (0 = no timeout)
+                elapsed = time.time() - start_time
+                if self._timeout > 0 and elapsed >= self._timeout:
+                    raise
+
+                delay = self._backoff.next_delay()
+                status = e.status_code if isinstance(e, BackendRequestError) else None
+                self._lg.warning(
+                    "transient error, retrying",
+                    extra={"status_code": status, "delay": delay, "elapsed": elapsed},
+                )
+                await asyncio.sleep(delay)
 
     # =========================================================================
     # Sync API
@@ -203,9 +294,8 @@ class LLMClient:
     ) -> ChatResponse:
         """Send a chat completion request and return full response (sync).
 
-        Automatically manages backoff state:
-        - Resets backoff on success
-        - Sets exponential backoff on BackendUnavailableError
+        When backoff is configured, automatically retries on transient errors
+        (connection failures and HTTP 429/502/503/529) with exponential backoff.
 
         Args:
             messages: List of chat messages.
@@ -222,8 +312,9 @@ class LLMClient:
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        try:
-            response = self._backend.chat(
+
+        def do_call() -> ChatResponse:
+            return self._backend.chat(
                 messages=messages,
                 model=model or self._default_model,
                 temperature=temperature,
@@ -235,11 +326,8 @@ class LLMClient:
                 tool_choice=tool_choice,
                 **kwargs,
             )
-            self._handle_success()
-            return response
-        except BackendUnavailableError:
-            self._handle_unavailable()
-            raise
+
+        return self._call_with_retry(do_call)
 
     def chat_stream(
         self,
@@ -256,9 +344,8 @@ class LLMClient:
     ) -> Iterator[str]:
         """Stream chat completion tokens (sync).
 
-        Automatically manages backoff state:
-        - Resets backoff on successful completion
-        - Sets exponential backoff on BackendUnavailableError
+        Note: Streaming does not support automatic retry. For retry support,
+        use chat() or chat_full() instead.
 
         Yields tokens as they arrive. After iteration, access last_response
         for usage statistics.
@@ -278,25 +365,18 @@ class LLMClient:
         Yields:
             String tokens as they arrive.
         """
-        # Can't use yield from - need try/except for backoff and _handle_success() after
-        try:
-            for token in self._backend.chat_stream(  # noqa: UP028
-                messages=messages,
-                model=model or self._default_model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                system=system,
-                adapter_id=adapter_id,
-                think=think,
-                tools=tools,
-                tool_choice=tool_choice,
-                **kwargs,
-            ):
-                yield token
-            self._handle_success()
-        except BackendUnavailableError:
-            self._handle_unavailable()
-            raise
+        yield from self._backend.chat_stream(
+            messages=messages,
+            model=model or self._default_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system=system,
+            adapter_id=adapter_id,
+            think=think,
+            tools=tools,
+            tool_choice=tool_choice,
+            **kwargs,
+        )
 
     # =========================================================================
     # Async API
@@ -361,9 +441,8 @@ class LLMClient:
     ) -> ChatResponse:
         """Send a chat completion request and return full response (async).
 
-        Automatically manages backoff state:
-        - Resets backoff on success
-        - Sets exponential backoff on BackendUnavailableError
+        When backoff is configured, automatically retries on transient errors
+        (connection failures and HTTP 429/502/503/529) with exponential backoff.
 
         Args:
             messages: List of chat messages.
@@ -380,8 +459,9 @@ class LLMClient:
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        try:
-            response = await self._backend.chat_async(
+
+        async def do_call() -> ChatResponse:
+            return await self._backend.chat_async(
                 messages=messages,
                 model=model or self._default_model,
                 temperature=temperature,
@@ -393,11 +473,8 @@ class LLMClient:
                 tool_choice=tool_choice,
                 **kwargs,
             )
-            self._handle_success()
-            return response
-        except BackendUnavailableError:
-            self._handle_unavailable()
-            raise
+
+        return await self._call_with_retry_async(do_call)
 
     async def chat_stream_async(
         self,
@@ -414,9 +491,8 @@ class LLMClient:
     ) -> AsyncIterator[str]:
         """Stream chat completion tokens (async).
 
-        Automatically manages backoff state:
-        - Resets backoff on successful completion
-        - Sets exponential backoff on BackendUnavailableError
+        Note: Streaming does not support automatic retry. For retry support,
+        use chat_async() or chat_full_async() instead.
 
         Yields tokens as they arrive. After iteration, access last_response
         for usage statistics.
@@ -436,24 +512,19 @@ class LLMClient:
         Yields:
             String tokens as they arrive.
         """
-        try:
-            async for token in self._backend.chat_stream_async(
-                messages=messages,
-                model=model or self._default_model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                system=system,
-                adapter_id=adapter_id,
-                think=think,
-                tools=tools,
-                tool_choice=tool_choice,
-                **kwargs,
-            ):
-                yield token
-            self._handle_success()
-        except BackendUnavailableError:
-            self._handle_unavailable()
-            raise
+        async for token in self._backend.chat_stream_async(
+            messages=messages,
+            model=model or self._default_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system=system,
+            adapter_id=adapter_id,
+            think=think,
+            tools=tools,
+            tool_choice=tool_choice,
+            **kwargs,
+        ):
+            yield token
 
     # =========================================================================
     # Resource management
