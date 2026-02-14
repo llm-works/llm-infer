@@ -68,10 +68,10 @@ class MockBackend(Backend):
         return cls(lg=lg)
 
 
-def make_client(responses: list[ChatResponse] | None = None) -> LLMClient:
+def make_client(lg: Logger, responses: list[ChatResponse] | None = None) -> LLMClient:
     """Create a client with a mock backend."""
     backend = MockBackend(responses=responses)
-    return LLMClient(backend=backend)
+    return LLMClient(lg=lg, backend=backend)
 
 
 class TestLLMRouterInit:
@@ -79,8 +79,8 @@ class TestLLMRouterInit:
 
     def test_init_with_clients(self, mock_lg: Logger) -> None:
         """Test router initializes with clients dict."""
-        client_a = make_client()
-        client_b = make_client()
+        client_a = make_client(mock_lg)
+        client_b = make_client(mock_lg)
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
 
         assert router.clients == {"a": client_a, "b": client_b}
@@ -88,7 +88,7 @@ class TestLLMRouterInit:
 
     def test_init_raises_if_default_not_in_clients(self, mock_lg: Logger) -> None:
         """Test router raises if default not in clients."""
-        client_a = make_client()
+        client_a = make_client(mock_lg)
         with pytest.raises(
             ValueError, match="Default backend 'missing' not in clients"
         ):
@@ -98,7 +98,7 @@ class TestLLMRouterInit:
         self, mock_lg: Logger
     ) -> None:
         """Test router raises if model routing references unknown backend."""
-        client_a = make_client()
+        client_a = make_client(mock_lg)
         model_to_backend = {"model-x": "unknown"}
         with pytest.raises(
             ValueError, match="Model 'model-x' routes to unknown backend 'unknown'"
@@ -113,8 +113,8 @@ class TestLLMRouterRouting:
         """Test chat() uses default backend when no backend specified."""
         response_a = ChatResponse(content="From A")
         response_b = ChatResponse(content="From B")
-        client_a = make_client([response_a])
-        client_b = make_client([response_b])
+        client_a = make_client(mock_lg, [response_a])
+        client_b = make_client(mock_lg, [response_b])
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
 
         result = router.chat([{"role": "user", "content": "Hi"}])
@@ -125,8 +125,8 @@ class TestLLMRouterRouting:
         """Test chat() routes to specified backend."""
         response_a = ChatResponse(content="From A")
         response_b = ChatResponse(content="From B")
-        client_a = make_client([response_a])
-        client_b = make_client([response_b])
+        client_a = make_client(mock_lg, [response_a])
+        client_b = make_client(mock_lg, [response_b])
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
 
         result = router.chat([{"role": "user", "content": "Hi"}], backend="b")
@@ -135,7 +135,7 @@ class TestLLMRouterRouting:
 
     def test_chat_raises_on_unknown_backend(self, mock_lg: Logger) -> None:
         """Test chat() raises on unknown backend."""
-        client_a = make_client([ChatResponse(content="A")])
+        client_a = make_client(mock_lg, [ChatResponse(content="A")])
         router = LLMRouter(mock_lg, {"a": client_a}, "a")
 
         with pytest.raises(ValueError, match="Backend 'unknown' not found"):
@@ -144,7 +144,7 @@ class TestLLMRouterRouting:
     def test_chat_full_routes_correctly(self, mock_lg: Logger) -> None:
         """Test chat_full() routes to correct backend."""
         response = ChatResponse(content="Full response")
-        client = make_client([response])
+        client = make_client(mock_lg, [response])
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
         result = router.chat_full([{"role": "user", "content": "Hi"}])
@@ -154,7 +154,7 @@ class TestLLMRouterRouting:
     def test_chat_stream_routes_correctly(self, mock_lg: Logger) -> None:
         """Test chat_stream() routes to correct backend."""
         response = ChatResponse(content="ABC")
-        client = make_client([response])
+        client = make_client(mock_lg, [response])
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
         tokens = list(router.chat_stream([{"role": "user", "content": "Hi"}]))
@@ -169,7 +169,7 @@ class TestLLMRouterAsync:
     async def test_chat_async_routes_correctly(self, mock_lg: Logger) -> None:
         """Test chat_async() routes to correct backend."""
         response = ChatResponse(content="Async response")
-        client = make_client([response])
+        client = make_client(mock_lg, [response])
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
         result = await router.chat_async([{"role": "user", "content": "Hi"}])
@@ -183,8 +183,8 @@ class TestLLMRouterAsync:
         """Test chat_async() routes to specified backend."""
         response_a = ChatResponse(content="From A")
         response_b = ChatResponse(content="From B")
-        client_a = make_client([response_a])
-        client_b = make_client([response_b])
+        client_a = make_client(mock_lg, [response_a])
+        client_b = make_client(mock_lg, [response_b])
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
 
         result = await router.chat_async(
@@ -197,7 +197,7 @@ class TestLLMRouterAsync:
     async def test_chat_full_async_routes_correctly(self, mock_lg: Logger) -> None:
         """Test chat_full_async() routes correctly."""
         response = ChatResponse(content="Full async")
-        client = make_client([response])
+        client = make_client(mock_lg, [response])
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
         result = await router.chat_full_async([{"role": "user", "content": "Hi"}])
@@ -208,7 +208,7 @@ class TestLLMRouterAsync:
     async def test_chat_stream_async_routes_correctly(self, mock_lg: Logger) -> None:
         """Test chat_stream_async() routes correctly."""
         response = ChatResponse(content="XYZ")
-        client = make_client([response])
+        client = make_client(mock_lg, [response])
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
         tokens = []
@@ -227,8 +227,8 @@ class TestLLMRouterModelRouting:
         """Test routing by model when model is in the routing table."""
         response_a = ChatResponse(content="From A")
         response_b = ChatResponse(content="From B")
-        client_a = make_client([response_a])
-        client_b = make_client([response_b])
+        client_a = make_client(mock_lg, [response_a])
+        client_b = make_client(mock_lg, [response_b])
         model_to_backend = {"model-a": "a", "model-b": "b"}
         router = LLMRouter(
             mock_lg, {"a": client_a, "b": client_b}, "a", model_to_backend
@@ -243,7 +243,7 @@ class TestLLMRouterModelRouting:
     ) -> None:
         """Test fallback to default when model not in routing table."""
         response_a = ChatResponse(content="From A")
-        client_a = make_client([response_a])
+        client_a = make_client(mock_lg, [response_a])
         model_to_backend = {"known-model": "a"}
         router = LLMRouter(mock_lg, {"a": client_a}, "a", model_to_backend)
 
@@ -255,8 +255,8 @@ class TestLLMRouterModelRouting:
         """Test explicit backend param overrides model-based routing."""
         response_a = ChatResponse(content="From A")
         response_b = ChatResponse(content="From B")
-        client_a = make_client([response_a])
-        client_b = make_client([response_b])
+        client_a = make_client(mock_lg, [response_a])
+        client_b = make_client(mock_lg, [response_b])
         model_to_backend = {"model-b": "b"}
         router = LLMRouter(
             mock_lg, {"a": client_a, "b": client_b}, "a", model_to_backend
@@ -271,7 +271,7 @@ class TestLLMRouterModelRouting:
 
     def test_models_property_returns_routing_table(self, mock_lg: Logger) -> None:
         """Test models property exposes the routing table."""
-        client = make_client()
+        client = make_client(mock_lg)
         model_to_backend = {"model-x": "main", "model-y": "main"}
         router = LLMRouter(mock_lg, {"main": client}, "main", model_to_backend)
 
@@ -279,8 +279,8 @@ class TestLLMRouterModelRouting:
 
     def test_get_client_with_model_param(self, mock_lg: Logger) -> None:
         """Test get_client resolves by model."""
-        client_a = make_client()
-        client_b = make_client()
+        client_a = make_client(mock_lg)
+        client_b = make_client(mock_lg)
         model_to_backend = {"gpt-4": "b"}
         router = LLMRouter(
             mock_lg, {"a": client_a, "b": client_b}, "a", model_to_backend
@@ -298,8 +298,8 @@ class TestLLMRouterResourceManagement:
         """Test close() closes all clients."""
         backend_a = MockBackend()
         backend_b = MockBackend()
-        client_a = LLMClient(backend=backend_a)
-        client_b = LLMClient(backend=backend_b)
+        client_a = LLMClient(lg=mock_lg, backend=backend_a)
+        client_b = LLMClient(lg=mock_lg, backend=backend_b)
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
 
         router.close()
@@ -312,8 +312,8 @@ class TestLLMRouterResourceManagement:
         """Test aclose() closes all clients."""
         backend_a = MockBackend()
         backend_b = MockBackend()
-        client_a = LLMClient(backend=backend_a)
-        client_b = LLMClient(backend=backend_b)
+        client_a = LLMClient(lg=mock_lg, backend=backend_a)
+        client_b = LLMClient(lg=mock_lg, backend=backend_b)
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
 
         await router.aclose()
@@ -324,7 +324,7 @@ class TestLLMRouterResourceManagement:
     def test_sync_context_manager(self, mock_lg: Logger) -> None:
         """Test sync context manager calls close."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         with LLMRouter(mock_lg, {"main": client}, "main") as router:
             assert router.clients == {"main": client}
@@ -335,7 +335,7 @@ class TestLLMRouterResourceManagement:
     async def test_async_context_manager(self, mock_lg: Logger) -> None:
         """Test async context manager calls aclose."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         async with LLMRouter(mock_lg, {"main": client}, "main") as router:
             assert router.clients == {"main": client}
@@ -349,7 +349,7 @@ class TestLLMRouterCanCall:
     def test_can_call_delegates_to_default_client(self, mock_lg: Logger) -> None:
         """Test can_call() delegates to default client."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
         # Client has no rate limiting, should return True
@@ -368,8 +368,8 @@ class TestLLMRouterCanCall:
 
         rate_limiter.last_t = time.time()  # Simulate recent call
 
-        client_a = LLMClient(backend=backend_a, rate_limiter=rate_limiter)
-        client_b = LLMClient(backend=backend_b)  # No rate limiting
+        client_a = LLMClient(lg=mock_lg, backend=backend_a, rate_limiter=rate_limiter)
+        client_b = LLMClient(lg=mock_lg, backend=backend_b)  # No rate limiting
 
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
 
@@ -387,8 +387,8 @@ class TestLLMRouterCanCall:
 
         # Client B has backoff active
         backoff = Backoff(mock_lg, base=10.0)
-        client_a = LLMClient(backend=backend_a)
-        client_b = LLMClient(backend=backend_b, backoff=backoff)
+        client_a = LLMClient(lg=mock_lg, backend=backend_a)
+        client_b = LLMClient(lg=mock_lg, backend=backend_b, backoff=backoff)
 
         import time
 
@@ -405,7 +405,7 @@ class TestLLMRouterCanCall:
     def test_can_call_raises_on_unknown_backend(self, mock_lg: Logger) -> None:
         """Test can_call raises ValueError for unknown backend."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
         with pytest.raises(ValueError, match="Backend 'unknown' not found"):

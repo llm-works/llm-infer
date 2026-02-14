@@ -202,14 +202,19 @@ class Factory:
         """
         backends_config = config.get("backends", {})
         rate_limit_config = config.get("rate_limit")
+        retry_config = config.get("retry")
 
         if not backends_config:
             return self._create_single_backend_router(
-                config, discover_models, rate_limit_config
+                config, discover_models, rate_limit_config, retry_config
             )
 
         return self._create_multi_backend_router(
-            backends_config, config.get("default"), discover_models, rate_limit_config
+            backends_config,
+            config.get("default"),
+            discover_models,
+            rate_limit_config,
+            retry_config,
         )
 
     def _create_single_backend_router(
@@ -217,12 +222,13 @@ class Factory:
         config: dict[str, Any],
         discover_models: bool,
         rate_limit_config: dict[str, Any] | None = None,
+        retry_config: dict[str, Any] | None = None,
     ) -> LLMRouter:
         """Create router wrapping a single backend config.
 
         On failure during model discovery or router init, closes client before re-raising.
         """
-        client = self._create_client(config, rate_limit_config)
+        client = self._create_client(config, rate_limit_config, retry_config)
         try:
             name = "default"
             model_to_backend = self._discover_models_for_backend(
@@ -239,13 +245,14 @@ class Factory:
         default_name: str | None,
         discover_models: bool,
         rate_limit_config: dict[str, Any] | None = None,
+        retry_config: dict[str, Any] | None = None,
     ) -> LLMRouter:
         """Create router from multi-backend config.
 
         On failure during model routing, closes all clients before re-raising.
         """
         clients, backend_configs = self._create_enabled_clients(
-            backends_config, rate_limit_config
+            backends_config, rate_limit_config, retry_config
         )
         if not clients:
             raise ValueError("No enabled backends in config")
@@ -271,6 +278,7 @@ class Factory:
         self,
         backends_config: dict[str, dict[str, Any]],
         rate_limit_config: dict[str, Any] | None = None,
+        retry_config: dict[str, Any] | None = None,
     ) -> tuple[dict[str, LLMClient], dict[str, dict[str, Any]]]:
         """Create clients for all enabled backends.
 
@@ -281,7 +289,9 @@ class Factory:
         try:
             for name, config in backends_config.items():
                 if config.get("enabled", True):
-                    clients[name] = self._create_client(config, rate_limit_config)
+                    clients[name] = self._create_client(
+                        config, rate_limit_config, retry_config
+                    )
                     configs[name] = config
         except Exception:
             self._close_clients_safely(clients)
@@ -420,27 +430,80 @@ class Factory:
 
         return rate_limiter, backoff
 
+    def _create_retry(self, retry_config: dict[str, Any] | None) -> Backoff | None:
+        """Create retry backoff from config.
+
+        Args:
+            retry_config: Retry configuration with enabled and backoff.
+
+        Returns:
+            Backoff instance if retry is enabled, None otherwise.
+        """
+        if retry_config is None:
+            return None
+        if not retry_config.get("enabled", True):
+            return None
+
+        from appinfra.rate_limit import Backoff
+
+        backoff_config = retry_config.get("backoff", {})
+        return Backoff(
+            self._lg,
+            base=backoff_config.get("base", 1.0),
+            max_delay=backoff_config.get("max", 60.0),
+        )
+
+    def _merge_config(
+        self,
+        global_config: dict[str, Any] | None,
+        backend_config: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Merge global config with backend-specific overrides.
+
+        Backend config takes precedence over global config.
+        """
+        if global_config is None and backend_config is None:
+            return None
+        if global_config is None:
+            return backend_config
+        if backend_config is None:
+            return global_config
+        return {**global_config, **backend_config}
+
     def _create_client(
         self,
         config: dict[str, Any],
         rate_limit_config: dict[str, Any] | None = None,
+        retry_config: dict[str, Any] | None = None,
     ) -> LLMClient:
         """Create single LLMClient from backend configuration.
 
         Args:
             config: Backend configuration with 'type' key.
-            rate_limit_config: Optional rate limit configuration.
+            rate_limit_config: Optional global rate limit configuration.
+            retry_config: Optional global retry configuration.
 
         Returns:
             Configured LLMClient instance.
         """
         backend = self.create_backend(config)
-        rate_limiter, backoff = self._create_rate_limiter(rate_limit_config)
+
+        # Merge global config with per-backend overrides
+        merged_rate_limit = self._merge_config(
+            rate_limit_config, config.get("rate_limit")
+        )
+        merged_retry = self._merge_config(retry_config, config.get("retry"))
+
+        rate_limiter, backoff = self._create_rate_limiter(merged_rate_limit)
+        retry = self._create_retry(merged_retry)
+
         return LLMClient(
+            lg=self._lg,
             backend=backend,
             default_model=config.get("model"),
             rate_limiter=rate_limiter,
             backoff=backoff,
+            retry=retry,
         )
 
     def from_backend_config(self, config: dict[str, Any]) -> LLMClient:
@@ -453,7 +516,9 @@ class Factory:
             Configured LLMClient instance.
         """
         backend = self.create_backend(config)
-        return LLMClient(backend=backend, default_model=config.get("model"))
+        return LLMClient(
+            lg=self._lg, backend=backend, default_model=config.get("model")
+        )
 
     def openai(
         self,
@@ -482,7 +547,7 @@ class Factory:
             api_key=api_key,
             timeout=timeout,
         )
-        return LLMClient(backend=backend, default_model=model)
+        return LLMClient(lg=self._lg, backend=backend, default_model=model)
 
     def anthropic(
         self,
@@ -516,4 +581,4 @@ class Factory:
             "timeout": timeout,
         }
         backend = self.create_backend(config)
-        return LLMClient(backend=backend, default_model=model)
+        return LLMClient(lg=self._lg, backend=backend, default_model=model)

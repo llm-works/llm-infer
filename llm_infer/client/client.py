@@ -27,16 +27,22 @@ For client creation, use Factory:
 
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import AsyncIterator, Iterator
-from typing import TYPE_CHECKING, Any, Self
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any, Self, TypeVar
+
+from appinfra.log import Logger
+from appinfra.rate_limit import Backoff, RateLimiter
 
 from llm_infer.client.backends import Backend
-from llm_infer.client.exceptions import BackendUnavailableError
+from llm_infer.client.exceptions import BackendRequestError, BackendUnavailableError
 from llm_infer.client.types import ChatResponse
 
-if TYPE_CHECKING:
-    from appinfra.rate_limit import Backoff, RateLimiter
+# Transient HTTP status codes that should trigger retry
+TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 529})
+
+T = TypeVar("T")
 
 
 class LLMClient:
@@ -69,24 +75,31 @@ class LLMClient:
 
     def __init__(
         self,
+        lg: Logger,
         backend: Backend,
         default_model: str | None = None,
         rate_limiter: RateLimiter | None = None,
         backoff: Backoff | None = None,
+        retry: Backoff | None = None,
     ) -> None:
         """Initialize the client with a backend.
 
         Args:
+            lg: Logger instance.
             backend: The backend to use for API calls.
             default_model: Default model to use if not specified per-request.
             rate_limiter: Optional rate limiter for throttling requests.
             backoff: Optional backoff controller for handling unavailability.
+            retry: Optional backoff for retrying transient errors (429, 502, 503, 529).
+                When provided, transient errors are retried with exponential backoff.
         """
+        self._lg = lg
         self._backend = backend
         self._default_model = default_model
         self._rate_limiter = rate_limiter
         self._backoff = backoff
         self._backoff_until: float | None = None
+        self._retry = retry
 
     @property
     def backend(self) -> Backend:
@@ -136,6 +149,76 @@ class LLMClient:
         if self._backoff is not None:
             delay = self._backoff.next_delay()
             self._backoff_until = time.time() + delay
+
+    def _call_with_retry(self, fn: Callable[[], T]) -> T:
+        """Execute fn with retry on transient errors.
+
+        Retries on HTTP status codes 429, 502, 503, 529 with exponential backoff.
+        Only active when retry backoff is configured.
+
+        Args:
+            fn: Function to call.
+
+        Returns:
+            Result of fn.
+
+        Raises:
+            BackendRequestError: If all retries exhausted or non-transient error.
+        """
+        if self._retry is None:
+            return fn()
+
+        self._retry.reset()
+        while True:
+            try:
+                return fn()
+            except BackendRequestError as e:
+                if e.status_code not in TRANSIENT_STATUS_CODES:
+                    raise
+                delay = self._retry.next_delay()
+                if delay >= self._retry.max_delay:
+                    # Max delay reached, give up
+                    raise
+                self._lg.warning(
+                    "transient error, retrying",
+                    extra={"status_code": e.status_code, "delay": delay},
+                )
+                time.sleep(delay)
+
+    async def _call_with_retry_async(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """Execute async fn with retry on transient errors.
+
+        Retries on HTTP status codes 429, 502, 503, 529 with exponential backoff.
+        Only active when retry backoff is configured.
+
+        Args:
+            fn: Async function to call.
+
+        Returns:
+            Result of fn.
+
+        Raises:
+            BackendRequestError: If all retries exhausted or non-transient error.
+        """
+        if self._retry is None:
+            return await fn()
+
+        self._retry.reset()
+        while True:
+            try:
+                return await fn()
+            except BackendRequestError as e:
+                if e.status_code not in TRANSIENT_STATUS_CODES:
+                    raise
+                delay = self._retry.next_delay()
+                if delay >= self._retry.max_delay:
+                    # Max delay reached, give up
+                    raise
+                self._lg.warning(
+                    "transient error, retrying",
+                    extra={"status_code": e.status_code, "delay": delay},
+                )
+                await asyncio.sleep(delay)
 
     # =========================================================================
     # Sync API
@@ -222,8 +305,9 @@ class LLMClient:
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        try:
-            response = self._backend.chat(
+
+        def do_call() -> ChatResponse:
+            return self._backend.chat(
                 messages=messages,
                 model=model or self._default_model,
                 temperature=temperature,
@@ -235,6 +319,9 @@ class LLMClient:
                 tool_choice=tool_choice,
                 **kwargs,
             )
+
+        try:
+            response = self._call_with_retry(do_call)
             self._handle_success()
             return response
         except BackendUnavailableError:
@@ -380,8 +467,9 @@ class LLMClient:
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        try:
-            response = await self._backend.chat_async(
+
+        async def do_call() -> ChatResponse:
+            return await self._backend.chat_async(
                 messages=messages,
                 model=model or self._default_model,
                 temperature=temperature,
@@ -393,6 +481,9 @@ class LLMClient:
                 tool_choice=tool_choice,
                 **kwargs,
             )
+
+        try:
+            response = await self._call_with_retry_async(do_call)
             self._handle_success()
             return response
         except BackendUnavailableError:

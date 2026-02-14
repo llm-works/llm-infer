@@ -72,17 +72,17 @@ class MockBackend(Backend):
 class TestLLMClientInit:
     """Test LLMClient initialization."""
 
-    def test_init_with_backend(self) -> None:
+    def test_init_with_backend(self, mock_lg: Logger) -> None:
         """Test client initializes with backend."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
         assert client.backend is backend
         assert client.last_response is None
 
-    def test_init_with_default_model(self) -> None:
+    def test_init_with_default_model(self, mock_lg: Logger) -> None:
         """Test client stores default model."""
         backend = MockBackend()
-        client = LLMClient(backend=backend, default_model="gpt-4")
+        client = LLMClient(lg=mock_lg, backend=backend, default_model="gpt-4")
         assert client._default_model == "gpt-4"
 
 
@@ -296,7 +296,7 @@ class TestLLMClientSyncAPI:
         """Test chat() returns content string."""
         response = ChatResponse(content="Hello!")
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         result = client.chat(messages=[{"role": "user", "content": "Hi"}])
 
@@ -311,7 +311,7 @@ class TestLLMClientSyncAPI:
             content="Hello!", usage=usage, finish_reason=FinishReason.STOP
         )
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
 
@@ -323,7 +323,7 @@ class TestLLMClientSyncAPI:
         """Test chat_stream() yields tokens."""
         response = ChatResponse(content="Hello")
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         tokens = list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
 
@@ -333,7 +333,7 @@ class TestLLMClientSyncAPI:
         """Test last_response is available after chat."""
         response = ChatResponse(content="Hello!")
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         client.chat(messages=[{"role": "user", "content": "Hi"}])
 
@@ -349,7 +349,7 @@ class TestLLMClientAsyncAPI:
         """Test chat_async() returns content string."""
         response = ChatResponse(content="Hello!")
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         result = await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
 
@@ -360,7 +360,7 @@ class TestLLMClientAsyncAPI:
         """Test chat_full_async() returns ChatResponse."""
         response = ChatResponse(content="Hello!", finish_reason=FinishReason.STOP)
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         result = await client.chat_full_async(
             messages=[{"role": "user", "content": "Hi"}]
@@ -374,7 +374,7 @@ class TestLLMClientAsyncAPI:
         """Test chat_stream_async() yields tokens."""
         response = ChatResponse(content="Hello")
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         tokens = []
         async for token in client.chat_stream_async(
@@ -391,7 +391,7 @@ class TestLLMClientResourceManagement:
     def test_sync_context_manager(self) -> None:
         """Test sync context manager calls close."""
         backend = MockBackend()
-        with LLMClient(backend=backend) as client:
+        with LLMClient(lg=mock_lg, backend=backend) as client:
             assert client.backend is backend
 
         assert backend._closed
@@ -400,7 +400,7 @@ class TestLLMClientResourceManagement:
     async def test_async_context_manager(self) -> None:
         """Test async context manager calls aclose."""
         backend = MockBackend()
-        async with LLMClient(backend=backend) as client:
+        async with LLMClient(lg=mock_lg, backend=backend) as client:
             assert client.backend is backend
 
         assert backend._aclosed
@@ -408,7 +408,7 @@ class TestLLMClientResourceManagement:
     def test_close_delegates_to_backend(self) -> None:
         """Test close() calls backend.close()."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         client.close()
 
@@ -418,7 +418,7 @@ class TestLLMClientResourceManagement:
     async def test_aclose_delegates_to_backend(self) -> None:
         """Test aclose() calls backend.aclose()."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         await client.aclose()
 
@@ -435,7 +435,7 @@ class TestLLMClientDefaultModel:
         backend.chat.return_value = response
         backend.last_response = response
 
-        client = LLMClient(backend=backend, default_model="gpt-4")
+        client = LLMClient(lg=mock_lg, backend=backend, default_model="gpt-4")
         client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         # Verify model was passed to backend
@@ -449,7 +449,7 @@ class TestLLMClientDefaultModel:
         backend.chat.return_value = response
         backend.last_response = response
 
-        client = LLMClient(backend=backend, default_model="gpt-4")
+        client = LLMClient(lg=mock_lg, backend=backend, default_model="gpt-4")
         client.chat(messages=[{"role": "user", "content": "Hi"}], model="gpt-3.5")
 
         call_kwargs = backend.chat.call_args.kwargs
@@ -462,7 +462,7 @@ class TestLLMClientRateLimiting:
     def test_can_call_returns_true_without_rate_limiting(self) -> None:
         """Test can_call returns True when no rate limiting configured."""
         backend = MockBackend()
-        client = LLMClient(backend=backend)
+        client = LLMClient(lg=mock_lg, backend=backend)
         assert client.can_call() is True
 
     def test_can_call_returns_true_when_rate_limit_allows(
@@ -473,7 +473,7 @@ class TestLLMClientRateLimiting:
 
         rate_limiter = RateLimiter(mock_lg, per_minute=60)
         backend = MockBackend()
-        client = LLMClient(backend=backend, rate_limiter=rate_limiter)
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
 
         assert client.can_call() is True
 
@@ -488,7 +488,7 @@ class TestLLMClientRateLimiting:
         rate_limiter.last_t = time.time()
 
         backend = MockBackend()
-        client = LLMClient(backend=backend, rate_limiter=rate_limiter)
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
 
         # Should be rate limited (less than 1 second since last call)
         assert client.can_call() is False
@@ -499,7 +499,7 @@ class TestLLMClientRateLimiting:
 
         backoff = Backoff(mock_lg, base=10.0)  # 10 second base
         backend = MockBackend()
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         # Manually set backoff state
         import time
@@ -514,7 +514,7 @@ class TestLLMClientRateLimiting:
 
         backoff = Backoff(mock_lg, base=1.0)
         backend = MockBackend()
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         # Set backoff in the past
         import time
@@ -530,7 +530,7 @@ class TestLLMClientRateLimiting:
         backoff = Backoff(mock_lg, base=1.0)
         response = ChatResponse(content="Hello!")
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         # Set some backoff state
         import time
@@ -555,7 +555,7 @@ class TestLLMClientRateLimiting:
         backend = MagicMock(spec=Backend)
         backend.chat.side_effect = BackendUnavailableError("Connection refused")
 
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         with pytest.raises(BackendUnavailableError):
             client.chat(messages=[{"role": "user", "content": "Hi"}])
@@ -572,7 +572,7 @@ class TestLLMClientRateLimiting:
         backoff = Backoff(mock_lg, base=1.0)
         response = ChatResponse(content="Hello!")
         backend = MockBackend(responses=[response])
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         # Set some backoff state
         import time
@@ -600,7 +600,7 @@ class TestLLMClientRateLimiting:
         backend = MagicMock(spec=Backend)
         backend.chat_async.side_effect = BackendUnavailableError("Connection refused")
 
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         with pytest.raises(BackendUnavailableError):
             await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
@@ -617,7 +617,7 @@ class TestLLMClientRateLimiting:
         backend = MagicMock(spec=Backend)
         backend.chat_stream.return_value = iter(["Hello", " world"])
 
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         # Set some backoff state
         import time
@@ -645,7 +645,7 @@ class TestLLMClientRateLimiting:
         backend = MagicMock(spec=Backend)
         backend.chat_stream.side_effect = BackendUnavailableError("Connection refused")
 
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         with pytest.raises(BackendUnavailableError):
             list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
@@ -670,7 +670,7 @@ class TestLLMClientRateLimiting:
 
         backend.chat_stream_async.return_value = mock_stream()
 
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         # Set some backoff state
         import time
@@ -706,7 +706,7 @@ class TestLLMClientRateLimiting:
             "Connection refused"
         )
 
-        client = LLMClient(backend=backend, backoff=backoff)
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         with pytest.raises(BackendUnavailableError):
             async for _ in client.chat_stream_async(
@@ -810,4 +810,251 @@ class TestFactoryRateLimitConfig:
         assert remote_client._rate_limiter is not None
         assert local_client._backoff is not None
         assert remote_client._backoff is not None
+        router.close()
+
+
+class TestLLMClientRetry:
+    """Test LLMClient retry with backoff for transient errors."""
+
+    def test_retry_on_429_rate_limited(self, mock_lg: Logger) -> None:
+        """Test client retries on 429 rate limited error."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        retry = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+        # First call fails with 429, second succeeds
+        backend.chat.side_effect = [
+            BackendRequestError("Rate limited", status_code=429),
+            response,
+        ]
+        backend.last_response = response
+
+        client = LLMClient(lg=mock_lg, backend=backend, retry=retry)
+        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success"
+        assert backend.chat.call_count == 2
+        # Verify warning was logged
+        mock_lg.warning.assert_called()
+
+    def test_retry_on_503_service_unavailable(self, mock_lg: Logger) -> None:
+        """Test client retries on 503 service unavailable."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        retry = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+        backend.chat.side_effect = [
+            BackendRequestError("Service unavailable", status_code=503),
+            response,
+        ]
+        backend.last_response = response
+
+        client = LLMClient(lg=mock_lg, backend=backend, retry=retry)
+        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success"
+        assert backend.chat.call_count == 2
+
+    def test_retry_on_529_overloaded(self, mock_lg: Logger) -> None:
+        """Test client retries on 529 overloaded (Anthropic-specific)."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        retry = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+        backend.chat.side_effect = [
+            BackendRequestError("Overloaded", status_code=529),
+            response,
+        ]
+        backend.last_response = response
+
+        client = LLMClient(lg=mock_lg, backend=backend, retry=retry)
+        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success"
+        assert backend.chat.call_count == 2
+
+    def test_no_retry_on_non_transient_error(self, mock_lg: Logger) -> None:
+        """Test client does not retry on non-transient errors (e.g., 400)."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        retry = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        backend.chat.side_effect = BackendRequestError("Bad request", status_code=400)
+
+        client = LLMClient(lg=mock_lg, backend=backend, retry=retry)
+
+        with pytest.raises(BackendRequestError) as exc_info:
+            client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+
+        assert exc_info.value.status_code == 400
+        # Should only be called once - no retry
+        assert backend.chat.call_count == 1
+
+    def test_retry_exhausted_raises(self, mock_lg: Logger) -> None:
+        """Test client raises after retry attempts exhausted."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        # Small max_delay so we hit the limit quickly
+        retry = Backoff(mock_lg, base=0.01, max_delay=0.02, jitter=False)
+        backend = MagicMock(spec=Backend)
+        # Always fail with transient error
+        backend.chat.side_effect = BackendRequestError("Rate limited", status_code=429)
+
+        client = LLMClient(lg=mock_lg, backend=backend, retry=retry)
+
+        with pytest.raises(BackendRequestError) as exc_info:
+            client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+
+        assert exc_info.value.status_code == 429
+        # Should have retried multiple times
+        assert backend.chat.call_count > 1
+
+    def test_no_retry_when_retry_not_configured(self, mock_lg: Logger) -> None:
+        """Test client does not retry when retry is not configured."""
+        from llm_infer.client.exceptions import BackendRequestError
+
+        backend = MagicMock(spec=Backend)
+        backend.chat.side_effect = BackendRequestError("Rate limited", status_code=429)
+
+        # No retry configured
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        with pytest.raises(BackendRequestError):
+            client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+
+        # Should only be called once
+        assert backend.chat.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_retry_async_on_transient_error(self, mock_lg: Logger) -> None:
+        """Test async client retries on transient errors."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        retry = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+
+        async def chat_async_side_effect(*args, **kwargs):
+            if backend.chat_async.call_count == 1:
+                raise BackendRequestError("Rate limited", status_code=429)
+            return response
+
+        backend.chat_async.side_effect = chat_async_side_effect
+        backend.last_response = response
+
+        client = LLMClient(lg=mock_lg, backend=backend, retry=retry)
+        result = await client.chat_full_async(
+            messages=[{"role": "user", "content": "Hi"}]
+        )
+
+        assert result.content == "Success"
+        assert backend.chat_async.call_count == 2
+
+
+class TestFactoryRetryConfig:
+    """Test Factory retry configuration parsing."""
+
+    def test_from_config_creates_retry(self, mock_lg: Logger) -> None:
+        """Test from_config creates retry backoff from config."""
+        factory = Factory(mock_lg)
+        config = {
+            "retry": {"enabled": True, "backoff": {"base": 2.0, "max": 120.0}},
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        client = router.get_client()
+        assert client._retry is not None
+        assert client._retry.base == 2.0
+        assert client._retry.max_delay == 120.0
+        router.close()
+
+    def test_from_config_retry_disabled(self, mock_lg: Logger) -> None:
+        """Test from_config with retry disabled does not create retry."""
+        factory = Factory(mock_lg)
+        config = {
+            "retry": {"enabled": False},
+            "backends": {
+                "local": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        client = router.get_client()
+        assert client._retry is None
+        router.close()
+
+    def test_per_backend_retry_override(self, mock_lg: Logger) -> None:
+        """Test per-backend retry config overrides global."""
+        factory = Factory(mock_lg)
+        config = {
+            "retry": {"enabled": True, "backoff": {"base": 1.0}},
+            "backends": {
+                "with_retry": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "without_retry": {
+                    "type": "openai_compatible",
+                    "base_url": "http://remote:8000/v1",
+                    "retry": {"enabled": False},
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        with_retry = router.get_client(backend="with_retry")
+        without_retry = router.get_client(backend="without_retry")
+
+        assert with_retry._retry is not None
+        assert without_retry._retry is None
+        router.close()
+
+    def test_per_backend_rate_limit_override(self, mock_lg: Logger) -> None:
+        """Test per-backend rate_limit config overrides global."""
+        factory = Factory(mock_lg)
+        config = {
+            "rate_limit": {"per_minute": 60},
+            "backends": {
+                "default_rate": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "custom_rate": {
+                    "type": "openai_compatible",
+                    "base_url": "http://remote:8000/v1",
+                    "rate_limit": {"per_minute": 30},
+                },
+            },
+        }
+        router = factory.from_config(config, discover_models=False)
+
+        default_client = router.get_client(backend="default_rate")
+        custom_client = router.get_client(backend="custom_rate")
+
+        assert default_client._rate_limiter.per_minute == 60
+        assert custom_client._rate_limiter.per_minute == 30
         router.close()

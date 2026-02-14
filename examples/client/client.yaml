@@ -8,10 +8,26 @@
 
 default: local
 
+rate_limit:
+  per_minute: 60
+  backoff:
+    base: 1.0
+    max: 60.0
+
+retry:
+  enabled: true
+  backoff:
+    base: 1.0
+    max: 60.0
+
 backends:
   local:
     type: openai_compatible
     base_url: http://localhost:8000/v1
+    rate_limit:
+      per_minute: 120            # Higher rate
+    retry:
+      enabled: false
     # models:                    # Optional: restrict to specific models
     #   - llama-3.1-8b
     #   - qwen-2.5-7b
