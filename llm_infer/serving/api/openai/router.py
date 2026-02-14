@@ -230,7 +230,7 @@ async def _handle_chat_non_streaming(
     headers = _build_adapter_fallback_headers(response)
     if headers:
         return JSONResponse(
-            content=chat_response.model_dump(exclude_none=True),
+            content=chat_response.model_dump(mode="json"),
             headers=headers,
         )
     return chat_response
@@ -285,7 +285,7 @@ async def _handle_completion_non_streaming(
     headers = _build_adapter_fallback_headers(response)
     if headers:
         return JSONResponse(
-            content=completion_response.model_dump(exclude_none=True),
+            content=completion_response.model_dump(mode="json"),
             headers=headers,
         )
     return completion_response
