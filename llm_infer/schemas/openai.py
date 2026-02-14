@@ -296,6 +296,9 @@ class ChatCompletionChunk(BaseModel):
     model: str
     choices: list[ChatCompletionChunkChoice]
     system_fingerprint: str | None = None
+    # llm-infer extensions (only present in final chunk if fallback occurred)
+    adapter_fallback: bool | None = None
+    adapter_requested: str | None = None
 
 
 # =============================================================================
@@ -390,6 +393,9 @@ class CompletionChunk(BaseModel):
     created: int
     model: str
     choices: list[CompletionChunkChoice]
+    # llm-infer extensions (only present in final chunk if fallback occurred)
+    adapter_fallback: bool | None = None
+    adapter_requested: str | None = None
 
 
 # =============================================================================

@@ -69,6 +69,8 @@ def create_chat_chunk(
     role: Role | None = None,
     finish_reason: FinishReason | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
+    adapter_fallback: bool | None = None,
+    adapter_requested: str | None = None,
 ) -> ChatCompletionChunk:
     """Create a chat completion chunk for streaming.
 
@@ -82,6 +84,8 @@ def create_chat_chunk(
         role: Message role (only set on first chunk).
         finish_reason: Finish reason (only set on final chunk).
         tool_calls: Tool calls (only set on final chunk when model calls tools).
+        adapter_fallback: True if adapter was requested but not found (final chunk only).
+        adapter_requested: The adapter that was requested (final chunk only).
     """
     tool_call_deltas = _convert_tool_calls_to_deltas(tool_calls)
     delta = ChatCompletionChunkDelta(
@@ -98,6 +102,8 @@ def create_chat_chunk(
                 finish_reason=finish_reason,
             )
         ],
+        adapter_fallback=adapter_fallback,
+        adapter_requested=adapter_requested,
     )
 
 
@@ -107,6 +113,8 @@ def create_completion_chunk(
     created: int,
     text: str,
     finish_reason: FinishReason | None = None,
+    adapter_fallback: bool | None = None,
+    adapter_requested: str | None = None,
 ) -> CompletionChunk:
     """Create a legacy completion chunk for streaming."""
     return CompletionChunk(
@@ -120,6 +128,8 @@ def create_completion_chunk(
                 finish_reason=finish_reason,
             )
         ],
+        adapter_fallback=adapter_fallback,
+        adapter_requested=adapter_requested,
     )
 
 

@@ -72,6 +72,8 @@ class StreamingGenerator(ABC):
         self,
         finish_reason: FinishReason,
         tool_calls: list[dict[str, Any]] | None = None,
+        adapter_fallback: bool | None = None,
+        adapter_requested: str | None = None,
     ) -> str:
         """Create SSE event for the final chunk with finish reason."""
         pass
@@ -86,18 +88,26 @@ class StreamingGenerator(ABC):
         # Stream tokens
         finish_reason = FinishReason.STOP
         tool_calls = None
+        adapter_fallback = None
+        adapter_requested = None
         async for chunk in self.ipc.submit_streaming(self.request_id, internal_request):
             if chunk.is_final:
                 finish_reason = _map_finish_reason(chunk.finish_reason)
                 tool_calls = getattr(chunk, "tool_calls", None)
+                # Extract adapter fallback info from final response
+                if getattr(chunk, "adapter_fallback", False):
+                    adapter_fallback = True
+                    adapter_requested = getattr(chunk, "adapter_requested", None)
                 break
             if chunk.token:
                 content = self.create_content_chunk(chunk.token)
                 if content:  # Skip empty chunks (e.g., normalizer buffering)
                     yield content
 
-        # Final chunk with finish_reason and tool_calls
-        yield self.create_final_chunk(finish_reason, tool_calls)
+        # Final chunk with finish_reason, tool_calls, and adapter info
+        yield self.create_final_chunk(
+            finish_reason, tool_calls, adapter_fallback, adapter_requested
+        )
         yield format_sse_done()
 
 
@@ -147,6 +157,8 @@ class ChatStreamingGenerator(StreamingGenerator):
         self,
         finish_reason: FinishReason,
         tool_calls: list[dict[str, Any]] | None = None,
+        adapter_fallback: bool | None = None,
+        adapter_requested: str | None = None,
     ) -> str:
         """Create final chunk for chat."""
         # Flush normalizer buffer if active
@@ -161,8 +173,10 @@ class ChatStreamingGenerator(StreamingGenerator):
             content=flushed if flushed else None,
             finish_reason=finish_reason,
             tool_calls=tool_calls,
+            adapter_fallback=adapter_fallback,
+            adapter_requested=adapter_requested,
         )
-        return format_sse_event(chunk.model_dump_json())
+        return format_sse_event(chunk.model_dump_json(exclude_none=True))
 
 
 class CompletionStreamingGenerator(StreamingGenerator):
@@ -182,6 +196,8 @@ class CompletionStreamingGenerator(StreamingGenerator):
         self,
         finish_reason: FinishReason,
         tool_calls: list[dict[str, Any]] | None = None,
+        adapter_fallback: bool | None = None,
+        adapter_requested: str | None = None,
     ) -> str:
         """Create final chunk for completion.
 
@@ -193,5 +209,7 @@ class CompletionStreamingGenerator(StreamingGenerator):
             created=self.created,
             text="",
             finish_reason=finish_reason,
+            adapter_fallback=adapter_fallback,
+            adapter_requested=adapter_requested,
         )
-        return format_sse_event(chunk.model_dump_json())
+        return format_sse_event(chunk.model_dump_json(exclude_none=True))
