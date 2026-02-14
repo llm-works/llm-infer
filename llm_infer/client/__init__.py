@@ -67,7 +67,7 @@ from llm_infer.client.exceptions import (
     BackendUnavailableError,
 )
 from llm_infer.client.factory import Factory
-from llm_infer.client.router import LLMRouter
+from llm_infer.client.router import LLMRouter, ResolvedTarget
 from llm_infer.client.types import ChatResponse
 
 __all__ = [
@@ -77,6 +77,7 @@ __all__ = [
     "LLMClient",
     # Router (multi-backend)
     "LLMRouter",
+    "ResolvedTarget",
     # Response types
     "ChatResponse",
     # Backend base class

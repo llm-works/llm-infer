@@ -107,6 +107,11 @@ class LLMClient:
         return self._backend
 
     @property
+    def default_model(self) -> str | None:
+        """Default model used when not specified per-request."""
+        return self._default_model
+
+    @property
     def last_response(self) -> ChatResponse | None:
         """Last response with usage stats.
 

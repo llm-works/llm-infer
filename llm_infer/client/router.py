@@ -28,12 +28,29 @@ from __future__ import annotations
 
 import types
 from collections.abc import AsyncIterator, Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any, Self
 
 from appinfra.log import Logger
 
 from llm_infer.client.client import LLMClient
 from llm_infer.client.types import ChatResponse
+
+
+@dataclass(frozen=True)
+class ResolvedTarget:
+    """Resolved backend and model for a potential request.
+
+    Returned by LLMRouter.resolve() to show which backend and model
+    would be used for a request without actually making the call.
+
+    Attributes:
+        backend: Name of the backend that will handle the request.
+        model: Model that will be used, or None if no default is configured.
+    """
+
+    backend: str
+    model: str | None
 
 
 class LLMRouter:
@@ -97,6 +114,55 @@ class LLMRouter:
         """Mapping from model ID to backend name (read-only)."""
         return types.MappingProxyType(self._model_to_backend)
 
+    def resolve(
+        self, model: str | None = None, backend: str | None = None
+    ) -> ResolvedTarget:
+        """Resolve which backend and model will be used for a request.
+
+        Performs the same routing logic as the chat methods but does not
+        make an actual API call. Useful for:
+        - Trace logging (show where request is going)
+        - Dry-run mode (log what would be called)
+        - Debugging routing decisions
+
+        Resolution priority:
+            1. Explicit backend name
+            2. Model-based lookup (if model is in the routing table)
+            3. Default backend
+
+        Model resolution:
+            - Uses explicit model if provided
+            - Falls back to the target backend's default_model
+
+        Args:
+            model: Model to use (for routing and as the resolved model).
+            backend: Explicit backend name (highest priority).
+
+        Returns:
+            ResolvedTarget with resolved backend name and model.
+
+        Raises:
+            ValueError: If explicit backend is not found.
+        """
+        # Resolve backend name
+        if backend is not None:
+            if backend not in self._clients:
+                available = list(self._clients.keys())
+                raise ValueError(
+                    f"Backend '{backend}' not found. Available: {available}"
+                )
+            backend_name = backend
+        elif model is not None and model in self._model_to_backend:
+            backend_name = self._model_to_backend[model]
+        else:
+            backend_name = self._default
+
+        # Resolve model (explicit or client's default)
+        client = self._clients[backend_name]
+        resolved_model = model if model is not None else client.default_model
+
+        return ResolvedTarget(backend=backend_name, model=resolved_model)
+
     def get_client(
         self, backend: str | None = None, model: str | None = None
     ) -> LLMClient:
@@ -117,21 +183,8 @@ class LLMRouter:
         Raises:
             ValueError: If explicit backend is not found.
         """
-        # Priority 1: Explicit backend
-        if backend is not None:
-            if backend not in self._clients:
-                available = list(self._clients.keys())
-                raise ValueError(
-                    f"Backend '{backend}' not found. Available: {available}"
-                )
-            return self._clients[backend]
-
-        # Priority 2: Model-based routing
-        if model is not None and model in self._model_to_backend:
-            return self._clients[self._model_to_backend[model]]
-
-        # Priority 3: Default
-        return self._clients[self._default]
+        resolved = self.resolve(model=model, backend=backend)
+        return self._clients[resolved.backend]
 
     def can_call(self, backend: str | None = None, model: str | None = None) -> bool:
         """Check if a call is allowed for the specified backend (non-blocking).

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client import ChatResponse, LLMClient, LLMRouter
+from llm_infer.client import ChatResponse, LLMClient, LLMRouter, ResolvedTarget
 from llm_infer.client.backends import Backend
 
 pytestmark = pytest.mark.unit
@@ -410,3 +410,121 @@ class TestLLMRouterCanCall:
 
         with pytest.raises(ValueError, match="Backend 'unknown' not found"):
             router.can_call(backend="unknown")
+
+
+class TestLLMRouterResolve:
+    """Test LLMRouter.resolve() method."""
+
+    def test_resolve_returns_resolved_target(self, mock_lg: Logger) -> None:
+        """Test resolve() returns a ResolvedTarget dataclass."""
+        client = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        result = router.resolve()
+
+        assert isinstance(result, ResolvedTarget)
+        assert result.backend == "main"
+
+    def test_resolve_uses_default_backend(self, mock_lg: Logger) -> None:
+        """Test resolve() uses default backend when none specified."""
+        client_a = make_client(mock_lg)
+        client_b = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
+
+        result = router.resolve()
+
+        assert result.backend == "a"
+
+    def test_resolve_uses_explicit_backend(self, mock_lg: Logger) -> None:
+        """Test resolve() uses explicit backend parameter."""
+        client_a = make_client(mock_lg)
+        client_b = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a")
+
+        result = router.resolve(backend="b")
+
+        assert result.backend == "b"
+
+    def test_resolve_routes_by_model(self, mock_lg: Logger) -> None:
+        """Test resolve() routes by model when in routing table."""
+        client_a = make_client(mock_lg)
+        client_b = make_client(mock_lg)
+        model_to_backend = {"gpt-4": "b"}
+        router = LLMRouter(
+            mock_lg, {"a": client_a, "b": client_b}, "a", model_to_backend
+        )
+
+        result = router.resolve(model="gpt-4")
+
+        assert result.backend == "b"
+        assert result.model == "gpt-4"
+
+    def test_resolve_explicit_backend_overrides_model_routing(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test explicit backend takes priority over model-based routing."""
+        client_a = make_client(mock_lg)
+        client_b = make_client(mock_lg)
+        model_to_backend = {"gpt-4": "b"}
+        router = LLMRouter(
+            mock_lg, {"a": client_a, "b": client_b}, "a", model_to_backend
+        )
+
+        result = router.resolve(model="gpt-4", backend="a")
+
+        assert result.backend == "a"
+        assert result.model == "gpt-4"
+
+    def test_resolve_returns_explicit_model(self, mock_lg: Logger) -> None:
+        """Test resolve() returns explicit model in result."""
+        client = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        result = router.resolve(model="claude-3-opus")
+
+        assert result.model == "claude-3-opus"
+
+    def test_resolve_returns_client_default_model(self, mock_lg: Logger) -> None:
+        """Test resolve() returns client's default_model when no model specified."""
+        backend = MockBackend()
+        client = LLMClient(lg=mock_lg, backend=backend, default_model="gpt-4-turbo")
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        result = router.resolve()
+
+        assert result.model == "gpt-4-turbo"
+
+    def test_resolve_returns_none_model_when_no_default(self, mock_lg: Logger) -> None:
+        """Test resolve() returns None model when client has no default."""
+        client = make_client(mock_lg)  # No default_model
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        result = router.resolve()
+
+        assert result.model is None
+
+    def test_resolve_raises_on_unknown_backend(self, mock_lg: Logger) -> None:
+        """Test resolve() raises ValueError for unknown backend."""
+        client = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        with pytest.raises(ValueError, match="Backend 'unknown' not found"):
+            router.resolve(backend="unknown")
+
+
+class TestLLMClientDefaultModel:
+    """Test LLMClient.default_model property."""
+
+    def test_default_model_returns_configured_value(self, mock_lg: Logger) -> None:
+        """Test default_model property returns the configured default."""
+        backend = MockBackend()
+        client = LLMClient(lg=mock_lg, backend=backend, default_model="gpt-4")
+
+        assert client.default_model == "gpt-4"
+
+    def test_default_model_returns_none_when_not_set(self, mock_lg: Logger) -> None:
+        """Test default_model property returns None when not configured."""
+        backend = MockBackend()
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        assert client.default_model is None
