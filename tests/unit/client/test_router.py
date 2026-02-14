@@ -380,26 +380,26 @@ class TestLLMRouterCanCall:
 
     def test_can_call_with_model_routing(self, mock_lg: Logger) -> None:
         """Test can_call(model=...) uses model routing."""
-        from appinfra.rate_limit import Backoff
+        from appinfra.rate_limit import RateLimiter
 
         backend_a = MockBackend()
         backend_b = MockBackend()
 
-        # Client B has backoff active
-        backoff = Backoff(mock_lg, base=10.0)
-        client_a = LLMClient(lg=mock_lg, backend=backend_a)
-        client_b = LLMClient(lg=mock_lg, backend=backend_b, backoff=backoff)
-
+        # Client B has rate limiting active
+        rate_limiter = RateLimiter(mock_lg, per_minute=60)
         import time
 
-        client_b._backoff_until = time.time() + 10  # Active backoff
+        rate_limiter.last_t = time.time()  # Simulate recent call
+
+        client_a = LLMClient(lg=mock_lg, backend=backend_a)
+        client_b = LLMClient(lg=mock_lg, backend=backend_b, rate_limiter=rate_limiter)
 
         model_routing = {"model-a": "a", "model-b": "b"}
         router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "a", model_routing)
 
-        # Model-a routes to client_a (no backoff)
+        # Model-a routes to client_a (no rate limit)
         assert router.can_call(model="model-a") is True
-        # Model-b routes to client_b (has backoff)
+        # Model-b routes to client_b (rate limited)
         assert router.can_call(model="model-b") is False
 
     def test_can_call_raises_on_unknown_backend(self, mock_lg: Logger) -> None:

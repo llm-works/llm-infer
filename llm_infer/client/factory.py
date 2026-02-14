@@ -399,59 +399,53 @@ class Factory:
 
     def _create_rate_limiter(
         self, rate_limit_config: dict[str, Any] | None
-    ) -> tuple[RateLimiter | None, Backoff | None]:
-        """Create rate limiter and backoff instances from config.
+    ) -> RateLimiter | None:
+        """Create rate limiter from config.
 
         Args:
-            rate_limit_config: Rate limit configuration with per_minute and backoff.
+            rate_limit_config: Rate limit configuration with per_minute.
 
         Returns:
-            Tuple of (rate_limiter, backoff), either or both may be None.
+            RateLimiter if configured, None otherwise.
         """
         if rate_limit_config is None:
-            return None, None
+            return None
 
-        from appinfra.rate_limit import Backoff, RateLimiter
-
-        rate_limiter: RateLimiter | None = None
-        backoff: Backoff | None = None
+        from appinfra.rate_limit import RateLimiter
 
         per_minute = rate_limit_config.get("per_minute")
-        if per_minute is not None:
-            rate_limiter = RateLimiter(self._lg, per_minute=per_minute)
+        if per_minute is None:
+            return None
 
-        backoff_config = rate_limit_config.get("backoff")
-        if backoff_config is not None:
-            backoff = Backoff(
-                self._lg,
-                base=backoff_config.get("base", 1.0),
-                max_delay=backoff_config.get("max", 60.0),
-            )
+        return RateLimiter(self._lg, per_minute=per_minute)
 
-        return rate_limiter, backoff
-
-    def _create_retry(self, retry_config: dict[str, Any] | None) -> Backoff | None:
-        """Create retry backoff from config.
+    def _create_retry(
+        self, retry_config: dict[str, Any] | None
+    ) -> tuple[Backoff | None, float]:
+        """Create retry backoff and timeout from config.
 
         Args:
-            retry_config: Retry configuration with enabled and backoff.
+            retry_config: Retry configuration with enabled, timeout, and backoff.
 
         Returns:
-            Backoff instance if retry is enabled, None otherwise.
+            Tuple of (backoff, timeout). Backoff is None if retry disabled.
         """
         if retry_config is None:
-            return None
+            return None, 0
         if not retry_config.get("enabled", True):
-            return None
+            return None, 0
 
         from appinfra.rate_limit import Backoff
 
         backoff_config = retry_config.get("backoff", {})
-        return Backoff(
+        backoff = Backoff(
             self._lg,
             base=backoff_config.get("base", 1.0),
             max_delay=backoff_config.get("max", 60.0),
         )
+        timeout = retry_config.get("timeout", 0)
+
+        return backoff, timeout
 
     def _merge_config(
         self,
@@ -494,8 +488,8 @@ class Factory:
         )
         merged_retry = self._merge_config(retry_config, config.get("retry"))
 
-        rate_limiter, backoff = self._create_rate_limiter(merged_rate_limit)
-        retry = self._create_retry(merged_retry)
+        rate_limiter = self._create_rate_limiter(merged_rate_limit)
+        backoff, timeout = self._create_retry(merged_retry)
 
         return LLMClient(
             lg=self._lg,
@@ -503,7 +497,7 @@ class Factory:
             default_model=config.get("model"),
             rate_limiter=rate_limiter,
             backoff=backoff,
-            retry=retry,
+            timeout=timeout,
         )
 
     def from_backend_config(self, config: dict[str, Any]) -> LLMClient:

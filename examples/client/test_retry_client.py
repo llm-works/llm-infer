@@ -24,9 +24,10 @@ router = factory.from_config(
     {
         "retry": {
             "enabled": True,
+            "timeout": 30,  # Give up after 30 seconds total
             "backoff": {
                 "base": 0.5,  # Start with 0.5s delay
-                "max": 10.0,  # Give up after reaching 10s delay
+                "max": 10.0,  # Max delay between retries
             },
         },
         "backends": {
@@ -41,7 +42,7 @@ router = factory.from_config(
 
 # Verify retry is configured
 client = router.get_client()
-print(f"Retry configured: {client._retry is not None}")
+print(f"Retry configured: {client._backoff is not None}")
 print("Sending request (server will return 429 twice, then success)...")
 print()
 
