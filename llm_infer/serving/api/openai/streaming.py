@@ -69,6 +69,8 @@ def create_chat_chunk(
     role: Role | None = None,
     finish_reason: FinishReason | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
+    adapter_fallback: bool | None = None,
+    adapter_requested: str | None = None,
 ) -> ChatCompletionChunk:
     """Create a chat completion chunk for streaming.
 
@@ -82,6 +84,8 @@ def create_chat_chunk(
         role: Message role (only set on first chunk).
         finish_reason: Finish reason (only set on final chunk).
         tool_calls: Tool calls (only set on final chunk when model calls tools).
+        adapter_fallback: True if adapter was requested but not found (final chunk only).
+        adapter_requested: The adapter that was requested (final chunk only).
     """
     tool_call_deltas = _convert_tool_calls_to_deltas(tool_calls)
     delta = ChatCompletionChunkDelta(
@@ -98,6 +102,8 @@ def create_chat_chunk(
                 finish_reason=finish_reason,
             )
         ],
+        adapter_fallback=adapter_fallback,
+        adapter_requested=adapter_requested,
     )
 
 
@@ -107,6 +113,8 @@ def create_completion_chunk(
     created: int,
     text: str,
     finish_reason: FinishReason | None = None,
+    adapter_fallback: bool | None = None,
+    adapter_requested: str | None = None,
 ) -> CompletionChunk:
     """Create a legacy completion chunk for streaming."""
     return CompletionChunk(
@@ -120,6 +128,8 @@ def create_completion_chunk(
                 finish_reason=finish_reason,
             )
         ],
+        adapter_fallback=adapter_fallback,
+        adapter_requested=adapter_requested,
     )
 
 
@@ -128,6 +138,8 @@ async def stream_chat_completion(
     model: str,
     token_iterator: AsyncIterator[str],
     get_finish_reason: Callable[[], FinishReason | None],
+    adapter_fallback: bool | None = None,
+    adapter_requested: str | None = None,
 ) -> AsyncIterator[str]:
     """Stream chat completion as SSE events."""
     created = int(time.time())
@@ -147,14 +159,16 @@ async def stream_chat_completion(
             ).model_dump_json()
         )
 
-    # Final chunk with finish_reason
+    # Final chunk with finish_reason and adapter fallback info
     yield format_sse_event(
         create_chat_chunk(
             request_id=request_id,
             model=model,
             created=created,
             finish_reason=get_finish_reason(),
-        ).model_dump_json()
+            adapter_fallback=adapter_fallback,
+            adapter_requested=adapter_requested,
+        ).model_dump_json(exclude_none=True)
     )
     yield format_sse_done()
 
@@ -164,6 +178,8 @@ def stream_chat_completion_sync(
     model: str,
     token_iterator: Iterator[str],
     get_finish_reason: Callable[[], FinishReason | None],
+    adapter_fallback: bool | None = None,
+    adapter_requested: str | None = None,
 ) -> Iterator[str]:
     """Stream chat completion as SSE events (sync version)."""
     created = int(time.time())
@@ -183,14 +199,16 @@ def stream_chat_completion_sync(
             ).model_dump_json()
         )
 
-    # Final chunk with finish_reason
+    # Final chunk with finish_reason and adapter fallback info
     yield format_sse_event(
         create_chat_chunk(
             request_id=request_id,
             model=model,
             created=created,
             finish_reason=get_finish_reason(),
-        ).model_dump_json()
+            adapter_fallback=adapter_fallback,
+            adapter_requested=adapter_requested,
+        ).model_dump_json(exclude_none=True)
     )
     yield format_sse_done()
 
@@ -200,6 +218,8 @@ def stream_completion_sync(
     model: str,
     token_iterator: Iterator[str],
     get_finish_reason: Callable[[], FinishReason | None],
+    adapter_fallback: bool | None = None,
+    adapter_requested: str | None = None,
 ) -> Iterator[str]:
     """
     Stream legacy completion as SSE events (sync version).
@@ -209,6 +229,8 @@ def stream_completion_sync(
         model: Model name for response
         token_iterator: Iterator yielding tokens
         get_finish_reason: Callback to get finish reason when done
+        adapter_fallback: True if adapter was requested but not found
+        adapter_requested: The adapter that was requested (if fallback occurred)
 
     Yields:
         SSE-formatted strings
@@ -225,7 +247,7 @@ def stream_completion_sync(
         )
         yield format_sse_event(chunk.model_dump_json())
 
-    # Final chunk with finish_reason
+    # Final chunk with finish_reason and adapter fallback info
     finish_reason = get_finish_reason()
     final_chunk = create_completion_chunk(
         request_id=request_id,
@@ -233,6 +255,8 @@ def stream_completion_sync(
         created=created,
         text="",
         finish_reason=finish_reason,
+        adapter_fallback=adapter_fallback,
+        adapter_requested=adapter_requested,
     )
-    yield format_sse_event(final_chunk.model_dump_json())
+    yield format_sse_event(final_chunk.model_dump_json(exclude_none=True))
     yield format_sse_done()

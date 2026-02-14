@@ -7,7 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from llm_infer.response.parsers.think import ThinkTagNormalizer, extract_thinking
 from llm_infer.schemas.openai import (
@@ -166,6 +166,8 @@ def _build_chat_response(
             )
         ],
         usage=_build_completion_usage(response),
+        adapter_fallback=getattr(response, "adapter_fallback", False),
+        adapter_requested=getattr(response, "adapter_requested", None),
     )
 
 
@@ -185,13 +187,23 @@ def _determine_chat_finish_reason(
     )
 
 
+def _build_adapter_fallback_headers(response: Any) -> dict[str, str]:
+    """Build adapter fallback headers if fallback occurred."""
+    if getattr(response, "adapter_fallback", False):
+        return {
+            "X-Adapter-Fallback": "true",
+            "X-Adapter-Requested": response.adapter_requested or "",
+        }
+    return {}
+
+
 async def _handle_chat_non_streaming(
     request_id: str,
     body: ChatCompletionRequest,
     model_name: str,
     ipc: Any,
     model_config: ModelConfig | None = None,
-) -> ChatCompletionResponse:
+) -> ChatCompletionResponse | JSONResponse:
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
     response = await ipc.submit(request_id, internal_request)
@@ -204,7 +216,7 @@ async def _handle_chat_non_streaming(
     has_tool_calls = bool(tool_calls)
     finish_reason = _determine_chat_finish_reason(response, body, has_tool_calls)
 
-    return _build_chat_response(
+    chat_response = _build_chat_response(
         request_id,
         model_name,
         content if content else None,
@@ -214,18 +226,23 @@ async def _handle_chat_non_streaming(
         tool_calls,
     )
 
+    # Add adapter fallback headers if needed
+    headers = _build_adapter_fallback_headers(response)
+    if headers:
+        return JSONResponse(
+            content=chat_response.model_dump(mode="json"),
+            headers=headers,
+        )
+    return chat_response
 
-async def _handle_completion_non_streaming(
+
+def _build_completion_response_obj(
     request_id: str,
     body: CompletionRequest,
     model_name: str,
-    ipc: Any,
+    response: Any,
 ) -> CompletionResponse:
-    """Handle non-streaming legacy completion request."""
-    internal_request = completion_request_to_internal(body, request_id)
-    response = await ipc.submit(request_id, internal_request)
-    raise_for_error_status(response)
-
+    """Build CompletionResponse from internal response."""
     max_tokens_reached = (
         response.completion_tokens is not None
         and response.completion_tokens >= body.max_tokens
@@ -233,12 +250,10 @@ async def _handle_completion_non_streaming(
     finish_reason = determine_finish_reason(
         is_eos=not max_tokens_reached, max_tokens_reached=max_tokens_reached
     )
-
     result_text = response.result or ""
     if body.echo:
         prompt = body.prompt if isinstance(body.prompt, str) else body.prompt[0]
         result_text = prompt + result_text
-
     return CompletionResponse(
         id=request_id,
         created=int(time.time()),
@@ -247,7 +262,33 @@ async def _handle_completion_non_streaming(
             CompletionChoice(index=0, text=result_text, finish_reason=finish_reason)
         ],
         usage=_build_completion_usage(response),
+        adapter_fallback=getattr(response, "adapter_fallback", False),
+        adapter_requested=getattr(response, "adapter_requested", None),
     )
+
+
+async def _handle_completion_non_streaming(
+    request_id: str,
+    body: CompletionRequest,
+    model_name: str,
+    ipc: Any,
+) -> CompletionResponse | JSONResponse:
+    """Handle non-streaming legacy completion request."""
+    internal_request = completion_request_to_internal(body, request_id)
+    response = await ipc.submit(request_id, internal_request)
+    raise_for_error_status(response)
+
+    completion_response = _build_completion_response_obj(
+        request_id, body, model_name, response
+    )
+
+    headers = _build_adapter_fallback_headers(response)
+    if headers:
+        return JSONResponse(
+            content=completion_response.model_dump(mode="json"),
+            headers=headers,
+        )
+    return completion_response
 
 
 def _create_model_info(model_name: str) -> ModelInfo:
@@ -297,7 +338,7 @@ def _register_completion_routes(
     @router.post("/chat/completions", response_model=None)
     async def chat_completions(
         body: ChatCompletionRequest, request: Request
-    ) -> ChatCompletionResponse | StreamingResponse:
+    ) -> ChatCompletionResponse | StreamingResponse | JSONResponse:
         ipc = request.app.state.ipc_channel
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
@@ -311,7 +352,7 @@ def _register_completion_routes(
     @router.post("/completions", response_model=None)
     async def completions(
         body: CompletionRequest, request: Request
-    ) -> CompletionResponse | StreamingResponse:
+    ) -> CompletionResponse | StreamingResponse | JSONResponse:
         ipc = request.app.state.ipc_channel
         request_id = f"cmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:

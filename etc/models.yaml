@@ -90,6 +90,22 @@ models:
       enforce_eager: true  # Must repeat - local vllm block replaces merged one
       gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
+  qwen2.5-coder-3b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 8192
+    vllm:
+      enforce_eager: true  # Must repeat - local vllm block replaces merged one
+      gpu_memory_utilization: 0.85  # 2GB model + LoRA + KV cache fits 8GB comfortably
+
+  qwen2.5-coder-7b-instruct-bnb-4bit:
+    <<: *qwen_think
+    max_model_len: 4096  # Reduced for 8GB GPU
+    vllm:
+      enforce_eager: true
+      gpu_memory_utilization: 0.85  # BNB 4-bit is compact, leave room for LoRA + KV
+      # Note: BNB quantized model - supports QLoRA training and LoRA inference
+
   # ---------------------------------------------------------------------------
   # Qwen3 instruct models
   # ---------------------------------------------------------------------------

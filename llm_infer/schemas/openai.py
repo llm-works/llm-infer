@@ -245,6 +245,9 @@ class ChatCompletionResponse(BaseModel):
     choices: list[ChatCompletionChoice]
     usage: ChatCompletionUsage
     system_fingerprint: str | None = None
+    # llm-infer extensions
+    adapter_fallback: bool = False  # True if requested adapter wasn't available
+    adapter_requested: str | None = None  # The adapter that was requested
 
 
 # =============================================================================
@@ -293,6 +296,9 @@ class ChatCompletionChunk(BaseModel):
     model: str
     choices: list[ChatCompletionChunkChoice]
     system_fingerprint: str | None = None
+    # llm-infer extensions (only present in final chunk if fallback occurred)
+    adapter_fallback: bool | None = None
+    adapter_requested: str | None = None
 
 
 # =============================================================================
@@ -360,6 +366,9 @@ class CompletionResponse(BaseModel):
     model: str
     choices: list[CompletionChoice]
     usage: ChatCompletionUsage
+    # llm-infer extensions
+    adapter_fallback: bool = False  # True if requested adapter wasn't available
+    adapter_requested: str | None = None  # The adapter that was requested
 
 
 # =============================================================================
@@ -384,6 +393,9 @@ class CompletionChunk(BaseModel):
     created: int
     model: str
     choices: list[CompletionChunkChoice]
+    # llm-infer extensions (only present in final chunk if fallback occurred)
+    adapter_fallback: bool | None = None
+    adapter_requested: str | None = None
 
 
 # =============================================================================

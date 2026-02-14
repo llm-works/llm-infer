@@ -44,6 +44,8 @@ class ChatResponse:
     # llm-infer extensions
     thinking: str | None = None
     tool_calls: list[ToolCall] | None = field(default=None)
+    adapter_fallback: bool = False  # True if requested adapter wasn't available
+    adapter_requested: str | None = None  # The adapter that was requested
 
     def has_tool_calls(self) -> bool:
         """Check if the response contains tool calls."""
