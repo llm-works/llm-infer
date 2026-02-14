@@ -58,6 +58,9 @@ class Response:
     completion_tokens: int | None = None
     # Tool calling response (list of tool call dicts if model requested tool calls)
     tool_calls: list[dict[str, Any]] | None = None
+    # Adapter fallback info (when requested adapter not found, fell back to base model)
+    adapter_fallback: bool = False
+    adapter_requested: str | None = None
 
 
 @dataclass

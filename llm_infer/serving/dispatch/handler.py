@@ -302,18 +302,23 @@ class RequestHandler(ABC):
                 self._lg.debug("using LoRA adapter", extra={"adapter_id": adapter_id})
         self._loaded_adapters.add(adapter_id)
 
-    def _resolve_lora_request(self, adapter_id: str | None) -> Any | None:
+    def _resolve_lora_request(
+        self, adapter_id: str | None
+    ) -> tuple[Any | None, str | None]:
         """Resolve adapter_id to a vLLM LoRARequest.
 
         Returns:
-            LoRARequest if adapter_id is valid, None if adapter_id is None.
+            Tuple of (lora_request, fallback_adapter_id):
+            - (LoRARequest, None) if adapter resolved successfully
+            - (None, None) if no adapter requested
+            - (None, adapter_id) if adapter not found (fallback to base model)
 
         Raises:
-            AdapterError: If adapter_id is invalid, not enabled, not found,
+            AdapterError: If adapter_id is empty string, adapter is disabled,
                 or LoRA module unavailable.
         """
         if adapter_id is None:
-            return None
+            return None, None
         if not adapter_id:
             raise AdapterError("adapter_id cannot be empty")
 
@@ -321,21 +326,29 @@ class RequestHandler(ABC):
         if not adapter_path.exists():
             if self._lg:
                 self._lg.warning(
-                    "adapter not found",
+                    "adapter not found, falling back to base model",
                     extra={"adapter_id": adapter_id, "path": str(adapter_path)},
                 )
-            raise AdapterError(f"adapter '{adapter_id}' not found")
+            return None, adapter_id  # Fallback to base model
         self._check_adapter_enabled(adapter_id, adapter_path)
         self._log_and_track_adapter(adapter_id, adapter_path)
 
-        return self._import_lora_request_class(adapter_id)(
+        lora_request = self._import_lora_request_class(adapter_id)(
             lora_name=adapter_id,
             lora_int_id=_stable_adapter_id(adapter_id),
             lora_path=str(adapter_path),
         )
+        return lora_request, None
 
-    def _build_engine_params(self, request: Request) -> dict[str, Any]:
-        """Build parameters for engine generate/stream methods from request."""
+    def _build_engine_params(
+        self, request: Request
+    ) -> tuple[dict[str, Any], str | None]:
+        """Build parameters for engine generate/stream methods from request.
+
+        Returns:
+            Tuple of (params_dict, fallback_adapter_id). fallback_adapter_id is
+            set if adapter was requested but not found (fell back to base model).
+        """
         params: dict[str, Any] = {
             "prompt": request.prompt,
             "max_tokens": request.max_tokens,
@@ -348,7 +361,10 @@ class RequestHandler(ABC):
             "context": request.context,
             "messages": request.messages,
         }
-        if lora_request := self._resolve_lora_request(request.adapter_id):
+        lora_request, fallback_adapter_id = self._resolve_lora_request(
+            request.adapter_id
+        )
+        if lora_request is not None:
             params["lora_request"] = lora_request
         # Tool calling support
         if request.tools:
@@ -358,7 +374,7 @@ class RequestHandler(ABC):
         # Structured output support
         if request.response_format is not None:
             params["response_format"] = request.response_format
-        return params
+        return params, fallback_adapter_id
 
     def _parse_generate_result(
         self, result: str | dict[str, Any]
@@ -378,6 +394,7 @@ class RequestHandler(ABC):
         result_text: str,
         tool_calls: list[dict[str, Any]] | None,
         usage: dict[str, Any] | None = None,
+        fallback_adapter_id: str | None = None,
     ) -> Response:
         """Build successful response with token counts.
 
@@ -402,16 +419,21 @@ class RequestHandler(ABC):
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             tool_calls=tool_calls,
+            adapter_fallback=fallback_adapter_id is not None,
+            adapter_requested=fallback_adapter_id,
         )
 
     def _process_blocking_request(self, request: Request) -> Response:
         """Process request with blocking generation (non-streaming)."""
         try:
-            result = self.engine.generate(**self._build_engine_params(request))
+            params, fallback_adapter_id = self._build_engine_params(request)
+            result = self.engine.generate(**params)
             if request.context:
                 request.context.mark(Event.DECODED)
             result_text, tool_calls, usage = self._parse_generate_result(result)
-            return self._build_success_response(request, result_text, tool_calls, usage)
+            return self._build_success_response(
+                request, result_text, tool_calls, usage, fallback_adapter_id
+            )
         except AdapterError as e:
             if self._lg:
                 self._lg.warning(
@@ -442,7 +464,12 @@ class RequestHandler(ABC):
         )
         self._response_q.put(final_chunk)
 
-    def _finalize_stream(self, request: Request, stream: Any) -> Response:
+    def _finalize_stream(
+        self,
+        request: Request,
+        stream: Any,
+        fallback_adapter_id: str | None = None,
+    ) -> Response:
         """Finalize streaming: send final chunk, mark context, return response."""
         ctx = request.context
         if ctx:
@@ -459,16 +486,17 @@ class RequestHandler(ABC):
             status=RequestStatus.COMPLETED,
             prompt_tokens=stream.prompt_tokens,
             completion_tokens=stream.completion_tokens,
+            adapter_fallback=fallback_adapter_id is not None,
+            adapter_requested=fallback_adapter_id,
         )
 
     def _process_streaming_request(self, request: Request) -> Response:
         """Process request with streaming generation."""
         try:
-            stream = self.engine.generate_stream_sync(
-                **self._build_engine_params(request)
-            )
+            params, fallback_adapter_id = self._build_engine_params(request)
+            stream = self.engine.generate_stream_sync(**params)
             self._stream_tokens_to_queue(request, stream)
-            return self._finalize_stream(request, stream)
+            return self._finalize_stream(request, stream, fallback_adapter_id)
         except AdapterError as e:
             # Adapter validation errors (invalid ID, not enabled, not found)
             if self._lg:

@@ -245,6 +245,9 @@ class ChatCompletionResponse(BaseModel):
     choices: list[ChatCompletionChoice]
     usage: ChatCompletionUsage
     system_fingerprint: str | None = None
+    # llm-infer extensions
+    adapter_fallback: bool = False  # True if requested adapter wasn't available
+    adapter_requested: str | None = None  # The adapter that was requested
 
 
 # =============================================================================
@@ -360,6 +363,9 @@ class CompletionResponse(BaseModel):
     model: str
     choices: list[CompletionChoice]
     usage: ChatCompletionUsage
+    # llm-infer extensions
+    adapter_fallback: bool = False  # True if requested adapter wasn't available
+    adapter_requested: str | None = None  # The adapter that was requested
 
 
 # =============================================================================
