@@ -294,9 +294,8 @@ class LLMClient:
     ) -> ChatResponse:
         """Send a chat completion request and return full response (sync).
 
-        Automatically manages backoff state:
-        - Resets backoff on success
-        - Sets exponential backoff on BackendUnavailableError
+        When backoff is configured, automatically retries on transient errors
+        (connection failures and HTTP 429/502/503/529) with exponential backoff.
 
         Args:
             messages: List of chat messages.
@@ -442,9 +441,8 @@ class LLMClient:
     ) -> ChatResponse:
         """Send a chat completion request and return full response (async).
 
-        Automatically manages backoff state:
-        - Resets backoff on success
-        - Sets exponential backoff on BackendUnavailableError
+        When backoff is configured, automatically retries on transient errors
+        (connection failures and HTTP 429/502/503/529) with exponential backoff.
 
         Args:
             messages: List of chat messages.

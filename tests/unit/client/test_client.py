@@ -691,7 +691,7 @@ class TestLLMClientRetry:
 
         assert exc_info.value.status_code == 429
         # Should have retried at least once before timeout
-        assert backend.chat.call_count >= 1
+        assert backend.chat.call_count >= 2
 
     def test_no_retry_when_backoff_not_configured(self, mock_lg: Logger) -> None:
         """Test client does not retry when backoff is not configured."""
