@@ -450,7 +450,12 @@ class RequestHandler(ABC):
             chunk = StreamChunk(id=request.id, token=token)
             self._response_q.put(chunk)
 
-    def _send_stream_final_chunk(self, request: Request, stream: Any) -> None:
+    def _send_stream_final_chunk(
+        self,
+        request: Request,
+        stream: Any,
+        fallback_adapter_id: str | None = None,
+    ) -> None:
         """Send final chunk with metadata after streaming completes."""
         assert self._response_q is not None
         final_chunk = StreamChunk(
@@ -461,6 +466,8 @@ class RequestHandler(ABC):
             prompt_tokens=stream.prompt_tokens,
             completion_tokens=stream.completion_tokens,
             tool_calls=getattr(stream, "tool_calls", None),
+            adapter_fallback=fallback_adapter_id is not None,
+            adapter_requested=fallback_adapter_id,
         )
         self._response_q.put(final_chunk)
 
@@ -474,7 +481,7 @@ class RequestHandler(ABC):
         ctx = request.context
         if ctx:
             ctx.mark(Event.DECODED)
-        self._send_stream_final_chunk(request, stream)
+        self._send_stream_final_chunk(request, stream, fallback_adapter_id)
         if ctx:
             ctx.mark(
                 Event.COMPLETE,

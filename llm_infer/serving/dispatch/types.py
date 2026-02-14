@@ -84,6 +84,9 @@ class StreamChunk:
     tool_calls: list[dict[str, Any]] | None = (
         None  # Tool calls (streamed incrementally)
     )
+    # Adapter fallback info (when requested adapter not found, fell back to base model)
+    adapter_fallback: bool = False
+    adapter_requested: str | None = None
 
 
 @dataclass
