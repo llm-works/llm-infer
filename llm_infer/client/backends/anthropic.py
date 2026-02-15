@@ -599,11 +599,14 @@ class AnthropicBackend(Backend):
         elif block.type == "tool_use":
             # Check if this is our structured output tool
             if structured_output_tool and block.name == structured_output_tool:
-                # Extract tool input as JSON content
-                if isinstance(block.input, str):
-                    content_parts.append(block.input)
-                else:
-                    content_parts.append(json.dumps(block.input))
+                # Extract tool input as JSON content.
+                # Anthropic SDK typically returns input as dict, but we handle str
+                # defensively for consistency with _create_tool_call.
+                content_parts.append(
+                    block.input
+                    if isinstance(block.input, str)
+                    else json.dumps(block.input)
+                )
             else:
                 tool_calls.append(self._create_tool_call(block))
 
@@ -674,10 +677,11 @@ class AnthropicBackend(Backend):
                 and block.name == state.structured_output_tool
             ):
                 # Extract tool input as JSON content
-                if isinstance(block.input, str):
-                    state.content_parts.append(block.input)
-                else:
-                    state.content_parts.append(json.dumps(block.input))
+                state.content_parts.append(
+                    block.input
+                    if isinstance(block.input, str)
+                    else json.dumps(block.input)
+                )
             else:
                 state.tool_calls.append(self._create_tool_call(block))
 

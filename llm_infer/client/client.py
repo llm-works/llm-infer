@@ -198,7 +198,13 @@ class LLMClient(ChatClient):
         return delay
 
     def _call_with_retry(self, fn: Callable[[], T]) -> T:
-        """Execute fn with retry on transient errors and gatekeeper cooldown."""
+        """Execute fn with retry on transient errors and gatekeeper cooldown.
+
+        Raises:
+            BackendUnavailableError: If connection fails and retries exhausted.
+            BackendRequestError: If HTTP error occurs and retries exhausted,
+                or if error is non-transient (e.g., 400 Bad Request).
+        """
         if self._backoff is None:
             return fn()
         self._apply_backoff_cooldown()
@@ -213,7 +219,13 @@ class LLMClient(ChatClient):
                 time.sleep(delay)
 
     async def _call_with_retry_async(self, fn: Callable[[], Awaitable[T]]) -> T:
-        """Execute async fn with retry on transient errors and gatekeeper cooldown."""
+        """Execute async fn with retry on transient errors and gatekeeper cooldown.
+
+        Raises:
+            BackendUnavailableError: If connection fails and retries exhausted.
+            BackendRequestError: If HTTP error occurs and retries exhausted,
+                or if error is non-transient (e.g., 400 Bad Request).
+        """
         if self._backoff is None:
             return await fn()
         await self._apply_backoff_cooldown_async()
