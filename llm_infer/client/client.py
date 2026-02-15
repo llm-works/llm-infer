@@ -189,7 +189,7 @@ class LLMClient(ChatClient):
         if self._timeout > 0 and elapsed >= self._timeout:
             self._backoff.next_delay()
             raise
-        delay = self._backoff.next_delay()
+        delay: float = self._backoff.next_delay()
         status = e.status_code if isinstance(e, BackendRequestError) else None
         self._lg.warning(
             "transient error, retrying",
