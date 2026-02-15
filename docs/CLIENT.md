@@ -46,16 +46,11 @@ lg = Logger("my-app")
 factory = Factory(lg)
 
 with factory.openai(base_url="http://localhost:8000/v1") as client:
-    # Simple: returns content string
     response = client.chat(
         messages=[{"role": "user", "content": "Hello!"}],
         system="You are a helpful assistant.",
         temperature=0.7,
     )
-    print(response)
-
-    # Full response with metadata
-    response = client.chat_full(messages=[{"role": "user", "content": "Hello!"}])
     print(response.content)
     print(f"Tokens used: {response.usage.total_tokens}")
 ```
@@ -73,7 +68,7 @@ async with factory.openai(base_url="http://localhost:8000/v1") as client:
     response = await client.chat_async(
         messages=[{"role": "user", "content": "Hello!"}],
     )
-    print(response)
+    print(response.content)
 ```
 
 ### Streaming
@@ -118,7 +113,7 @@ async with factory.anthropic(model="claude-sonnet-4-20250514") as client:
         messages=[{"role": "user", "content": "Hello!"}],
         system="You are a helpful assistant.",
     )
-    print(response)
+    print(response.content)
 ```
 
 ## llm-infer Extensions
@@ -129,10 +124,11 @@ The client supports llm-infer specific extensions for enhanced functionality.
 
 ```python
 with factory.openai() as client:
-    response = client.chat_full(
+    response = client.chat(
         messages=[{"role": "user", "content": "Translate to French: Hello"}],
-        adapter_id="translation-lora",  # Select LoRA adapter
+        adapter="translation-lora",  # Select LoRA adapter
     )
+    print(response.content)
 ```
 
 ### Thinking Mode
@@ -141,7 +137,7 @@ Enable thinking mode to get separated reasoning content:
 
 ```python
 with factory.openai() as client:
-    response = client.chat_full(
+    response = client.chat(
         messages=[{"role": "user", "content": "What is 15 * 23?"}],
         think=True,  # Enable thinking mode
     )
@@ -170,7 +166,7 @@ tools = [
 ]
 
 with factory.openai() as client:
-    response = client.chat_full(
+    response = client.chat(
         messages=[{"role": "user", "content": "What's the weather in NYC?"}],
         tools=tools,
         tool_choice="auto",
@@ -226,11 +222,9 @@ The client facade that delegates to backend implementations. Create instances us
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `chat(messages, ...)` | `str` | Sync chat, returns content |
-| `chat_full(messages, ...)` | `ChatResponse` | Sync chat, returns full response |
+| `chat(messages, ...)` | `ChatResponse` | Sync chat completion |
 | `chat_stream(messages, ...)` | `Iterator[str]` | Sync streaming |
-| `chat_async(messages, ...)` | `str` | Async chat, returns content |
-| `chat_full_async(messages, ...)` | `ChatResponse` | Async chat, returns full response |
+| `chat_async(messages, ...)` | `ChatResponse` | Async chat completion |
 | `chat_stream_async(messages, ...)` | `AsyncIterator[str]` | Async streaming |
 
 #### Common Parameters
@@ -242,7 +236,7 @@ The client facade that delegates to backend implementations. Create instances us
 | `temperature` | `float` | `1.0` | Sampling temperature (0.0 to 2.0) |
 | `max_tokens` | `int \| None` | `None` | Maximum tokens to generate |
 | `system` | `str \| None` | `None` | System prompt |
-| `adapter_id` | `str \| None` | `None` | LoRA adapter name (OpenAI-compatible only) |
+| `adapter` | `str \| None` | `None` | LoRA adapter name (OpenAI-compatible only) |
 | `think` | `bool \| None` | `None` | Enable thinking mode |
 | `tools` | `list[dict] \| None` | `None` | Tool definitions |
 | `tool_choice` | `str \| dict \| None` | `None` | Tool use control |
@@ -322,7 +316,7 @@ async def chat_completions(request: dict):
             media_type="text/event-stream",
         )
     else:
-        response = client.chat_full(messages)
+        response = client.chat(messages)
         return {"choices": [{"message": {"content": response.content}}]}
 
 @app.on_event("shutdown")
@@ -372,8 +366,8 @@ class MockBackend(Backend):
 
 # Use in tests
 backend = MockBackend(["Hello!", "Goodbye!"])
-client = LLMClient(backend=backend)
-assert client.chat([{"role": "user", "content": "Hi"}]) == "Hello!"
+client = LLMClient(lg=lg, backend=backend)
+assert client.chat([{"role": "user", "content": "Hi"}]).content == "Hello!"
 ```
 
 ### With External APIs
@@ -419,6 +413,7 @@ factory = Factory(lg)
 with factory.openai() as client:
     try:
         response = client.chat(messages=[{"role": "user", "content": "Hello"}])
+        print(response.content)
     except BackendUnavailableError:
         print("Server not reachable")
     except BackendTimeoutError:
@@ -443,15 +438,18 @@ factory = Factory(lg)
 # Sync - closes sync HTTP client
 with factory.openai() as client:
     response = client.chat(messages)
+    print(response.content)
 
 # Async - closes both sync and async HTTP clients
 async with factory.openai() as client:
     response = await client.chat_async(messages)
+    print(response.content)
 
 # Manual cleanup if not using context managers
 client = factory.openai()
 try:
     response = client.chat(messages)
+    print(response.content)
 finally:
     client.close()  # or await client.aclose() for async
 ```
@@ -480,7 +478,7 @@ Client                    Backend                   API
 ```text
 Client                    Backend                   API
   │                         │                        │
-  │─── chat_full() ────────>│                        │
+  │─── chat() ─────────────>│                        │
   │                         │─── POST /chat/completions ──>│
   │                         │                        │
   │                         │<─── JSON response ─────│

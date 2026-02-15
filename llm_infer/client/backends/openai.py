@@ -8,7 +8,7 @@ This backend works with any OpenAI-compatible API, including:
 - Any other OpenAI-compatible server
 
 llm-infer Extensions:
-    - adapter_id: LoRA adapter selection for vLLM
+    - adapter: LoRA adapter selection for vLLM
     - think: Thinking mode with <think> block extraction
     - tools/tool_choice: Function calling support
 """
@@ -73,26 +73,26 @@ class OpenAICompatibleBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request (sync)."""
         url, payload = self._prepare_request(
             messages,
             model,
+            system,
             temperature,
             max_tokens,
-            system,
-            adapter_id,
-            think,
             tools,
             tool_choice,
+            think,
+            adapter,
             stream=False,
             **kwargs,
         )
@@ -105,26 +105,26 @@ class OpenAICompatibleBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Send a streaming chat completion request (sync)."""
         url, payload = self._prepare_request(
             messages,
             model,
+            system,
             temperature,
             max_tokens,
-            system,
-            adapter_id,
-            think,
             tools,
             tool_choice,
+            think,
+            adapter,
             stream=True,
             **kwargs,
         )
@@ -143,26 +143,26 @@ class OpenAICompatibleBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request (async)."""
         url, payload = self._prepare_request(
             messages,
             model,
+            system,
             temperature,
             max_tokens,
-            system,
-            adapter_id,
-            think,
             tools,
             tool_choice,
+            think,
+            adapter,
             stream=False,
             **kwargs,
         )
@@ -175,26 +175,26 @@ class OpenAICompatibleBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async)."""
         url, payload = self._prepare_request(
             messages,
             model,
+            system,
             temperature,
             max_tokens,
-            system,
-            adapter_id,
-            think,
             tools,
             tool_choice,
+            think,
+            adapter,
             stream=True,
             **kwargs,
         )
@@ -392,13 +392,13 @@ class OpenAICompatibleBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None,
+        system: str | None,
         temperature: float,
         max_tokens: int | None,
-        system: str | None,
-        adapter_id: str | None,
-        think: bool | None,
         tools: list[dict[str, Any]] | None,
         tool_choice: str | dict[str, Any] | None,
+        think: bool | None,
+        adapter: str | None,
         stream: bool,
         **kwargs: Any,
     ) -> tuple[str, dict[str, Any]]:
@@ -411,10 +411,10 @@ class OpenAICompatibleBackend(Backend):
             temperature,
             max_tokens,
             stream,
-            adapter_id,
-            think,
             tools,
             tool_choice,
+            think,
+            adapter,
             **kwargs,
         )
         return url, payload
@@ -442,7 +442,7 @@ class OpenAICompatibleBackend(Backend):
             "temperature",
             "stream",
             "max_tokens",
-            "adapter_id",
+            "adapter",
             "think",
             "tools",
             "tool_choice",
@@ -456,10 +456,10 @@ class OpenAICompatibleBackend(Backend):
         temperature: float,
         max_tokens: int | None,
         stream: bool,
-        adapter_id: str | None,
-        think: bool | None,
         tools: list[dict[str, Any]] | None,
         tool_choice: str | dict[str, Any] | None,
+        think: bool | None,
+        adapter: str | None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Build the request payload."""
@@ -470,7 +470,7 @@ class OpenAICompatibleBackend(Backend):
             "stream": stream,
         }
         self._add_optional_params(
-            payload, max_tokens, adapter_id, think, tools, tool_choice
+            payload, max_tokens, tools, tool_choice, think, adapter
         )
         # Add extra kwargs, filtering out reserved keys to prevent override
         for key, value in kwargs.items():
@@ -482,22 +482,22 @@ class OpenAICompatibleBackend(Backend):
         self,
         payload: dict[str, Any],
         max_tokens: int | None,
-        adapter_id: str | None,
-        think: bool | None,
         tools: list[dict[str, Any]] | None,
         tool_choice: str | dict[str, Any] | None,
+        think: bool | None,
+        adapter: str | None,
     ) -> None:
         """Add optional parameters to payload."""
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        if adapter_id is not None:
-            payload["adapter_id"] = adapter_id
-        if think is not None:
-            payload["think"] = think
         if tools is not None:
             payload["tools"] = tools
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
+        if think is not None:
+            payload["think"] = think
+        if adapter is not None:
+            payload["adapter_id"] = adapter
 
     # =========================================================================
     # Response parsing

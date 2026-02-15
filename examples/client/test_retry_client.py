@@ -47,8 +47,8 @@ print("Sending request (server will return 429 twice, then success)...")
 print()
 
 try:
-    result = router.chat([{"role": "user", "content": "Hello!"}])
-    print(f"Response: {result}")
+    response = router.chat([{"role": "user", "content": "Hello!"}])
+    print(f"Response: {response.content}")
 except Exception as e:
     print(f"Error: {e}")
 finally:

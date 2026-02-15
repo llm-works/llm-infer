@@ -292,18 +292,8 @@ class TestFactory:
 class TestLLMClientSyncAPI:
     """Test LLMClient sync API."""
 
-    def test_chat_returns_content(self, mock_lg: Logger) -> None:
-        """Test chat() returns content string."""
-        response = ChatResponse(content="Hello!")
-        backend = MockBackend(responses=[response])
-        client = LLMClient(lg=mock_lg, backend=backend)
-
-        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
-
-        assert result == "Hello!"
-
-    def test_chat_full_returns_response(self, mock_lg: Logger) -> None:
-        """Test chat_full() returns ChatResponse."""
+    def test_chat_returns_response(self, mock_lg: Logger) -> None:
+        """Test chat() returns ChatResponse."""
         usage = ChatCompletionUsage(
             prompt_tokens=5, completion_tokens=2, total_tokens=7
         )
@@ -313,7 +303,7 @@ class TestLLMClientSyncAPI:
         backend = MockBackend(responses=[response])
         client = LLMClient(lg=mock_lg, backend=backend)
 
-        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         assert result.content == "Hello!"
         assert result.usage is not None
@@ -345,26 +335,13 @@ class TestLLMClientAsyncAPI:
     """Test LLMClient async API."""
 
     @pytest.mark.asyncio
-    async def test_chat_async_returns_content(self, mock_lg: Logger) -> None:
-        """Test chat_async() returns content string."""
-        response = ChatResponse(content="Hello!")
-        backend = MockBackend(responses=[response])
-        client = LLMClient(lg=mock_lg, backend=backend)
-
-        result = await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
-
-        assert result == "Hello!"
-
-    @pytest.mark.asyncio
-    async def test_chat_full_async_returns_response(self, mock_lg: Logger) -> None:
-        """Test chat_full_async() returns ChatResponse."""
+    async def test_chat_async_returns_response(self, mock_lg: Logger) -> None:
+        """Test chat_async() returns ChatResponse."""
         response = ChatResponse(content="Hello!", finish_reason=FinishReason.STOP)
         backend = MockBackend(responses=[response])
         client = LLMClient(lg=mock_lg, backend=backend)
 
-        result = await client.chat_full_async(
-            messages=[{"role": "user", "content": "Hi"}]
-        )
+        result = await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
 
         assert result.content == "Hello!"
         assert result.finish_reason == FinishReason.STOP
@@ -583,7 +560,7 @@ class TestLLMClientRetry:
         backend.last_response = response
 
         client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
-        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         assert result.content == "Success"
         assert backend.chat.call_count == 2
@@ -606,7 +583,7 @@ class TestLLMClientRetry:
         backend.last_response = response
 
         client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
-        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         assert result.content == "Success"
         assert backend.chat.call_count == 2
@@ -627,7 +604,7 @@ class TestLLMClientRetry:
         backend.last_response = response
 
         client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
-        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         assert result.content == "Success"
         assert backend.chat.call_count == 2
@@ -648,7 +625,7 @@ class TestLLMClientRetry:
         backend.last_response = response
 
         client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
-        result = client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         assert result.content == "Success"
         assert backend.chat.call_count == 2
@@ -666,7 +643,7 @@ class TestLLMClientRetry:
         client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
 
         with pytest.raises(BackendRequestError) as exc_info:
-            client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+            client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         assert exc_info.value.status_code == 400
         # Should only be called once - no retry
@@ -687,7 +664,7 @@ class TestLLMClientRetry:
         client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff, timeout=0.05)
 
         with pytest.raises(BackendRequestError) as exc_info:
-            client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+            client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         assert exc_info.value.status_code == 429
         # Should have retried at least once before timeout
@@ -704,7 +681,7 @@ class TestLLMClientRetry:
         client = LLMClient(lg=mock_lg, backend=backend)
 
         with pytest.raises(BackendRequestError):
-            client.chat_full(messages=[{"role": "user", "content": "Hi"}])
+            client.chat(messages=[{"role": "user", "content": "Hi"}])
 
         # Should only be called once
         assert backend.chat.call_count == 1
@@ -729,9 +706,7 @@ class TestLLMClientRetry:
         backend.last_response = response
 
         client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
-        result = await client.chat_full_async(
-            messages=[{"role": "user", "content": "Hi"}]
-        )
+        result = await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
 
         assert result.content == "Success"
         assert backend.chat_async.call_count == 2

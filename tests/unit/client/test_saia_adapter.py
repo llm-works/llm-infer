@@ -28,7 +28,7 @@ pytestmark = pytest.mark.unit
 def mock_client() -> MagicMock:
     """Create a mock LLMClient."""
     client = MagicMock(spec=LLMClient)
-    client.chat_full_async = AsyncMock()
+    client.chat_async = AsyncMock()
     return client
 
 
@@ -269,7 +269,7 @@ class TestSAIAAdapterChat:
     @pytest.mark.asyncio
     async def test_chat_simple(self, mock_client: MagicMock) -> None:
         """Test simple chat call."""
-        mock_client.chat_full_async.return_value = ChatResponse(
+        mock_client.chat_async.return_value = ChatResponse(
             content="Hello!",
             usage=ChatCompletionUsage(
                 prompt_tokens=5, completion_tokens=2, total_tokens=7
@@ -286,15 +286,15 @@ class TestSAIAAdapterChat:
 
         assert isinstance(result, AgentResponse)
         assert result.content == "Hello!"
-        mock_client.chat_full_async.assert_called_once()
-        call_kwargs = mock_client.chat_full_async.call_args.kwargs
+        mock_client.chat_async.assert_called_once()
+        call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["system"] == "You are helpful"
         assert call_kwargs["max_tokens"] == 100
 
     @pytest.mark.asyncio
     async def test_chat_with_tools(self, mock_client: MagicMock) -> None:
         """Test chat with tool definitions."""
-        mock_client.chat_full_async.return_value = ChatResponse(
+        mock_client.chat_async.return_value = ChatResponse(
             content="",
             tool_calls=[
                 ToolCall(
@@ -321,14 +321,14 @@ class TestSAIAAdapterChat:
 
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "search"
-        call_kwargs = mock_client.chat_full_async.call_args.kwargs
+        call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["tools"] is not None
         assert len(call_kwargs["tools"]) == 1
 
     @pytest.mark.asyncio
     async def test_chat_with_response_schema(self, mock_client: MagicMock) -> None:
         """Test chat with structured output schema."""
-        mock_client.chat_full_async.return_value = ChatResponse(
+        mock_client.chat_async.return_value = ChatResponse(
             content='{"name": "Alice"}',
             finish_reason=FinishReason.STOP,
         )
@@ -343,6 +343,6 @@ class TestSAIAAdapterChat:
             response_schema=schema,
         )
 
-        call_kwargs = mock_client.chat_full_async.call_args.kwargs
+        call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["response_format"] is not None
         assert call_kwargs["response_format"]["type"] == "json_schema"

@@ -60,7 +60,7 @@ class AnthropicBackend(Backend):
     Note:
         - System messages should be passed via the `system` parameter,
           not in the messages list.
-        - adapter_id is not supported (Anthropic-specific feature).
+        - adapter is not supported (Anthropic-specific feature).
         - think mode is currently not supported (raises NotImplementedError).
     """
 
@@ -109,17 +109,17 @@ class AnthropicBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request (sync)."""
-        _ = adapter_id  # Not supported for Anthropic
+        _ = adapter  # Not supported for Anthropic
         request_kwargs = self._prepare_request(
             messages,
             model,
@@ -141,17 +141,17 @@ class AnthropicBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Send a streaming chat completion request (sync)."""
-        _ = adapter_id
+        _ = adapter
         request_kwargs = self._prepare_request(
             messages,
             model,
@@ -182,17 +182,17 @@ class AnthropicBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request (async)."""
-        _ = adapter_id
+        _ = adapter
         request_kwargs = self._prepare_request(
             messages,
             model,
@@ -215,17 +215,17 @@ class AnthropicBackend(Backend):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async)."""
-        _ = adapter_id
+        _ = adapter
         request_kwargs = self._prepare_request(
             messages,
             model,

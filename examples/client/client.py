@@ -64,9 +64,9 @@ def _print_response(
             response_text += token
         print()
         return response_text
-    response_text = router.chat(messages, backend=backend, model=model)
-    print(response_text)
-    return response_text
+    response = router.chat(messages, backend=backend, model=model)
+    print(response.content)
+    return response.content
 
 
 def chat_interactive(
