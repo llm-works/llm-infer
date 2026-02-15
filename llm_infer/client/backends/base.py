@@ -12,7 +12,7 @@ from typing import Any
 
 from appinfra.log import Logger
 
-from llm_infer.client.types import ChatResponse
+from ..types import ChatResponse
 
 
 class Backend(ABC):

@@ -35,10 +35,10 @@ from typing import Any, Self, TypeVar
 from appinfra.log import Logger
 from appinfra.rate_limit import Backoff, RateLimiter
 
-from llm_infer.client.backends import Backend
-from llm_infer.client.base import ChatClient
-from llm_infer.client.exceptions import BackendRequestError, BackendUnavailableError
-from llm_infer.client.types import ChatResponse
+from .backends import Backend
+from .base import ChatClient
+from .exceptions import BackendRequestError, BackendUnavailableError
+from .types import ChatResponse
 
 # Transient HTTP status codes that should trigger retry
 TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 529})

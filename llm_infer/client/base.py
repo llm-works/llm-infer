@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Self
 
-from llm_infer.client.types import ChatResponse
+from .types import ChatResponse
 
 
 class ChatClient(ABC):

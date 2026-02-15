@@ -4,7 +4,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
-from llm_infer.schemas.openai import (
+from ....schemas.openai import (
     ChatCompletionChunk,
     ChatCompletionChunkChoice,
     ChatCompletionChunkDelta,
@@ -15,7 +15,6 @@ from llm_infer.schemas.openai import (
     Role,
     ToolCallDelta,
 )
-
 from .mappers import generate_tool_call_id, normalize_arguments
 
 

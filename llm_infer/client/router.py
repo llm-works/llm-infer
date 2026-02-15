@@ -33,9 +33,9 @@ from typing import Any, Self
 
 from appinfra.log import Logger
 
-from llm_infer.client.base import ChatClient
-from llm_infer.client.client import LLMClient
-from llm_infer.client.types import ChatResponse
+from .base import ChatClient
+from .client import LLMClient
+from .types import ChatResponse
 
 
 @dataclass(frozen=True)

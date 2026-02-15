@@ -23,20 +23,20 @@ from typing import Any
 import httpx
 from appinfra.log import Logger
 
-from llm_infer.client.backends.base import Backend
-from llm_infer.client.exceptions import (
-    BackendRequestError,
-    BackendTimeoutError,
-    BackendUnavailableError,
-)
-from llm_infer.client.types import ChatResponse
-from llm_infer.schemas.openai import (
+from ...schemas.openai import (
     ChatCompletionUsage,
     FinishReason,
     FunctionCall,
     Role,
     ToolCall,
 )
+from ..exceptions import (
+    BackendRequestError,
+    BackendTimeoutError,
+    BackendUnavailableError,
+)
+from ..types import ChatResponse
+from .base import Backend
 
 
 class OpenAICompatibleBackend(Backend):
