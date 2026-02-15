@@ -57,14 +57,13 @@ class Backend(ABC):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        # llm-infer extensions
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request (sync).
@@ -72,13 +71,13 @@ class Backend(ABC):
         Args:
             messages: List of chat messages as dicts with 'role' and 'content'.
             model: Model to use (overrides default if set).
+            system: System prompt (prepended to messages or passed separately).
             temperature: Sampling temperature (0.0 to 2.0).
             max_tokens: Maximum tokens to generate.
-            system: System prompt (prepended to messages or passed separately).
-            adapter_id: LoRA adapter name (llm-infer extension, OpenAI only).
-            think: Enable thinking mode (llm-infer extension).
             tools: List of tool definitions for function calling.
             tool_choice: Control tool use ('auto', 'none', 'required', or specific).
+            think: Enable thinking mode (llm-infer extension).
+            adapter: LoRA adapter name (llm-infer extension, OpenAI only).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
@@ -96,14 +95,13 @@ class Backend(ABC):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        # llm-infer extensions
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Send a streaming chat completion request (sync).
@@ -114,13 +112,13 @@ class Backend(ABC):
         Args:
             messages: List of chat messages.
             model: Model to use.
+            system: System prompt.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (llm-infer extension).
-            think: Enable thinking mode (llm-infer extension).
             tools: List of tool definitions.
             tool_choice: Control tool use.
+            think: Enable thinking mode (llm-infer extension).
+            adapter: LoRA adapter name (llm-infer extension).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
@@ -142,14 +140,13 @@ class Backend(ABC):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        # llm-infer extensions
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a non-streaming chat completion request (async).
@@ -157,13 +154,13 @@ class Backend(ABC):
         Args:
             messages: List of chat messages.
             model: Model to use.
+            system: System prompt.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (llm-infer extension).
-            think: Enable thinking mode (llm-infer extension).
             tools: List of tool definitions.
             tool_choice: Control tool use.
+            think: Enable thinking mode (llm-infer extension).
+            adapter: LoRA adapter name (llm-infer extension).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
@@ -181,14 +178,13 @@ class Backend(ABC):
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        # llm-infer extensions
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async).
@@ -203,13 +199,13 @@ class Backend(ABC):
         Args:
             messages: List of chat messages.
             model: Model to use.
+            system: System prompt.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (llm-infer extension).
-            think: Enable thinking mode (llm-infer extension).
             tools: List of tool definitions.
             tool_choice: Control tool use.
+            think: Enable thinking mode (llm-infer extension).
+            adapter: LoRA adapter name (llm-infer extension).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
