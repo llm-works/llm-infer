@@ -164,7 +164,7 @@ class LLMRouter:
         return ResolvedTarget(backend=backend_name, model=resolved_model)
 
     def get_client(
-        self, backend: str | None = None, model: str | None = None
+        self, model: str | None = None, backend: str | None = None
     ) -> LLMClient:
         """Get the client for the specified backend or model.
 
@@ -174,8 +174,8 @@ class LLMRouter:
             3. Default backend
 
         Args:
-            backend: Backend name (highest priority).
             model: Model ID for model-based routing.
+            backend: Backend name (highest priority).
 
         Returns:
             The LLMClient for the resolved backend.
@@ -186,15 +186,15 @@ class LLMRouter:
         resolved = self.resolve(model=model, backend=backend)
         return self._clients[resolved.backend]
 
-    def can_call(self, backend: str | None = None, model: str | None = None) -> bool:
+    def can_call(self, model: str | None = None, backend: str | None = None) -> bool:
         """Check if a call is allowed for the specified backend (non-blocking).
 
         Delegates to the appropriate client's can_call() method based on
         backend/model routing.
 
         Args:
-            backend: Backend name (highest priority).
             model: Model ID for model-based routing.
+            backend: Backend name (highest priority).
 
         Returns:
             True if a call is allowed, False if rate limited or in backoff.
@@ -202,7 +202,7 @@ class LLMRouter:
         Raises:
             ValueError: If explicit backend is not found.
         """
-        return self.get_client(backend, model).can_call()
+        return self.get_client(model=model, backend=backend).can_call()
 
     # =========================================================================
     # Sync API
@@ -240,7 +240,7 @@ class LLMRouter:
         Returns:
             Generated text content.
         """
-        return self.get_client(backend, model).chat(
+        return self.get_client(model=model, backend=backend).chat(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -285,7 +285,7 @@ class LLMRouter:
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        return self.get_client(backend, model).chat_full(
+        return self.get_client(model=model, backend=backend).chat_full(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -330,7 +330,7 @@ class LLMRouter:
         Yields:
             String tokens as they arrive.
         """
-        yield from self.get_client(backend, model).chat_stream(
+        yield from self.get_client(model=model, backend=backend).chat_stream(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -379,7 +379,7 @@ class LLMRouter:
         Returns:
             Generated text content.
         """
-        return await self.get_client(backend, model).chat_async(
+        return await self.get_client(model=model, backend=backend).chat_async(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -424,7 +424,7 @@ class LLMRouter:
         Returns:
             ChatResponse with content, usage, thinking, tool_calls, etc.
         """
-        return await self.get_client(backend, model).chat_full_async(
+        return await self.get_client(model=model, backend=backend).chat_full_async(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -469,7 +469,9 @@ class LLMRouter:
         Yields:
             String tokens as they arrive.
         """
-        async for token in self.get_client(backend, model).chat_stream_async(
+        async for token in self.get_client(
+            model=model, backend=backend
+        ).chat_stream_async(
             messages=messages,
             model=model,
             temperature=temperature,
