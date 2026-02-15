@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from llm_infer.response.parsers.think import ThinkTagNormalizer, extract_thinking
-from llm_infer.schemas.openai import (
+from ....response.parsers.think import ThinkTagNormalizer, extract_thinking
+from ....schemas.openai import (
     ChatCompletionChoice,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -30,7 +30,6 @@ from llm_infer.schemas.openai import (
     Role,
     ToolCall,
 )
-
 from ..errors import raise_for_error_status
 from .mappers import (
     chat_request_to_internal,

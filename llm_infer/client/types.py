@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from llm_infer.schemas.openai import (
+from ..schemas.openai import (
     ChatCompletionUsage,
     FinishReason,
     ToolCall,

@@ -7,8 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
-from llm_infer.schemas.openai import FinishReason, Role
-
+from ....schemas.openai import FinishReason, Role
 from .streaming import (
     create_chat_chunk,
     create_completion_chunk,
@@ -17,8 +16,7 @@ from .streaming import (
 )
 
 if TYPE_CHECKING:
-    from llm_infer.response.parsers.think import ThinkTagNormalizer
-
+    from ....response.parsers.think import ThinkTagNormalizer
     from ...dispatch.types import Request as InternalRequest
 
 

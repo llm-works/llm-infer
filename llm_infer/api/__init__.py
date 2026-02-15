@@ -18,8 +18,8 @@ Usage:
         response = client.chat([{"role": "user", "content": "Hello"}])
 """
 
-from llm_infer.client import Backend, ChatResponse, Factory, LLMClient
-from llm_infer.schemas.openai import (
+from ..client import Backend, ChatResponse, Factory, LLMClient
+from ..schemas.openai import (
     ChatCompletionChoice,
     ChatCompletionChunk,
     ChatCompletionChunkChoice,

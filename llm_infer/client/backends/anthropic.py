@@ -20,19 +20,19 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
-from llm_infer.client.backends.base import Backend
-from llm_infer.client.exceptions import (
-    BackendRequestError,
-    BackendTimeoutError,
-    BackendUnavailableError,
-)
-from llm_infer.client.types import ChatResponse
-from llm_infer.schemas.openai import (
+from ...schemas.openai import (
     ChatCompletionUsage,
     FinishReason,
     FunctionCall,
     ToolCall,
 )
+from ..exceptions import (
+    BackendRequestError,
+    BackendTimeoutError,
+    BackendUnavailableError,
+)
+from ..types import ChatResponse
+from .base import Backend
 
 if TYPE_CHECKING:
     import anthropic

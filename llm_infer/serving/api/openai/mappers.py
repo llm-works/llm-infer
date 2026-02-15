@@ -6,7 +6,7 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from llm_infer.schemas.openai import (
+from ....schemas.openai import (
     ChatCompletionRequest,
     ChatMessage,
     CompletionRequest,
@@ -16,11 +16,10 @@ from llm_infer.schemas.openai import (
     Tool,
     ToolChoice,
 )
-
 from ...dispatch.types import Request as InternalRequest
 
 if TYPE_CHECKING:
-    from llm_infer.models.config import ModelConfig
+    from ....models.config import ModelConfig
 
 
 def format_messages_as_prompt(messages: list[ChatMessage]) -> str:

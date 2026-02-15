@@ -1,6 +1,6 @@
 """OpenAI-compatible API layer."""
 
-from llm_infer.schemas.openai import (
+from ....schemas.openai import (
     ChatCompletionChunk,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -12,7 +12,6 @@ from llm_infer.schemas.openai import (
     ModelList,
     Role,
 )
-
 from .errors import ErrorResponse, OpenAIHTTPException, create_error_response
 from .mappers import (
     chat_request_to_internal,

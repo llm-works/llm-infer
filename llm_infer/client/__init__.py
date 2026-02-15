@@ -59,18 +59,18 @@ llm-infer Extensions:
     - tools/tool_choice: Function calling support
 """
 
-from llm_infer.client.backends import Backend, OpenAICompatibleBackend
-from llm_infer.client.base import ChatClient
-from llm_infer.client.client import LLMClient
-from llm_infer.client.exceptions import (
+from .backends import Backend, OpenAICompatibleBackend
+from .base import ChatClient
+from .client import LLMClient
+from .exceptions import (
     BackendError,
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
 )
-from llm_infer.client.factory import Factory
-from llm_infer.client.router import LLMRouter, ResolvedTarget
-from llm_infer.client.types import ChatResponse
+from .factory import Factory
+from .router import LLMRouter, ResolvedTarget
+from .types import ChatResponse
 
 __all__ = [
     # Factory (primary entry point)
@@ -95,7 +95,7 @@ __all__ = [
 
 # Optional SAIA integration (requires: pip install llm-infer[saia])
 try:
-    from llm_infer.client.saia import SAIAAdapter  # noqa: F401
+    from .saia import SAIAAdapter  # noqa: F401
 
     __all__.append("SAIAAdapter")
 except ImportError:

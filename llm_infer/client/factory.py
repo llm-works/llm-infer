@@ -36,10 +36,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.log import Logger
 
-from llm_infer.client.backends.base import Backend
-from llm_infer.client.backends.openai import OpenAICompatibleBackend
-from llm_infer.client.client import LLMClient
-from llm_infer.client.router import LLMRouter
+from .backends.base import Backend
+from .backends.openai import OpenAICompatibleBackend
+from .client import LLMClient
+from .router import LLMRouter
 
 if TYPE_CHECKING:
     from appinfra.rate_limit import Backoff, RateLimiter
