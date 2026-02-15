@@ -131,9 +131,13 @@ class AnthropicBackend(Backend):
             tool_choice,
             **kwargs,
         )
+        # Pop internal marker before API call
+        structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         with self._handle_errors():
             response = self._client.messages.create(**request_kwargs)
-        result = self._parse_response(response, model or self._model)
+        result = self._parse_response(
+            response, model or self._model, structured_output_tool
+        )
         self._last_response = result
         return result
 
@@ -164,7 +168,9 @@ class AnthropicBackend(Backend):
             stream=True,
             **kwargs,
         )
-        state = _StreamState()
+        # Pop internal marker before API call
+        structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
+        state = _StreamState(structured_output_tool)
         with self._handle_errors():
             with self._client.messages.stream(**request_kwargs) as stream:
                 for event in stream:
@@ -204,10 +210,14 @@ class AnthropicBackend(Backend):
             tool_choice,
             **kwargs,
         )
+        # Pop internal marker before API call
+        structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         client = self._get_async_client()
         async with self._handle_errors_async():
             response = await client.messages.create(**request_kwargs)
-        result = self._parse_response(response, model or self._model)
+        result = self._parse_response(
+            response, model or self._model, structured_output_tool
+        )
         self._last_response = result
         return result
 
@@ -238,7 +248,9 @@ class AnthropicBackend(Backend):
             stream=True,
             **kwargs,
         )
-        state = _StreamState()
+        # Pop internal marker before API call
+        structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
+        state = _StreamState(structured_output_tool)
         client = self._get_async_client()
         async with self._handle_errors_async():
             async with client.messages.stream(**request_kwargs) as stream:
@@ -358,6 +370,8 @@ class AnthropicBackend(Backend):
                 "extended_thinking requires different API structure"
             )
 
+        self._apply_response_format(request_kwargs, kwargs)
+
         for key, value in kwargs.items():
             if value is not None and key not in ("stream",):
                 request_kwargs[key] = value
@@ -458,23 +472,103 @@ class AnthropicBackend(Backend):
                 "name": tool_choice["function"].get("name", ""),
             }
 
+    def _apply_response_format(
+        self, request_kwargs: dict[str, Any], kwargs: dict[str, Any]
+    ) -> None:
+        """Extract and apply response_format by converting to tool-based structured output.
+
+        Handles response_format passed directly or nested in extra_body.
+        Pops the relevant keys from kwargs to prevent them from being sent to the API.
+        """
+        response_format = kwargs.pop("response_format", None)
+        extra_body = kwargs.pop("extra_body", None)
+        if extra_body and "response_format" in extra_body:
+            response_format = extra_body.pop("response_format")
+            if extra_body:  # Re-add if other keys remain
+                kwargs["extra_body"] = extra_body
+
+        structured_tool = self._convert_response_format_to_tool(response_format)
+        if structured_tool:
+            existing_tools = request_kwargs.get("tools", [])
+            request_kwargs["tools"] = existing_tools + [structured_tool]
+            request_kwargs["tool_choice"] = {
+                "type": "tool",
+                "name": "__structured_output__",
+            }
+            request_kwargs["_structured_output_tool"] = "__structured_output__"
+
+    def _convert_response_format_to_tool(
+        self, response_format: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Convert response_format to an Anthropic tool definition.
+
+        Anthropic doesn't support response_format directly. Instead, we create a tool
+        that forces the model to produce structured output matching the schema.
+
+        Args:
+            response_format: OpenAI-style response_format dict with type and optionally
+                json_schema fields.
+
+        Returns:
+            Anthropic tool definition if structured output is requested, None otherwise.
+        """
+        if response_format is None:
+            return None
+
+        format_type = response_format.get("type", "text")
+        if format_type == "text":
+            return None
+
+        # Extract schema from response_format
+        if format_type == "json_object":
+            # Basic JSON object without specific schema
+            schema = {"type": "object"}
+        elif format_type == "json_schema":
+            # Full schema provided
+            json_schema = response_format.get("json_schema", {})
+            schema = json_schema.get("schema", {"type": "object"})
+        else:
+            return None
+
+        return {
+            "name": "__structured_output__",
+            "description": "Output structured data matching the required schema.",
+            "input_schema": schema,
+        }
+
     # =========================================================================
     # Response parsing
     # =========================================================================
 
-    def _parse_response(self, response: Any, model: str) -> ChatResponse:
-        """Parse Anthropic response to ChatResponse."""
+    def _parse_response(
+        self, response: Any, model: str, structured_output_tool: str | None = None
+    ) -> ChatResponse:
+        """Parse Anthropic response to ChatResponse.
+
+        Args:
+            response: Raw Anthropic API response.
+            model: Model name for the response.
+            structured_output_tool: If set, tool_use blocks with this name are treated
+                as structured output content rather than tool calls.
+        """
         content_parts: list[str] = []
         thinking_parts: list[str] = []
         tool_calls: list[ToolCall] = []
 
         for block in response.content:
-            self._parse_content_block(block, content_parts, thinking_parts, tool_calls)
+            self._parse_content_block(
+                block, content_parts, thinking_parts, tool_calls, structured_output_tool
+            )
+
+        # If structured output was used, finish_reason should be STOP not TOOL_CALLS
+        finish_reason = self._map_stop_reason(response.stop_reason)
+        if structured_output_tool and finish_reason == FinishReason.TOOL_CALLS:
+            finish_reason = FinishReason.STOP
 
         return ChatResponse(
             content="".join(content_parts),
             usage=self._create_usage(getattr(response, "usage", None)),
-            finish_reason=self._map_stop_reason(response.stop_reason),
+            finish_reason=finish_reason,
             model=response.model or model,
             thinking="".join(thinking_parts) if thinking_parts else None,
             tool_calls=tool_calls if tool_calls else None,
@@ -486,14 +580,35 @@ class AnthropicBackend(Backend):
         content_parts: list[str],
         thinking_parts: list[str],
         tool_calls: list[ToolCall],
+        structured_output_tool: str | None = None,
     ) -> None:
-        """Parse a content block from response."""
+        """Parse a content block from response.
+
+        Args:
+            block: Content block from Anthropic response.
+            content_parts: List to append text content to.
+            thinking_parts: List to append thinking content to.
+            tool_calls: List to append tool calls to.
+            structured_output_tool: If set and matches the tool_use block name,
+                extract the tool input as JSON content instead of a tool call.
+        """
         if block.type == "text":
             content_parts.append(block.text)
         elif block.type == "thinking":
             thinking_parts.append(block.thinking)
         elif block.type == "tool_use":
-            tool_calls.append(self._create_tool_call(block))
+            # Check if this is our structured output tool
+            if structured_output_tool and block.name == structured_output_tool:
+                # Extract tool input as JSON content.
+                # Anthropic SDK typically returns input as dict, but we handle str
+                # defensively for consistency with _create_tool_call.
+                content_parts.append(
+                    block.input
+                    if isinstance(block.input, str)
+                    else json.dumps(block.input)
+                )
+            else:
+                tool_calls.append(self._create_tool_call(block))
 
     def _create_tool_call(self, block: Any) -> ToolCall:
         """Create a ToolCall from an Anthropic tool_use block."""
@@ -556,7 +671,19 @@ class AnthropicBackend(Backend):
         """Process a content_block_stop event."""
         block = getattr(event, "content_block", None)
         if block and getattr(block, "type", None) == "tool_use":
-            state.tool_calls.append(self._create_tool_call(block))
+            # Check if this is our structured output tool
+            if (
+                state.structured_output_tool
+                and block.name == state.structured_output_tool
+            ):
+                # Extract tool input as JSON content
+                state.content_parts.append(
+                    block.input
+                    if isinstance(block.input, str)
+                    else json.dumps(block.input)
+                )
+            else:
+                state.tool_calls.append(self._create_tool_call(block))
 
     def _finalize_stream_state(self, state: _StreamState, final_message: Any) -> None:
         """Finalize stream state with usage and finish reason."""
@@ -583,19 +710,25 @@ class AnthropicBackend(Backend):
 class _StreamState:
     """Accumulates state while processing stream events."""
 
-    def __init__(self) -> None:
+    def __init__(self, structured_output_tool: str | None = None) -> None:
         self.content_parts: list[str] = []
         self.thinking_parts: list[str] = []
         self.tool_calls: list[ToolCall] = []
         self.usage: ChatCompletionUsage | None = None
         self.finish_reason: FinishReason | None = None
+        self.structured_output_tool = structured_output_tool
 
     def to_response(self, model: str) -> ChatResponse:
         """Convert accumulated state to ChatResponse."""
+        # If structured output was used, finish_reason should be STOP not TOOL_CALLS
+        finish_reason = self.finish_reason
+        if self.structured_output_tool and finish_reason == FinishReason.TOOL_CALLS:
+            finish_reason = FinishReason.STOP
+
         return ChatResponse(
             content="".join(self.content_parts),
             usage=self.usage,
-            finish_reason=self.finish_reason,
+            finish_reason=finish_reason,
             model=model,
             thinking="".join(self.thinking_parts) if self.thinking_parts else None,
             tool_calls=self.tool_calls if self.tool_calls else None,

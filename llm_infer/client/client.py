@@ -144,94 +144,99 @@ class LLMClient(ChatClient):
             return exc.status_code in TRANSIENT_STATUS_CODES
         return False
 
+    def _apply_backoff_cooldown(self) -> None:
+        """Apply cooldown delay if previous calls have failed.
+
+        This acts as a gatekeeper, preventing rapid-fire requests when errors
+        occur - even for non-transient errors like 400 Bad Request.
+        """
+        if self._backoff is None or self._backoff.attempts == 0:
+            return
+        # Calculate delay without incrementing (next_delay would increment)
+        delay = min(
+            self._backoff.base * (self._backoff.factor ** (self._backoff.attempts - 1)),
+            self._backoff.max_delay,
+        )
+        self._lg.debug(
+            "backoff cooldown before request",
+            extra={"delay": delay, "attempts": self._backoff.attempts},
+        )
+        time.sleep(delay)
+
+    async def _apply_backoff_cooldown_async(self) -> None:
+        """Async version of _apply_backoff_cooldown."""
+        if self._backoff is None or self._backoff.attempts == 0:
+            return
+        delay = min(
+            self._backoff.base * (self._backoff.factor ** (self._backoff.attempts - 1)),
+            self._backoff.max_delay,
+        )
+        self._lg.debug(
+            "backoff cooldown before request",
+            extra={"delay": delay, "attempts": self._backoff.attempts},
+        )
+        await asyncio.sleep(delay)
+
+    def _handle_retry_error(
+        self, e: BackendUnavailableError | BackendRequestError, start_time: float
+    ) -> float:
+        """Handle error during retry, returning delay if should retry, or re-raising."""
+        assert self._backoff is not None  # Only called when backoff is configured
+        if not self._is_transient_error(e):
+            self._backoff.next_delay()  # Increment for next call
+            raise
+        elapsed = time.time() - start_time
+        if self._timeout > 0 and elapsed >= self._timeout:
+            self._backoff.next_delay()
+            raise
+        delay: float = self._backoff.next_delay()
+        status = e.status_code if isinstance(e, BackendRequestError) else None
+        self._lg.warning(
+            "transient error, retrying",
+            extra={"status_code": status, "delay": delay, "elapsed": elapsed},
+        )
+        return delay
+
     def _call_with_retry(self, fn: Callable[[], T]) -> T:
-        """Execute fn with retry on transient errors.
-
-        Retries on connection failures and HTTP 429/502/503/529 with exponential
-        backoff. Only active when backoff is configured.
-
-        Args:
-            fn: Function to call.
-
-        Returns:
-            Result of fn.
+        """Execute fn with retry on transient errors and gatekeeper cooldown.
 
         Raises:
             BackendUnavailableError: If connection fails and retries exhausted.
-            BackendRequestError: If transient HTTP error and retries exhausted,
-                or non-transient error.
+            BackendRequestError: If HTTP error occurs and retries exhausted,
+                or if error is non-transient (e.g., 400 Bad Request).
         """
         if self._backoff is None:
             return fn()
-
-        self._backoff.reset()
+        self._apply_backoff_cooldown()
         start_time = time.time()
-
         while True:
             try:
                 result = fn()
-                self._backoff.reset()  # Reset on success
+                self._backoff.reset()
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self._is_transient_error(e):
-                    raise
-
-                # Check timeout (0 = no timeout)
-                elapsed = time.time() - start_time
-                if self._timeout > 0 and elapsed >= self._timeout:
-                    raise
-
-                delay = self._backoff.next_delay()
-                status = e.status_code if isinstance(e, BackendRequestError) else None
-                self._lg.warning(
-                    "transient error, retrying",
-                    extra={"status_code": status, "delay": delay, "elapsed": elapsed},
-                )
+                delay = self._handle_retry_error(e, start_time)
                 time.sleep(delay)
 
     async def _call_with_retry_async(self, fn: Callable[[], Awaitable[T]]) -> T:
-        """Execute async fn with retry on transient errors.
-
-        Retries on connection failures and HTTP 429/502/503/529 with exponential
-        backoff. Only active when backoff is configured.
-
-        Args:
-            fn: Async function to call.
-
-        Returns:
-            Result of fn.
+        """Execute async fn with retry on transient errors and gatekeeper cooldown.
 
         Raises:
             BackendUnavailableError: If connection fails and retries exhausted.
-            BackendRequestError: If transient HTTP error and retries exhausted,
-                or non-transient error.
+            BackendRequestError: If HTTP error occurs and retries exhausted,
+                or if error is non-transient (e.g., 400 Bad Request).
         """
         if self._backoff is None:
             return await fn()
-
-        self._backoff.reset()
+        await self._apply_backoff_cooldown_async()
         start_time = time.time()
-
         while True:
             try:
                 result = await fn()
-                self._backoff.reset()  # Reset on success
+                self._backoff.reset()
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self._is_transient_error(e):
-                    raise
-
-                # Check timeout (0 = no timeout)
-                elapsed = time.time() - start_time
-                if self._timeout > 0 and elapsed >= self._timeout:
-                    raise
-
-                delay = self._backoff.next_delay()
-                status = e.status_code if isinstance(e, BackendRequestError) else None
-                self._lg.warning(
-                    "transient error, retrying",
-                    extra={"status_code": status, "delay": delay, "elapsed": elapsed},
-                )
+                delay = self._handle_retry_error(e, start_time)
                 await asyncio.sleep(delay)
 
     # =========================================================================

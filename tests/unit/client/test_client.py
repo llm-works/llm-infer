@@ -711,6 +711,49 @@ class TestLLMClientRetry:
         assert result.content == "Success"
         assert backend.chat_async.call_count == 2
 
+    def test_backoff_gatekeeper_on_non_transient_error(self, mock_lg: Logger) -> None:
+        """Test backoff persists across calls for non-transient errors (gatekeeper).
+
+        When a non-transient error (like 400) occurs, the backoff should increment
+        so subsequent calls are delayed, preventing rapid-fire hammering of the API.
+        """
+        from unittest.mock import patch
+
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        backoff = Backoff(mock_lg, base=1.0, max_delay=60.0, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+
+        # First call: 400 error (not retried, but backoff increments)
+        backend.chat.side_effect = [
+            BackendRequestError("Bad request", status_code=400),
+        ]
+
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
+
+        with pytest.raises(BackendRequestError):
+            client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        # Backoff should have incremented
+        assert backoff.attempts == 1
+
+        # Reset mock for second call
+        backend.chat.side_effect = [response]
+        backend.last_response = response
+
+        # Second call: verify cooldown is applied before the request
+        with patch("llm_infer.client.client.time.sleep") as mock_sleep:
+            result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success"
+        # Cooldown should have slept for base * factor^(attempts-1) = 1.0 * 2^0 = 1.0
+        mock_sleep.assert_called_once_with(1.0)
+        # Successful call resets backoff
+        assert backoff.attempts == 0
+
 
 class TestFactoryRetryConfig:
     """Test Factory retry configuration parsing."""
