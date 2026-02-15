@@ -717,6 +717,8 @@ class TestLLMClientRetry:
         When a non-transient error (like 400) occurs, the backoff should increment
         so subsequent calls are delayed, preventing rapid-fire hammering of the API.
         """
+        from unittest.mock import patch
+
         from appinfra.rate_limit import Backoff
 
         from llm_infer.client.exceptions import BackendRequestError
@@ -742,12 +744,15 @@ class TestLLMClientRetry:
         backend.chat.side_effect = [response]
         backend.last_response = response
 
-        # Second call would normally sleep for backoff.base (1 second)
-        # but we're just verifying the attempts counter incremented
-        # The actual delay happens in _apply_backoff_cooldown()
+        # Second call: verify cooldown is applied before the request
+        with patch("llm_infer.client.client.time.sleep") as mock_sleep:
+            result = client.chat(messages=[{"role": "user", "content": "Hi"}])
 
-        # Verify the backoff attempts persisted (gatekeeper behavior)
-        assert backoff.attempts == 1
+        assert result.content == "Success"
+        # Cooldown should have slept for base * factor^(attempts-1) = 1.0 * 2^0 = 1.0
+        mock_sleep.assert_called_once_with(1.0)
+        # Successful call resets backoff
+        assert backoff.attempts == 0
 
 
 class TestFactoryRetryConfig:
