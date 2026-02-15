@@ -14,7 +14,7 @@ Quick Start:
     # Single backend - returns LLMClient
     with factory.openai(base_url="http://localhost:8000/v1") as client:
         response = client.chat([{"role": "user", "content": "Hello"}])
-        print(response)
+        print(response.content)
 
     # Multi-backend config - returns LLMRouter
     config = {
@@ -35,15 +35,16 @@ Quick Start:
 
     # With llm-infer extensions
     with factory.openai() as client:
-        response = client.chat_full(
+        response = client.chat(
             messages=[{"role": "user", "content": "Think about this"}],
             think=True,
-            adapter_id="my-lora",
+            adapter="my-lora",
         )
         print(response.content)
         print(response.thinking)  # Separated thinking content
 
 Classes:
+    - ChatClient: Abstract base class for all chat clients
     - LLMClient: Single-backend client
     - LLMRouter: Multi-backend router with backend selection
     - Factory: Creates clients and routers from config
@@ -53,12 +54,13 @@ Backends:
     - AnthropicBackend: Anthropic Claude API (requires: pip install llm-infer[anthropic])
 
 llm-infer Extensions:
-    - adapter_id: LoRA adapter selection for vLLM
+    - adapter: LoRA adapter selection for vLLM
     - think: Thinking mode with <think> block extraction
     - tools/tool_choice: Function calling support
 """
 
 from llm_infer.client.backends import Backend, OpenAICompatibleBackend
+from llm_infer.client.base import ChatClient
 from llm_infer.client.client import LLMClient
 from llm_infer.client.exceptions import (
     BackendError,
@@ -73,7 +75,8 @@ from llm_infer.client.types import ChatResponse
 __all__ = [
     # Factory (primary entry point)
     "Factory",
-    # Client facade
+    # Client types
+    "ChatClient",
     "LLMClient",
     # Router (multi-backend)
     "LLMRouter",

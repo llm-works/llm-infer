@@ -36,6 +36,7 @@ from appinfra.log import Logger
 from appinfra.rate_limit import Backoff, RateLimiter
 
 from llm_infer.client.backends import Backend
+from llm_infer.client.base import ChatClient
 from llm_infer.client.exceptions import BackendRequestError, BackendUnavailableError
 from llm_infer.client.types import ChatResponse
 
@@ -45,7 +46,7 @@ TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 529})
 T = TypeVar("T")
 
 
-class LLMClient:
+class LLMClient(ChatClient):
     """Single-backend LLM client with sync/async support.
 
     This client wraps a single backend and provides a consistent interface
@@ -241,63 +242,16 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> str:
-        """Send a chat completion request and return content (sync).
-
-        This is the simple API that returns just the generated text.
-        For full response with usage stats, use chat_full().
-
-        Args:
-            messages: List of chat messages.
-            model: Model to use (overrides default).
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (OpenAI-compatible only).
-            think: Enable thinking mode.
-            tools: Tool definitions for function calling.
-            tool_choice: Control tool use.
-            **kwargs: Additional backend-specific parameters.
-
-        Returns:
-            Generated text content.
-        """
-        response = self.chat_full(
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system=system,
-            adapter_id=adapter_id,
-            think=think,
-            tools=tools,
-            tool_choice=tool_choice,
-            **kwargs,
-        )
-        return response.content
-
-    def chat_full(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
         think: bool | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        """Send a chat completion request and return full response (sync).
+        """Send a chat completion request (sync).
 
         When backoff is configured, automatically retries on transient errors
         (connection failures and HTTP 429/502/503/529) with exponential backoff.
@@ -305,13 +259,13 @@ class LLMClient:
         Args:
             messages: List of chat messages.
             model: Model to use (overrides default).
+            system: System prompt.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (OpenAI-compatible only).
-            think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
@@ -322,13 +276,13 @@ class LLMClient:
             return self._backend.chat(
                 messages=messages,
                 model=model or self._default_model,
+                system=system,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                system=system,
-                adapter_id=adapter_id,
-                think=think,
                 tools=tools,
                 tool_choice=tool_choice,
+                think=think,
+                adapter=adapter,
                 **kwargs,
             )
 
@@ -338,19 +292,19 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Stream chat completion tokens (sync).
 
         Note: Streaming does not support automatic retry. For retry support,
-        use chat() or chat_full() instead.
+        use chat() instead.
 
         Yields tokens as they arrive. After iteration, access last_response
         for usage statistics.
@@ -358,13 +312,13 @@ class LLMClient:
         Args:
             messages: List of chat messages.
             model: Model to use (overrides default).
+            system: System prompt.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (OpenAI-compatible only).
-            think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
@@ -373,13 +327,13 @@ class LLMClient:
         yield from self._backend.chat_stream(
             messages=messages,
             model=model or self._default_model,
+            system=system,
             temperature=temperature,
             max_tokens=max_tokens,
-            system=system,
-            adapter_id=adapter_id,
-            think=think,
             tools=tools,
             tool_choice=tool_choice,
+            think=think,
+            adapter=adapter,
             **kwargs,
         )
 
@@ -391,60 +345,16 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> str:
-        """Send a chat completion request and return content (async).
-
-        Args:
-            messages: List of chat messages.
-            model: Model to use (overrides default).
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (OpenAI-compatible only).
-            think: Enable thinking mode.
-            tools: Tool definitions for function calling.
-            tool_choice: Control tool use.
-            **kwargs: Additional backend-specific parameters.
-
-        Returns:
-            Generated text content.
-        """
-        response = await self.chat_full_async(
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system=system,
-            adapter_id=adapter_id,
-            think=think,
-            tools=tools,
-            tool_choice=tool_choice,
-            **kwargs,
-        )
-        return response.content
-
-    async def chat_full_async(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
         think: bool | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        """Send a chat completion request and return full response (async).
+        """Send a chat completion request (async).
 
         When backoff is configured, automatically retries on transient errors
         (connection failures and HTTP 429/502/503/529) with exponential backoff.
@@ -452,13 +362,13 @@ class LLMClient:
         Args:
             messages: List of chat messages.
             model: Model to use (overrides default).
+            system: System prompt.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (OpenAI-compatible only).
-            think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
@@ -469,13 +379,13 @@ class LLMClient:
             return await self._backend.chat_async(
                 messages=messages,
                 model=model or self._default_model,
+                system=system,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                system=system,
-                adapter_id=adapter_id,
-                think=think,
                 tools=tools,
                 tool_choice=tool_choice,
+                think=think,
+                adapter=adapter,
                 **kwargs,
             )
 
@@ -485,19 +395,19 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
+        system: str | None = None,
         temperature: float = 1.0,
         max_tokens: int | None = None,
-        system: str | None = None,
-        adapter_id: str | None = None,
-        think: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream chat completion tokens (async).
 
         Note: Streaming does not support automatic retry. For retry support,
-        use chat_async() or chat_full_async() instead.
+        use chat_async() instead.
 
         Yields tokens as they arrive. After iteration, access last_response
         for usage statistics.
@@ -505,13 +415,13 @@ class LLMClient:
         Args:
             messages: List of chat messages.
             model: Model to use (overrides default).
+            system: System prompt.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
-            system: System prompt.
-            adapter_id: LoRA adapter name (OpenAI-compatible only).
-            think: Enable thinking mode.
             tools: Tool definitions for function calling.
             tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
@@ -520,13 +430,13 @@ class LLMClient:
         async for token in self._backend.chat_stream_async(
             messages=messages,
             model=model or self._default_model,
+            system=system,
             temperature=temperature,
             max_tokens=max_tokens,
-            system=system,
-            adapter_id=adapter_id,
-            think=think,
             tools=tools,
             tool_choice=tool_choice,
+            think=think,
+            adapter=adapter,
             **kwargs,
         ):
             yield token

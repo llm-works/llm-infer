@@ -80,7 +80,7 @@ class SAIAAdapter(Backend):
         api_tools = self._convert_tools(tools) if tools else None
         response_format = self._build_response_format(response_schema)
 
-        response = await self._client.chat_full_async(
+        response = await self._client.chat_async(
             messages=api_messages,
             system=system,
             tools=api_tools,

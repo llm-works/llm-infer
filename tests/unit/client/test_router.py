@@ -119,7 +119,7 @@ class TestLLMRouterRouting:
 
         result = router.chat([{"role": "user", "content": "Hi"}])
 
-        assert result == "From A"
+        assert result.content == "From A"
 
     def test_chat_routes_to_specified_backend(self, mock_lg: Logger) -> None:
         """Test chat() routes to specified backend."""
@@ -131,7 +131,7 @@ class TestLLMRouterRouting:
 
         result = router.chat([{"role": "user", "content": "Hi"}], backend="b")
 
-        assert result == "From B"
+        assert result.content == "From B"
 
     def test_chat_raises_on_unknown_backend(self, mock_lg: Logger) -> None:
         """Test chat() raises on unknown backend."""
@@ -140,16 +140,6 @@ class TestLLMRouterRouting:
 
         with pytest.raises(ValueError, match="Backend 'unknown' not found"):
             router.chat([{"role": "user", "content": "Hi"}], backend="unknown")
-
-    def test_chat_full_routes_correctly(self, mock_lg: Logger) -> None:
-        """Test chat_full() routes to correct backend."""
-        response = ChatResponse(content="Full response")
-        client = make_client(mock_lg, [response])
-        router = LLMRouter(mock_lg, {"main": client}, "main")
-
-        result = router.chat_full([{"role": "user", "content": "Hi"}])
-
-        assert result.content == "Full response"
 
     def test_chat_stream_routes_correctly(self, mock_lg: Logger) -> None:
         """Test chat_stream() routes to correct backend."""
@@ -174,7 +164,7 @@ class TestLLMRouterAsync:
 
         result = await router.chat_async([{"role": "user", "content": "Hi"}])
 
-        assert result == "Async response"
+        assert result.content == "Async response"
 
     @pytest.mark.asyncio
     async def test_chat_async_routes_to_specified_backend(
@@ -191,18 +181,7 @@ class TestLLMRouterAsync:
             [{"role": "user", "content": "Hi"}], backend="b"
         )
 
-        assert result == "From B"
-
-    @pytest.mark.asyncio
-    async def test_chat_full_async_routes_correctly(self, mock_lg: Logger) -> None:
-        """Test chat_full_async() routes correctly."""
-        response = ChatResponse(content="Full async")
-        client = make_client(mock_lg, [response])
-        router = LLMRouter(mock_lg, {"main": client}, "main")
-
-        result = await router.chat_full_async([{"role": "user", "content": "Hi"}])
-
-        assert result.content == "Full async"
+        assert result.content == "From B"
 
     @pytest.mark.asyncio
     async def test_chat_stream_async_routes_correctly(self, mock_lg: Logger) -> None:
@@ -236,7 +215,7 @@ class TestLLMRouterModelRouting:
 
         result = router.chat([{"role": "user", "content": "Hi"}], model="model-b")
 
-        assert result == "From B"
+        assert result.content == "From B"
 
     def test_falls_back_to_default_when_model_not_in_table(
         self, mock_lg: Logger
@@ -249,7 +228,7 @@ class TestLLMRouterModelRouting:
 
         result = router.chat([{"role": "user", "content": "Hi"}], model="unknown-model")
 
-        assert result == "From A"  # Falls back to default
+        assert result.content == "From A"  # Falls back to default
 
     def test_explicit_backend_takes_priority_over_model(self, mock_lg: Logger) -> None:
         """Test explicit backend param overrides model-based routing."""
@@ -267,7 +246,7 @@ class TestLLMRouterModelRouting:
             [{"role": "user", "content": "Hi"}], model="model-b", backend="a"
         )
 
-        assert result == "From A"
+        assert result.content == "From A"
 
     def test_models_property_returns_routing_table(self, mock_lg: Logger) -> None:
         """Test models property exposes the routing table."""
