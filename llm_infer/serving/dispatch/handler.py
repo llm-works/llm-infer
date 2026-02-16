@@ -12,7 +12,7 @@ import yaml
 
 from ...context import Event, RequestContext
 from ..adapters import validate_adapter_id
-from .types import Request, RequestStatus, Response, StreamChunk
+from .types import Request, RequestStatus, Response, ResponseAdapterInfo, StreamChunk
 
 
 class AdapterError(Exception):
@@ -404,7 +404,7 @@ class RequestHandler(ABC):
         result_text: str,
         tool_calls: list[dict[str, Any]] | None,
         usage: dict[str, Any] | None = None,
-        fallback_adapter_id: str | None = None,
+        adapter_info: ResponseAdapterInfo | None = None,
     ) -> Response:
         """Build successful response with token counts.
 
@@ -429,8 +429,7 @@ class RequestHandler(ABC):
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             tool_calls=tool_calls,
-            adapter_fallback=fallback_adapter_id is not None,
-            adapter_requested=fallback_adapter_id,
+            adapter=adapter_info,
         )
 
     def _process_blocking_request(self, request: Request) -> Response:
@@ -445,8 +444,13 @@ class RequestHandler(ABC):
             )
             # Adapter mismatch from response takes precedence over pre-request fallback
             effective_fallback = adapter_mismatch_id or fallback_adapter_id
+            adapter_info = (
+                ResponseAdapterInfo(requested=effective_fallback, fallback=True)
+                if effective_fallback
+                else None
+            )
             return self._build_success_response(
-                request, result_text, tool_calls, usage, effective_fallback
+                request, result_text, tool_calls, usage, adapter_info
             )
         except AdapterError as e:
             if self._lg:
@@ -464,15 +468,26 @@ class RequestHandler(ABC):
             chunk = StreamChunk(id=request.id, token=token)
             self._response_q.put(chunk)
 
-    def _get_effective_adapter_fallback(
-        self, stream: Any, fallback_adapter_id: str | None
-    ) -> str | None:
-        """Get effective adapter fallback ID, checking stream for mismatch."""
+    def _build_adapter_info(
+        self,
+        fallback_adapter_id: str | None,
+        stream: Any | None = None,
+    ) -> ResponseAdapterInfo | None:
+        """Build AdapterInfo from fallback ID and/or stream mismatch.
+
+        Returns None if no adapter was involved in the request.
+        """
         # Check if stream reported adapter mismatch from vLLM response
-        stream_mismatch = getattr(stream, "adapter_mismatch", False)
-        if stream_mismatch:
-            return getattr(stream, "adapter_requested", None)
-        return fallback_adapter_id
+        if stream is not None:
+            stream_mismatch = getattr(stream, "adapter_mismatch", False)
+            if stream_mismatch:
+                requested = getattr(stream, "adapter_requested", None)
+                return ResponseAdapterInfo(requested=requested, fallback=True)
+
+        if fallback_adapter_id is not None:
+            return ResponseAdapterInfo(requested=fallback_adapter_id, fallback=True)
+
+        return None
 
     def _send_stream_final_chunk(
         self,
@@ -482,9 +497,7 @@ class RequestHandler(ABC):
     ) -> None:
         """Send final chunk with metadata after streaming completes."""
         assert self._response_q is not None
-        effective_fallback = self._get_effective_adapter_fallback(
-            stream, fallback_adapter_id
-        )
+        adapter_info = self._build_adapter_info(fallback_adapter_id, stream)
         final_chunk = StreamChunk(
             id=request.id,
             token="",
@@ -493,8 +506,7 @@ class RequestHandler(ABC):
             prompt_tokens=stream.prompt_tokens,
             completion_tokens=stream.completion_tokens,
             tool_calls=getattr(stream, "tool_calls", None),
-            adapter_fallback=effective_fallback is not None,
-            adapter_requested=effective_fallback,
+            adapter=adapter_info,
         )
         self._response_q.put(final_chunk)
 
@@ -515,16 +527,13 @@ class RequestHandler(ABC):
                 prompt_tokens=stream.prompt_tokens,
                 completion_tokens=stream.completion_tokens,
             )
-        effective_fallback = self._get_effective_adapter_fallback(
-            stream, fallback_adapter_id
-        )
+        adapter_info = self._build_adapter_info(fallback_adapter_id, stream)
         return Response(
             id=request.id,
             status=RequestStatus.COMPLETED,
             prompt_tokens=stream.prompt_tokens,
             completion_tokens=stream.completion_tokens,
-            adapter_fallback=effective_fallback is not None,
-            adapter_requested=effective_fallback,
+            adapter=adapter_info,
         )
 
     def _process_streaming_request(self, request: Request) -> Response:

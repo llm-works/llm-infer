@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
-from ....schemas.openai import FinishReason, Role
+from ....schemas.openai import AdapterInfoResponse, FinishReason, Role
 from .streaming import (
     create_chat_chunk,
     create_completion_chunk,
@@ -33,6 +33,20 @@ def _map_finish_reason(reason: str | None) -> FinishReason:
         return FinishReason.TOOL_CALLS
     # "error" and all other cases map to STOP
     return FinishReason.STOP
+
+
+def _extract_adapter_info(chunk: Any) -> AdapterInfoResponse | None:
+    """Extract adapter info from a stream chunk."""
+    chunk_adapter = getattr(chunk, "adapter", None)
+    if chunk_adapter is None:
+        return None
+    return AdapterInfoResponse(
+        requested=chunk_adapter.requested,
+        actual=chunk_adapter.actual,
+        fallback=chunk_adapter.fallback,
+        mtime=chunk_adapter.mtime,
+        md5=chunk_adapter.md5,
+    )
 
 
 class StreamingGenerator(ABC):
@@ -70,8 +84,7 @@ class StreamingGenerator(ABC):
         self,
         finish_reason: FinishReason,
         tool_calls: list[dict[str, Any]] | None = None,
-        adapter_fallback: bool | None = None,
-        adapter_requested: str | None = None,
+        adapter: AdapterInfoResponse | None = None,
     ) -> str:
         """Create SSE event for the final chunk with finish reason."""
         pass
@@ -86,16 +99,12 @@ class StreamingGenerator(ABC):
         # Stream tokens
         finish_reason = FinishReason.STOP
         tool_calls = None
-        adapter_fallback = None
-        adapter_requested = None
+        adapter: AdapterInfoResponse | None = None
         async for chunk in self.ipc.submit_streaming(self.request_id, internal_request):
             if chunk.is_final:
                 finish_reason = _map_finish_reason(chunk.finish_reason)
                 tool_calls = getattr(chunk, "tool_calls", None)
-                # Extract adapter fallback info from final response
-                if getattr(chunk, "adapter_fallback", False):
-                    adapter_fallback = True
-                    adapter_requested = getattr(chunk, "adapter_requested", None)
+                adapter = _extract_adapter_info(chunk)
                 break
             if chunk.token:
                 content = self.create_content_chunk(chunk.token)
@@ -103,9 +112,7 @@ class StreamingGenerator(ABC):
                     yield content
 
         # Final chunk with finish_reason, tool_calls, and adapter info
-        yield self.create_final_chunk(
-            finish_reason, tool_calls, adapter_fallback, adapter_requested
-        )
+        yield self.create_final_chunk(finish_reason, tool_calls, adapter)
         yield format_sse_done()
 
 
@@ -155,8 +162,7 @@ class ChatStreamingGenerator(StreamingGenerator):
         self,
         finish_reason: FinishReason,
         tool_calls: list[dict[str, Any]] | None = None,
-        adapter_fallback: bool | None = None,
-        adapter_requested: str | None = None,
+        adapter: AdapterInfoResponse | None = None,
     ) -> str:
         """Create final chunk for chat."""
         # Flush normalizer buffer if active
@@ -171,8 +177,7 @@ class ChatStreamingGenerator(StreamingGenerator):
             content=flushed if flushed else None,
             finish_reason=finish_reason,
             tool_calls=tool_calls,
-            adapter_fallback=adapter_fallback,
-            adapter_requested=adapter_requested,
+            adapter=adapter,
         )
         return format_sse_event(chunk.model_dump_json(exclude_none=True))
 
@@ -194,8 +199,7 @@ class CompletionStreamingGenerator(StreamingGenerator):
         self,
         finish_reason: FinishReason,
         tool_calls: list[dict[str, Any]] | None = None,
-        adapter_fallback: bool | None = None,
-        adapter_requested: str | None = None,
+        adapter: AdapterInfoResponse | None = None,
     ) -> str:
         """Create final chunk for completion.
 
@@ -207,7 +211,6 @@ class CompletionStreamingGenerator(StreamingGenerator):
             created=self.created,
             text="",
             finish_reason=finish_reason,
-            adapter_fallback=adapter_fallback,
-            adapter_requested=adapter_requested,
+            adapter=adapter,
         )
         return format_sse_event(chunk.model_dump_json(exclude_none=True))

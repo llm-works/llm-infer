@@ -10,6 +10,27 @@ if TYPE_CHECKING:
     from ...context import RequestContext
 
 
+@dataclass
+class ResponseAdapterInfo:
+    """LoRA adapter info for internal response types."""
+
+    requested: str | None = None
+    actual: str | None = None
+    fallback: bool = False
+    mtime: str | None = None
+    md5: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for JSON serialization."""
+        return {
+            "requested": self.requested,
+            "actual": self.actual,
+            "fallback": self.fallback,
+            "mtime": self.mtime,
+            "md5": self.md5,
+        }
+
+
 class RequestStatus(Enum):
     """Status of an inference request."""
 
@@ -58,9 +79,8 @@ class Response:
     completion_tokens: int | None = None
     # Tool calling response (list of tool call dicts if model requested tool calls)
     tool_calls: list[dict[str, Any]] | None = None
-    # Adapter fallback info (when requested adapter not found, fell back to base model)
-    adapter_fallback: bool = False
-    adapter_requested: str | None = None
+    # LoRA adapter info (when adapter was requested)
+    adapter: ResponseAdapterInfo | None = None
 
 
 @dataclass
@@ -84,9 +104,8 @@ class StreamChunk:
     tool_calls: list[dict[str, Any]] | None = (
         None  # Tool calls (streamed incrementally)
     )
-    # Adapter fallback info (when requested adapter not found, fell back to base model)
-    adapter_fallback: bool = False
-    adapter_requested: str | None = None
+    # LoRA adapter info (when adapter was requested)
+    adapter: ResponseAdapterInfo | None = None
 
 
 @dataclass

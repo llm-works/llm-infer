@@ -16,6 +16,28 @@ from ..schemas.openai import (
 
 
 @dataclass
+class AdapterInfo:
+    """LoRA adapter information for a completion request.
+
+    Tracks which adapter was requested, which was actually used by the
+    inference engine, and metadata for verification.
+
+    Attributes:
+        requested: The adapter name the client requested.
+        actual: The adapter name the engine actually used (from response).
+        fallback: True if actual != requested (adapter wasn't available).
+        mtime: ISO-8601 modification time of the adapter weights file.
+        md5: First 12 chars of MD5 hash of the adapter weights file.
+    """
+
+    requested: str | None = None
+    actual: str | None = None
+    fallback: bool = False
+    mtime: str | None = None
+    md5: str | None = None
+
+
+@dataclass
 class ChatResponse:
     """Response from a chat completion request.
 
@@ -35,6 +57,8 @@ class ChatResponse:
             Only present when think mode is enabled.
         tool_calls: List of tool/function calls made by the model. Present
             when the model invokes tools during generation.
+        adapter: LoRA adapter info including requested/actual adapter and
+            verification metadata. Only present if adapter was requested.
     """
 
     content: str
@@ -44,8 +68,7 @@ class ChatResponse:
     # llm-infer extensions
     thinking: str | None = None
     tool_calls: list[ToolCall] | None = field(default=None)
-    adapter_fallback: bool = False  # True if requested adapter wasn't available
-    adapter_requested: str | None = None  # The adapter that was requested
+    adapter: AdapterInfo | None = None  # Present if adapter was requested
 
     def has_tool_calls(self) -> bool:
         """Check if the response contains tool calls."""

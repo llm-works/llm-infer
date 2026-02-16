@@ -18,7 +18,6 @@ LoRA Limitation:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -27,12 +26,13 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from appinfra.log import Logger
+
+from ..adapter_meta import compute_adapter_metadata
 
 if TYPE_CHECKING:
     from ..context import RequestContext
@@ -359,28 +359,6 @@ class VLLMServerEngine:
             return self._adapter_metadata.get(lora_request.lora_name)
         return None
 
-    def _compute_adapter_metadata(self, adapter_path: Path) -> dict[str, str]:
-        """Compute adapter metadata: mtime and md5sum of weights file."""
-        # PEFT standard weight filenames
-        weights_file = adapter_path / "adapter_model.safetensors"
-        if not weights_file.exists():
-            weights_file = adapter_path / "adapter_model.bin"
-
-        if not weights_file.exists():
-            return {"mtime": "unknown", "md5": "unknown"}
-
-        # Get mtime
-        mtime = datetime.fromtimestamp(weights_file.stat().st_mtime, tz=UTC)
-        mtime_str = mtime.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # Compute md5sum (first 12 chars is enough for identification)
-        md5 = hashlib.md5()
-        with open(weights_file, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                md5.update(chunk)
-
-        return {"mtime": mtime_str, "md5": md5.hexdigest()[:12]}
-
     def _validate_adapter_base_path(self, base_path: Path) -> bool:
         """Validate adapter base path exists and is a directory.
 
@@ -417,7 +395,7 @@ class VLLMServerEngine:
         )
         if enabled:
             self._adapter_paths[entry.name] = str(entry)
-            metadata = self._compute_adapter_metadata(entry)
+            metadata = compute_adapter_metadata(entry).to_dict()
             self._adapter_metadata[entry.name] = metadata
             self._lg.info(
                 "found LoRA adapter",

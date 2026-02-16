@@ -235,6 +235,20 @@ class ChatCompletionUsage(BaseModel):
     total_tokens: int
 
 
+class AdapterInfoResponse(BaseModel):
+    """LoRA adapter information (llm-infer extension).
+
+    Tracks which adapter was requested, which was actually used,
+    and metadata for verification.
+    """
+
+    requested: str | None = None  # The adapter the client requested
+    actual: str | None = None  # The adapter the engine actually used
+    fallback: bool = False  # True if actual != requested
+    mtime: str | None = None  # ISO-8601 modification time of weights file
+    md5: str | None = None  # First 12 chars of MD5 hash of weights file
+
+
 class ChatCompletionResponse(BaseModel):
     """Non-streaming chat completion response."""
 
@@ -246,8 +260,7 @@ class ChatCompletionResponse(BaseModel):
     usage: ChatCompletionUsage
     system_fingerprint: str | None = None
     # llm-infer extensions
-    adapter_fallback: bool = False  # True if requested adapter wasn't available
-    adapter_requested: str | None = None  # The adapter that was requested
+    adapter: AdapterInfoResponse | None = None
 
 
 # =============================================================================
@@ -296,9 +309,8 @@ class ChatCompletionChunk(BaseModel):
     model: str
     choices: list[ChatCompletionChunkChoice]
     system_fingerprint: str | None = None
-    # llm-infer extensions (only present in final chunk if fallback occurred)
-    adapter_fallback: bool | None = None
-    adapter_requested: str | None = None
+    # llm-infer extensions (only present in final chunk if adapter was requested)
+    adapter: AdapterInfoResponse | None = None
 
 
 # =============================================================================
@@ -367,8 +379,7 @@ class CompletionResponse(BaseModel):
     choices: list[CompletionChoice]
     usage: ChatCompletionUsage
     # llm-infer extensions
-    adapter_fallback: bool = False  # True if requested adapter wasn't available
-    adapter_requested: str | None = None  # The adapter that was requested
+    adapter: AdapterInfoResponse | None = None
 
 
 # =============================================================================
@@ -393,9 +404,8 @@ class CompletionChunk(BaseModel):
     created: int
     model: str
     choices: list[CompletionChunkChoice]
-    # llm-infer extensions (only present in final chunk if fallback occurred)
-    adapter_fallback: bool | None = None
-    adapter_requested: str | None = None
+    # llm-infer extensions (only present in final chunk if adapter was requested)
+    adapter: AdapterInfoResponse | None = None
 
 
 # =============================================================================
