@@ -24,6 +24,7 @@ class TestVLLMServerEngineVerifyAdapters:
         # Set up required attributes
         engine._lg = MagicMock()
         engine._adapter_paths = dict(adapter_paths)
+        engine._adapter_metadata = {k: {} for k in adapter_paths}
 
         # Mock httpx client to return loaded_models
         mock_response = MagicMock()

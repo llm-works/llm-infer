@@ -590,33 +590,29 @@ class VLLMServerEngine:
                 f"Failed to connect to vLLM server at {self._base_url}. Error: {e}"
             ) from e
 
-    def _verify_adapters(self) -> None:
-        """Verify adapters were loaded by vLLM, remove any that failed.
+    def _remove_failed_adapter(self, adapter_id: str) -> None:
+        """Remove an adapter that vLLM failed to load."""
+        self._lg.warning(
+            "adapter not loaded by vLLM, removing from available adapters",
+            extra={"adapter_id": adapter_id, "path": self._adapter_paths[adapter_id]},
+        )
+        del self._adapter_paths[adapter_id]
+        self._adapter_metadata.pop(adapter_id, None)
 
-        Queries vLLM's /v1/models endpoint and removes adapters from our
-        available list that vLLM didn't actually load. This guarantees we
-        only report adapters to customers that are confirmed working.
-        """
+    def _verify_adapters(self) -> None:
+        """Verify adapters were loaded by vLLM, remove any that failed."""
         if not self._adapter_paths:
             return
 
         response = self._client.get("/v1/models")
+        response.raise_for_status()
         data = response.json()
         loaded_models = {m.get("id", "") for m in data.get("data", [])}
 
         # Find and remove adapters that vLLM didn't load
-        failed: list[str] = []
-        for adapter_id in list(self._adapter_paths.keys()):
-            if adapter_id not in loaded_models:
-                failed.append(adapter_id)
-                self._lg.warning(
-                    "adapter not loaded by vLLM, removing from available adapters",
-                    extra={
-                        "adapter_id": adapter_id,
-                        "path": self._adapter_paths[adapter_id],
-                    },
-                )
-                del self._adapter_paths[adapter_id]
+        failed = [a for a in self._adapter_paths if a not in loaded_models]
+        for adapter_id in failed:
+            self._remove_failed_adapter(adapter_id)
 
         if failed:
             self._lg.warning(
