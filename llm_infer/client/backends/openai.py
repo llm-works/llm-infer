@@ -35,7 +35,7 @@ from ..exceptions import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
-from ..types import ChatResponse
+from ..types import AdapterInfo, ChatResponse
 from .base import Backend
 
 
@@ -520,8 +520,7 @@ class OpenAICompatibleBackend(Backend):
             model=data.get("model", model),
             thinking=message.get("thinking"),
             tool_calls=tool_calls,
-            adapter_fallback=data.get("adapter_fallback", False),
-            adapter_requested=data.get("adapter_requested"),
+            adapter=_parse_adapter_info(data.get("adapter")),
         )
 
     def _parse_tool_calls(
@@ -595,8 +594,7 @@ class _StreamState:
     _tool_call_buffer: dict[int, dict[str, Any]] = field(default_factory=dict)
     finish_reason: FinishReason | None = None
     usage: ChatCompletionUsage | None = None
-    adapter_fallback: bool = False
-    adapter_requested: str | None = None
+    adapter: AdapterInfo | None = None
 
     def process_chunk(self, chunk: dict[str, Any]) -> str | None:
         """Process a single SSE chunk, returning token content if present."""
@@ -609,10 +607,9 @@ class _StreamState:
         if "usage" in chunk:
             self.usage = _parse_usage(chunk["usage"])
 
-        # Adapter fallback info (present in final chunk if fallback occurred)
-        if chunk.get("adapter_fallback"):
-            self.adapter_fallback = True
-            self.adapter_requested = chunk.get("adapter_requested")
+        # Adapter info (present in final chunk if adapter was requested)
+        if "adapter" in chunk:
+            self.adapter = _parse_adapter_info(chunk["adapter"])
 
         return token
 
@@ -673,8 +670,7 @@ class _StreamState:
             model=model,
             thinking="".join(self.thinking) if self.thinking else None,
             tool_calls=tool_calls,
-            adapter_fallback=self.adapter_fallback,
-            adapter_requested=self.adapter_requested,
+            adapter=self.adapter,
         )
 
     def _finalize_tool_calls(self) -> list[ToolCall] | None:
@@ -714,4 +710,17 @@ def _parse_usage(data: dict[str, Any] | None) -> ChatCompletionUsage | None:
         prompt_tokens=data.get("prompt_tokens") or 0,
         completion_tokens=data.get("completion_tokens") or 0,
         total_tokens=data.get("total_tokens") or 0,
+    )
+
+
+def _parse_adapter_info(data: dict[str, Any] | None) -> AdapterInfo | None:
+    """Parse adapter dict to AdapterInfo."""
+    if data is None:
+        return None
+    return AdapterInfo(
+        requested=data.get("requested"),
+        actual=data.get("actual"),
+        fallback=data.get("fallback", False),
+        mtime=data.get("mtime"),
+        md5=data.get("md5"),
     )

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ....response.parsers.think import ThinkTagNormalizer, extract_thinking
 from ....schemas.openai import (
+    AdapterInfoResponse,
     ChatCompletionChoice,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -165,8 +166,7 @@ def _build_chat_response(
             )
         ],
         usage=_build_completion_usage(response),
-        adapter_fallback=getattr(response, "adapter_fallback", False),
-        adapter_requested=getattr(response, "adapter_requested", None),
+        adapter=_build_adapter_info(response),
     )
 
 
@@ -186,12 +186,27 @@ def _determine_chat_finish_reason(
     )
 
 
+def _build_adapter_info(response: Any) -> AdapterInfoResponse | None:
+    """Build AdapterInfoResponse from internal response."""
+    adapter = getattr(response, "adapter", None)
+    if adapter is None:
+        return None
+    return AdapterInfoResponse(
+        requested=adapter.requested,
+        actual=adapter.actual,
+        fallback=adapter.fallback,
+        mtime=adapter.mtime,
+        md5=adapter.md5,
+    )
+
+
 def _build_adapter_fallback_headers(response: Any) -> dict[str, str]:
     """Build adapter fallback headers if fallback occurred."""
-    if getattr(response, "adapter_fallback", False):
+    adapter = getattr(response, "adapter", None)
+    if adapter is not None and adapter.fallback:
         return {
             "X-Adapter-Fallback": "true",
-            "X-Adapter-Requested": response.adapter_requested or "",
+            "X-Adapter-Requested": adapter.requested or "",
         }
     return {}
 
@@ -261,8 +276,7 @@ def _build_completion_response_obj(
             CompletionChoice(index=0, text=result_text, finish_reason=finish_reason)
         ],
         usage=_build_completion_usage(response),
-        adapter_fallback=getattr(response, "adapter_fallback", False),
-        adapter_requested=getattr(response, "adapter_requested", None),
+        adapter=_build_adapter_info(response),
     )
 
 
