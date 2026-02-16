@@ -140,20 +140,19 @@ class TestVLLMServerEngineAdapterResponseVerification:
     """Test VLLMServerEngine adapter verification at request time."""
 
     def test_verify_adapter_response_no_adapter(self) -> None:
-        """Test verification returns no mismatch when no adapter requested."""
+        """Test verification returns None when no adapter requested."""
         from llm_infer.engines.vllm_server import VLLMServerEngine
 
         engine = object.__new__(VLLMServerEngine)
         engine._lg = MagicMock()
 
-        mismatch, requested = engine._verify_adapter_response("base-model", None)
+        result = engine._verify_adapter_response("base-model", None)
 
-        assert mismatch is False
-        assert requested is None
+        assert result is None
         engine._lg.warning.assert_not_called()
 
     def test_verify_adapter_response_match(self) -> None:
-        """Test verification returns no mismatch when adapter matches."""
+        """Test verification returns success info when adapter matches."""
         from llm_infer.engines.vllm_server import VLLMServerEngine
 
         engine = object.__new__(VLLMServerEngine)
@@ -162,16 +161,17 @@ class TestVLLMServerEngineAdapterResponseVerification:
             "my-adapter": {"mtime": "2026-01-01", "md5": "abc123"}
         }
 
-        # Mock lora_request with lora_name attribute
         lora_request = MagicMock()
         lora_request.lora_name = "my-adapter"
 
-        mismatch, requested = engine._verify_adapter_response(
-            "my-adapter", lora_request
-        )
+        result = engine._verify_adapter_response("my-adapter", lora_request)
 
-        assert mismatch is False
-        assert requested is None
+        assert result is not None
+        assert result["requested"] == "my-adapter"
+        assert result["actual"] == "my-adapter"
+        assert result["fallback"] is False
+        assert result["mtime"] == "2026-01-01"
+        assert result["md5"] == "abc123"
         engine._lg.warning.assert_not_called()
 
     def test_verify_adapter_response_mismatch(self) -> None:
@@ -184,12 +184,12 @@ class TestVLLMServerEngineAdapterResponseVerification:
         lora_request = MagicMock()
         lora_request.lora_name = "my-adapter"
 
-        mismatch, requested = engine._verify_adapter_response(
-            "base-model", lora_request
-        )
+        result = engine._verify_adapter_response("base-model", lora_request)
 
-        assert mismatch is True
-        assert requested == "my-adapter"
+        assert result is not None
+        assert result["requested"] == "my-adapter"
+        assert result["actual"] == "base-model"
+        assert result["fallback"] is True
         engine._lg.warning.assert_called_once()
         call_extra = engine._lg.warning.call_args[1]["extra"]
         assert call_extra["requested"] == "my-adapter"
@@ -215,17 +215,18 @@ class TestVLLMServerEngineAdapterResponseVerification:
 
         assert isinstance(result, dict)
         assert result["content"] == "Hello"
-        assert result["adapter_mismatch"] is True
-        assert result["adapter_requested"] == "my-adapter"
+        assert result["adapter"]["fallback"] is True
+        assert result["adapter"]["requested"] == "my-adapter"
+        assert result["adapter"]["actual"] == "base-model"
 
-    def test_parse_completion_response_no_mismatch(self) -> None:
-        """Test response parsing has no mismatch when adapter matches."""
+    def test_parse_completion_response_success(self) -> None:
+        """Test response parsing includes adapter success info with metadata."""
         from llm_infer.engines.vllm_server import VLLMServerEngine
 
         engine = object.__new__(VLLMServerEngine)
         engine._lg = MagicMock()
         engine._adapter_metadata = {
-            "my-adapter": {"mtime": "2026-01-01", "md5": "abc123"}
+            "my-adapter": {"mtime": "2026-01-01T00:00:00Z", "md5": "abc123def456"}
         }
 
         lora_request = MagicMock()
@@ -238,5 +239,11 @@ class TestVLLMServerEngineAdapterResponseVerification:
 
         result = engine._parse_completion_response(data, lora_request)
 
-        # Returns string when no extra info needed
-        assert result == "Hello"
+        # Returns dict with adapter info on success
+        assert isinstance(result, dict)
+        assert result["content"] == "Hello"
+        assert result["adapter"]["fallback"] is False
+        assert result["adapter"]["requested"] == "my-adapter"
+        assert result["adapter"]["actual"] == "my-adapter"
+        assert result["adapter"]["mtime"] == "2026-01-01T00:00:00Z"
+        assert result["adapter"]["md5"] == "abc123def456"

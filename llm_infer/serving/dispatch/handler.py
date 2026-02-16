@@ -378,23 +378,21 @@ class RequestHandler(ABC):
 
     def _parse_generate_result(
         self, result: str | dict[str, Any]
-    ) -> tuple[str, list[dict[str, Any]] | None, dict[str, Any] | None, str | None]:
+    ) -> tuple[
+        str, list[dict[str, Any]] | None, dict[str, Any] | None, dict[str, Any] | None
+    ]:
         """Parse engine generate result.
 
         Returns:
-            Tuple of (content, tool_calls, usage, adapter_mismatch_id).
-            adapter_mismatch_id is set if vLLM used a different model than requested.
+            Tuple of (content, tool_calls, usage, adapter_info).
+            adapter_info is a dict with requested/actual/fallback/mtime/md5 if present.
         """
         if isinstance(result, dict):
-            # Check for adapter mismatch (vLLM used different model than requested)
-            adapter_mismatch_id = None
-            if result.get("adapter_mismatch"):
-                adapter_mismatch_id = result.get("adapter_requested")
             return (
                 result.get("content", ""),
                 result.get("tool_calls"),
                 result.get("usage"),
-                adapter_mismatch_id,
+                result.get("adapter"),
             )
         return result, None, None, None
 
@@ -439,15 +437,12 @@ class RequestHandler(ABC):
             result = self.engine.generate(**params)
             if request.context:
                 request.context.mark(Event.DECODED)
-            result_text, tool_calls, usage, adapter_mismatch_id = (
-                self._parse_generate_result(result)
+            result_text, tool_calls, usage, adapter_dict = self._parse_generate_result(
+                result
             )
-            # Adapter mismatch from response takes precedence over pre-request fallback
-            effective_fallback = adapter_mismatch_id or fallback_adapter_id
-            adapter_info = (
-                ResponseAdapterInfo(requested=effective_fallback, fallback=True)
-                if effective_fallback
-                else None
+            # Build adapter info from engine response or pre-request fallback
+            adapter_info = self._build_adapter_info_from_result(
+                adapter_dict, fallback_adapter_id
             )
             return self._build_success_response(
                 request, result_text, tool_calls, usage, adapter_info
@@ -468,6 +463,31 @@ class RequestHandler(ABC):
             chunk = StreamChunk(id=request.id, token=token)
             self._response_q.put(chunk)
 
+    def _build_adapter_info_from_result(
+        self,
+        adapter_dict: dict[str, Any] | None,
+        fallback_adapter_id: str | None,
+    ) -> ResponseAdapterInfo | None:
+        """Build AdapterInfo from engine result or pre-request fallback.
+
+        Args:
+            adapter_dict: Adapter info from engine (has requested/actual/fallback/mtime/md5)
+            fallback_adapter_id: Pre-request fallback (adapter not found before calling engine)
+        """
+        # Engine returned adapter info (success or mismatch)
+        if adapter_dict is not None:
+            return ResponseAdapterInfo(
+                requested=adapter_dict.get("requested"),
+                actual=adapter_dict.get("actual"),
+                fallback=adapter_dict.get("fallback", False),
+                mtime=adapter_dict.get("mtime"),
+                md5=adapter_dict.get("md5"),
+            )
+        # Pre-request fallback (adapter not available)
+        if fallback_adapter_id is not None:
+            return ResponseAdapterInfo(requested=fallback_adapter_id, fallback=True)
+        return None
+
     def _build_adapter_info(
         self,
         fallback_adapter_id: str | None,
@@ -477,8 +497,18 @@ class RequestHandler(ABC):
 
         Returns None if no adapter was involved in the request.
         """
-        # Check if stream reported adapter mismatch from vLLM response
+        # Check if stream reported adapter info (success or mismatch)
         if stream is not None:
+            stream_adapter = getattr(stream, "adapter_info", None)
+            if stream_adapter is not None:
+                return ResponseAdapterInfo(
+                    requested=stream_adapter.get("requested"),
+                    actual=stream_adapter.get("actual"),
+                    fallback=stream_adapter.get("fallback", False),
+                    mtime=stream_adapter.get("mtime"),
+                    md5=stream_adapter.get("md5"),
+                )
+            # Legacy: check for mismatch-only flag
             stream_mismatch = getattr(stream, "adapter_mismatch", False)
             if stream_mismatch:
                 requested = getattr(stream, "adapter_requested", None)

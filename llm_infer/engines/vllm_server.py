@@ -39,6 +39,33 @@ if TYPE_CHECKING:
     from ..serving.dispatch.config import VLLMServerConfig
 
 
+def _get_adapter_name(lora_request: Any) -> str:
+    """Extract adapter name from a LoRA request object."""
+    return (
+        lora_request.lora_name
+        if hasattr(lora_request, "lora_name")
+        else str(lora_request)
+    )
+
+
+def _build_adapter_info(
+    requested: str,
+    actual: str,
+    fallback: bool,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build adapter info dict for response."""
+    info: dict[str, Any] = {
+        "requested": requested,
+        "actual": actual,
+        "fallback": fallback,
+    }
+    if metadata and not fallback:
+        info["mtime"] = metadata.get("mtime")
+        info["md5"] = metadata.get("md5")
+    return info
+
+
 class VLLMServerStreamingIterator:
     """Streaming iterator for vLLM server's OpenAI-compatible SSE stream.
 
@@ -80,8 +107,7 @@ class VLLMServerStreamingIterator:
 
         # Adapter verification (populated from first chunk with model field)
         self._response_model: str | None = None
-        self.adapter_mismatch: bool = False
-        self.adapter_requested: str | None = None
+        self.adapter_info: dict[str, Any] | None = None
 
     def _start_stream(self) -> None:
         """Start the streaming request."""
@@ -176,31 +202,27 @@ class VLLMServerStreamingIterator:
         if self._lora_request is None or self._response_model is None:
             return
 
-        requested = (
-            self._lora_request.lora_name
-            if hasattr(self._lora_request, "lora_name")
-            else str(self._lora_request)
-        )
-
-        if self._response_model != requested:
+        requested = _get_adapter_name(self._lora_request)
+        actual = self._response_model
+        fallback = actual != requested
+        if fallback:
             self._lg.warning(
                 "adapter mismatch: vLLM used different model than requested",
-                extra={
-                    "requested": requested,
-                    "actual": self._response_model,
-                },
+                extra={"requested": requested, "actual": actual},
             )
-            self.adapter_mismatch = True
-            self.adapter_requested = requested
         else:
+            meta = self._adapter_metadata
             self._lg.debug(
                 "verified LoRA adapter",
                 extra={
                     "adapter": requested,
-                    "mtime": self._adapter_metadata.get("mtime", ""),
-                    "md5": self._adapter_metadata.get("md5", ""),
+                    "mtime": meta.get("mtime", ""),
+                    "md5": meta.get("md5", ""),
                 },
             )
+        self.adapter_info = _build_adapter_info(
+            requested, actual, fallback, None if fallback else self._adapter_metadata
+        )
 
     def _handle_done_sentinel(self) -> None:
         """Handle the [DONE] SSE sentinel, finalizing the stream."""
@@ -755,46 +777,35 @@ class VLLMServerEngine:
         return result
 
     def _verify_adapter_response(
-        self,
-        response_model: str,
-        lora_request: Any | None,
-    ) -> tuple[bool, str | None]:
-        """Verify vLLM used the requested adapter.
-
-        Returns:
-            Tuple of (mismatch, requested_adapter):
-            - (False, None) if no adapter requested or adapter matches
-            - (True, adapter_name) if adapter was requested but vLLM used different model
-        """
+        self, response_model: str, lora_request: Any | None
+    ) -> dict[str, Any] | None:
+        """Verify vLLM used the requested adapter, return adapter info dict."""
         if lora_request is None:
-            return False, None
+            return None
 
-        requested = (
-            lora_request.lora_name
-            if hasattr(lora_request, "lora_name")
-            else str(lora_request)
-        )
-
-        if response_model != requested:
+        requested = _get_adapter_name(lora_request)
+        fallback = response_model != requested
+        if fallback:
             self._lg.warning(
                 "adapter mismatch: vLLM used different model than requested",
+                extra={"requested": requested, "actual": response_model},
+            )
+        else:
+            meta = self._adapter_metadata.get(requested, {})
+            self._lg.debug(
+                "verified LoRA adapter",
                 extra={
-                    "requested": requested,
-                    "actual": response_model,
+                    "adapter": requested,
+                    "mtime": meta.get("mtime", ""),
+                    "md5": meta.get("md5", ""),
                 },
             )
-            return True, requested
-
-        metadata = self._adapter_metadata.get(requested, {})
-        self._lg.debug(
-            "verified LoRA adapter",
-            extra={
-                "adapter": requested,
-                "mtime": metadata.get("mtime", ""),
-                "md5": metadata.get("md5", ""),
-            },
+        return _build_adapter_info(
+            requested,
+            response_model,
+            fallback,
+            None if fallback else self._adapter_metadata.get(requested),
         )
-        return False, None
 
     def _parse_completion_response(
         self,
@@ -811,20 +822,17 @@ class VLLMServerEngine:
 
         # Verify adapter was actually used
         response_model = data.get("model", "")
-        adapter_mismatch, adapter_requested = self._verify_adapter_response(
-            response_model, lora_request
-        )
+        adapter_info = self._verify_adapter_response(response_model, lora_request)
 
         # Build response dict if we have extra info
-        if tool_calls or usage or adapter_mismatch:
+        if tool_calls or usage or adapter_info:
             result: dict[str, Any] = {"content": content}
             if tool_calls:
                 result["tool_calls"] = tool_calls
             if usage:
                 result["usage"] = usage
-            if adapter_mismatch:
-                result["adapter_mismatch"] = True
-                result["adapter_requested"] = adapter_requested
+            if adapter_info:
+                result["adapter"] = adapter_info
             return result
         return content
 
