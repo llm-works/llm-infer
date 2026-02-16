@@ -18,6 +18,7 @@ LoRA Limitation:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -50,13 +52,20 @@ class VLLMServerStreamingIterator:
         client: httpx.Client,
         url: str,
         payload: dict[str, Any],
+        lora_request: Any | None = None,
+        adapter_metadata: dict[str, str] | None = None,
     ) -> None:
         self._lg = lg
         self._client = client
         self._url = url
         self._payload = payload
+        self._lora_request = lora_request
+        self._adapter_metadata = adapter_metadata or {}
+        self._init_state()
 
-        # State tracking
+    def _init_state(self) -> None:
+        """Initialize streaming state and tracking fields."""
+        # Stream state
         self._stream_context: Any = None
         self._response: httpx.Response | None = None
         self._line_iter: Iterator[str] | None = None
@@ -66,9 +75,13 @@ class VLLMServerStreamingIterator:
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
         self.finish_reason: str | None = None
-        # Tool calls accumulated from delta chunks (keyed by index)
         self._tool_call_chunks: dict[int, dict[str, Any]] = {}
         self.tool_calls: list[dict[str, Any]] | None = None
+
+        # Adapter verification (populated from first chunk with model field)
+        self._response_model: str | None = None
+        self.adapter_mismatch: bool = False
+        self.adapter_requested: str | None = None
 
     def _start_stream(self) -> None:
         """Start the streaming request."""
@@ -158,6 +171,37 @@ class VLLMServerStreamingIterator:
 
         return None
 
+    def _verify_adapter(self) -> None:
+        """Verify vLLM used the requested adapter."""
+        if self._lora_request is None or self._response_model is None:
+            return
+
+        requested = (
+            self._lora_request.lora_name
+            if hasattr(self._lora_request, "lora_name")
+            else str(self._lora_request)
+        )
+
+        if self._response_model != requested:
+            self._lg.warning(
+                "adapter mismatch: vLLM used different model than requested",
+                extra={
+                    "requested": requested,
+                    "actual": self._response_model,
+                },
+            )
+            self.adapter_mismatch = True
+            self.adapter_requested = requested
+        else:
+            self._lg.debug(
+                "verified LoRA adapter",
+                extra={
+                    "adapter": requested,
+                    "mtime": self._adapter_metadata.get("mtime", ""),
+                    "md5": self._adapter_metadata.get("md5", ""),
+                },
+            )
+
     def _handle_done_sentinel(self) -> None:
         """Handle the [DONE] SSE sentinel, finalizing the stream."""
         if not self._finished:
@@ -166,11 +210,26 @@ class VLLMServerStreamingIterator:
             if not self.finish_reason:
                 self.finish_reason = "stop"
 
-    def _process_sse_line(self, line: str) -> str | None:
-        """Process a single SSE line, returning text chunk if present.
+    def _process_choice_delta(self, data: dict[str, Any]) -> str | None:
+        """Process choice delta from SSE chunk, returning content if present."""
+        choices = data.get("choices", [])
+        if not choices:
+            if data.get("usage"):
+                self._handle_completion(data)
+            return None
 
-        SSE format: "data: {json}\n\n" or "data: [DONE]\n\n"
-        """
+        choice = choices[0]
+        delta = choice.get("delta", {})
+        if tc_deltas := delta.get("tool_calls"):
+            for tc_delta in tc_deltas:
+                self._accumulate_tool_call_delta(tc_delta)
+        if choice.get("finish_reason"):
+            self._handle_completion(data)
+        content: str = delta.get("content") or ""
+        return content if content else None
+
+    def _process_sse_line(self, line: str) -> str | None:
+        """Process a single SSE line, returning text chunk if present."""
         if not line.startswith("data: "):
             return None
 
@@ -180,24 +239,13 @@ class VLLMServerStreamingIterator:
             raise StopIteration
 
         data = json.loads(data_str)
-        choices = data.get("choices", [])
-        if not choices:
-            if data.get("usage"):
-                self._handle_completion(data)
-            return None
 
-        choice = choices[0]
-        delta = choice.get("delta", {})
-        # Accumulate tool call deltas before handling completion
-        # to ensure final chunk's deltas are included
-        if tc_deltas := delta.get("tool_calls"):
-            for tc_delta in tc_deltas:
-                self._accumulate_tool_call_delta(tc_delta)
-        if choice.get("finish_reason"):
-            self._handle_completion(data)
+        # Capture and verify model from first chunk
+        if self._response_model is None and "model" in data:
+            self._response_model = data["model"]
+            self._verify_adapter()
 
-        content: str = delta.get("content") or ""
-        return content if content else None
+        return self._process_choice_delta(data)
 
     def __next__(self) -> str:
         if self._finished:
@@ -240,7 +288,22 @@ class VLLMServerEngine:
         self._config = config
         self._process: subprocess.Popen[bytes] | None = None
         self._owns_process = False
-        # Parse and normalize host to avoid double-port issues
+        self._base_url = self._parse_base_url(config)
+        self._model_name = config.served_model_name or Path(config.model_path).name
+        self._adapter_paths: dict[str, str] = {}
+        self._adapter_metadata: dict[str, dict[str, str]] = {}
+
+        if config.lora.enabled and config.lora.base_path:
+            self._scan_adapters(Path(config.lora.base_path))
+
+        self._client = httpx.Client(
+            base_url=self._base_url,
+            timeout=httpx.Timeout(config.timeout, connect=10.0),
+        )
+        self._initialize_connection()
+
+    def _parse_base_url(self, config: VLLMServerConfig) -> str:
+        """Parse and normalize host URL to avoid double-port issues."""
         from urllib.parse import urlparse
 
         parsed = urlparse(
@@ -248,21 +311,7 @@ class VLLMServerEngine:
         )
         scheme = parsed.scheme or "http"
         hostname = parsed.hostname or parsed.netloc.split(":")[0]
-        self._base_url = f"{scheme}://{hostname}:{config.port}"
-        self._model_name = config.served_model_name or Path(config.model_path).name
-        self._adapter_paths: dict[str, str] = {}  # adapter_name -> filesystem_path
-
-        # Scan for adapters if LoRA is enabled (before starting server)
-        if config.lora.enabled and config.lora.base_path:
-            self._scan_adapters(Path(config.lora.base_path))
-
-        # HTTP client with configured timeout
-        self._client = httpx.Client(
-            base_url=self._base_url,
-            timeout=httpx.Timeout(config.timeout, connect=10.0),
-        )
-
-        self._initialize_connection()
+        return f"{scheme}://{hostname}:{config.port}"
 
     def _initialize_connection(self) -> None:
         """Initialize server connection, starting server if needed."""
@@ -271,6 +320,7 @@ class VLLMServerEngine:
                 self._start_server()
 
             self._verify_connection()
+            self._verify_adapters()
         except Exception:
             self._client.close()
             if self._owns_process:
@@ -302,6 +352,34 @@ class VLLMServerEngine:
                 extra={"path": str(config_path), "exception": e},
             )
             return None
+
+    def _get_adapter_metadata(self, lora_request: Any | None) -> dict[str, str] | None:
+        """Get cached adapter metadata for a LoRA request."""
+        if lora_request and hasattr(lora_request, "lora_name"):
+            return self._adapter_metadata.get(lora_request.lora_name)
+        return None
+
+    def _compute_adapter_metadata(self, adapter_path: Path) -> dict[str, str]:
+        """Compute adapter metadata: mtime and md5sum of weights file."""
+        # PEFT standard weight filenames
+        weights_file = adapter_path / "adapter_model.safetensors"
+        if not weights_file.exists():
+            weights_file = adapter_path / "adapter_model.bin"
+
+        if not weights_file.exists():
+            return {"mtime": "unknown", "md5": "unknown"}
+
+        # Get mtime
+        mtime = datetime.fromtimestamp(weights_file.stat().st_mtime, tz=UTC)
+        mtime_str = mtime.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Compute md5sum (first 12 chars is enough for identification)
+        md5 = hashlib.md5()
+        with open(weights_file, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                md5.update(chunk)
+
+        return {"mtime": mtime_str, "md5": md5.hexdigest()[:12]}
 
     def _validate_adapter_base_path(self, base_path: Path) -> bool:
         """Validate adapter base path exists and is a directory.
@@ -339,9 +417,15 @@ class VLLMServerEngine:
         )
         if enabled:
             self._adapter_paths[entry.name] = str(entry)
+            metadata = self._compute_adapter_metadata(entry)
+            self._adapter_metadata[entry.name] = metadata
             self._lg.info(
                 "found LoRA adapter",
-                extra={"adapter": entry.name, "path": str(entry)},
+                extra={
+                    "adapter": entry.name,
+                    "mtime": metadata["mtime"],
+                    "md5": metadata["md5"],
+                },
             )
 
     def _scan_adapters(self, base_path: Path) -> None:
@@ -528,6 +612,43 @@ class VLLMServerEngine:
                 f"Failed to connect to vLLM server at {self._base_url}. Error: {e}"
             ) from e
 
+    def _verify_adapters(self) -> None:
+        """Verify adapters were loaded by vLLM, remove any that failed.
+
+        Queries vLLM's /v1/models endpoint and removes adapters from our
+        available list that vLLM didn't actually load. This guarantees we
+        only report adapters to customers that are confirmed working.
+        """
+        if not self._adapter_paths:
+            return
+
+        response = self._client.get("/v1/models")
+        data = response.json()
+        loaded_models = {m.get("id", "") for m in data.get("data", [])}
+
+        # Find and remove adapters that vLLM didn't load
+        failed: list[str] = []
+        for adapter_id in list(self._adapter_paths.keys()):
+            if adapter_id not in loaded_models:
+                failed.append(adapter_id)
+                self._lg.warning(
+                    "adapter not loaded by vLLM, removing from available adapters",
+                    extra={
+                        "adapter_id": adapter_id,
+                        "path": self._adapter_paths[adapter_id],
+                    },
+                )
+                del self._adapter_paths[adapter_id]
+
+        if failed:
+            self._lg.warning(
+                "adapter verification complete",
+                extra={
+                    "removed": failed,
+                    "available": list(self._adapter_paths.keys()),
+                },
+            )
+
     # -------------------------------------------------------------------------
     # InferenceEngineProtocol: Properties
     # -------------------------------------------------------------------------
@@ -659,8 +780,54 @@ class VLLMServerEngine:
         result: dict[str, Any] = response.json()
         return result
 
-    def _parse_completion_response(self, data: dict[str, Any]) -> str | dict[str, Any]:
-        """Extract content, tool_calls, and usage from a chat completions response."""
+    def _verify_adapter_response(
+        self,
+        response_model: str,
+        lora_request: Any | None,
+    ) -> tuple[bool, str | None]:
+        """Verify vLLM used the requested adapter.
+
+        Returns:
+            Tuple of (mismatch, requested_adapter):
+            - (False, None) if no adapter requested or adapter matches
+            - (True, adapter_name) if adapter was requested but vLLM used different model
+        """
+        if lora_request is None:
+            return False, None
+
+        requested = (
+            lora_request.lora_name
+            if hasattr(lora_request, "lora_name")
+            else str(lora_request)
+        )
+
+        if response_model != requested:
+            self._lg.warning(
+                "adapter mismatch: vLLM used different model than requested",
+                extra={
+                    "requested": requested,
+                    "actual": response_model,
+                },
+            )
+            return True, requested
+
+        metadata = self._adapter_metadata.get(requested, {})
+        self._lg.debug(
+            "verified LoRA adapter",
+            extra={
+                "adapter": requested,
+                "mtime": metadata.get("mtime", ""),
+                "md5": metadata.get("md5", ""),
+            },
+        )
+        return False, None
+
+    def _parse_completion_response(
+        self,
+        data: dict[str, Any],
+        lora_request: Any | None = None,
+    ) -> str | dict[str, Any]:
+        """Extract content, tool_calls, usage, and verify adapter from response."""
         choices = data.get("choices") or [{}]
         choice = choices[0] if choices else {}
         message = choice.get("message", {})
@@ -668,10 +835,23 @@ class VLLMServerEngine:
         tool_calls = message.get("tool_calls")
         usage = data.get("usage", {})
 
-        if tool_calls:
-            return {"content": content, "tool_calls": tool_calls, "usage": usage}
-        if usage:
-            return {"content": content, "usage": usage}
+        # Verify adapter was actually used
+        response_model = data.get("model", "")
+        adapter_mismatch, adapter_requested = self._verify_adapter_response(
+            response_model, lora_request
+        )
+
+        # Build response dict if we have extra info
+        if tool_calls or usage or adapter_mismatch:
+            result: dict[str, Any] = {"content": content}
+            if tool_calls:
+                result["tool_calls"] = tool_calls
+            if usage:
+                result["usage"] = usage
+            if adapter_mismatch:
+                result["adapter_mismatch"] = True
+                result["adapter_requested"] = adapter_requested
+            return result
         return content
 
     def generate(
@@ -720,7 +900,7 @@ class VLLMServerEngine:
             payload["top_k"] = top_k
 
         data = self._post_chat_completions(payload)
-        return self._parse_completion_response(data)
+        return self._parse_completion_response(data, lora_request)
 
     def generate_stream_sync(
         self,
@@ -759,7 +939,12 @@ class VLLMServerEngine:
             payload["top_k"] = top_k
 
         return VLLMServerStreamingIterator(
-            self._lg, self._client, "/v1/chat/completions", payload
+            self._lg,
+            self._client,
+            "/v1/chat/completions",
+            payload,
+            lora_request,
+            self._get_adapter_metadata(lora_request),
         )
 
     # -------------------------------------------------------------------------

@@ -378,15 +378,25 @@ class RequestHandler(ABC):
 
     def _parse_generate_result(
         self, result: str | dict[str, Any]
-    ) -> tuple[str, list[dict[str, Any]] | None, dict[str, Any] | None]:
-        """Parse engine generate result, extracting content, tool_calls, and usage."""
+    ) -> tuple[str, list[dict[str, Any]] | None, dict[str, Any] | None, str | None]:
+        """Parse engine generate result.
+
+        Returns:
+            Tuple of (content, tool_calls, usage, adapter_mismatch_id).
+            adapter_mismatch_id is set if vLLM used a different model than requested.
+        """
         if isinstance(result, dict):
+            # Check for adapter mismatch (vLLM used different model than requested)
+            adapter_mismatch_id = None
+            if result.get("adapter_mismatch"):
+                adapter_mismatch_id = result.get("adapter_requested")
             return (
                 result.get("content", ""),
                 result.get("tool_calls"),
                 result.get("usage"),
+                adapter_mismatch_id,
             )
-        return result, None, None
+        return result, None, None, None
 
     def _build_success_response(
         self,
@@ -430,9 +440,13 @@ class RequestHandler(ABC):
             result = self.engine.generate(**params)
             if request.context:
                 request.context.mark(Event.DECODED)
-            result_text, tool_calls, usage = self._parse_generate_result(result)
+            result_text, tool_calls, usage, adapter_mismatch_id = (
+                self._parse_generate_result(result)
+            )
+            # Adapter mismatch from response takes precedence over pre-request fallback
+            effective_fallback = adapter_mismatch_id or fallback_adapter_id
             return self._build_success_response(
-                request, result_text, tool_calls, usage, fallback_adapter_id
+                request, result_text, tool_calls, usage, effective_fallback
             )
         except AdapterError as e:
             if self._lg:
@@ -450,6 +464,16 @@ class RequestHandler(ABC):
             chunk = StreamChunk(id=request.id, token=token)
             self._response_q.put(chunk)
 
+    def _get_effective_adapter_fallback(
+        self, stream: Any, fallback_adapter_id: str | None
+    ) -> str | None:
+        """Get effective adapter fallback ID, checking stream for mismatch."""
+        # Check if stream reported adapter mismatch from vLLM response
+        stream_mismatch = getattr(stream, "adapter_mismatch", False)
+        if stream_mismatch:
+            return getattr(stream, "adapter_requested", None)
+        return fallback_adapter_id
+
     def _send_stream_final_chunk(
         self,
         request: Request,
@@ -458,6 +482,9 @@ class RequestHandler(ABC):
     ) -> None:
         """Send final chunk with metadata after streaming completes."""
         assert self._response_q is not None
+        effective_fallback = self._get_effective_adapter_fallback(
+            stream, fallback_adapter_id
+        )
         final_chunk = StreamChunk(
             id=request.id,
             token="",
@@ -466,8 +493,8 @@ class RequestHandler(ABC):
             prompt_tokens=stream.prompt_tokens,
             completion_tokens=stream.completion_tokens,
             tool_calls=getattr(stream, "tool_calls", None),
-            adapter_fallback=fallback_adapter_id is not None,
-            adapter_requested=fallback_adapter_id,
+            adapter_fallback=effective_fallback is not None,
+            adapter_requested=effective_fallback,
         )
         self._response_q.put(final_chunk)
 
@@ -488,13 +515,16 @@ class RequestHandler(ABC):
                 prompt_tokens=stream.prompt_tokens,
                 completion_tokens=stream.completion_tokens,
             )
+        effective_fallback = self._get_effective_adapter_fallback(
+            stream, fallback_adapter_id
+        )
         return Response(
             id=request.id,
             status=RequestStatus.COMPLETED,
             prompt_tokens=stream.prompt_tokens,
             completion_tokens=stream.completion_tokens,
-            adapter_fallback=fallback_adapter_id is not None,
-            adapter_requested=fallback_adapter_id,
+            adapter_fallback=effective_fallback is not None,
+            adapter_requested=effective_fallback,
         )
 
     def _process_streaming_request(self, request: Request) -> Response:
