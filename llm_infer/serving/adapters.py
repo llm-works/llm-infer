@@ -15,22 +15,21 @@ from appinfra.log import Logger
 
 
 def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
-    """Validate adapter_id and resolve to safe path within base_path.
+    """Validate adapter_id and resolve to safe path.
 
     Performs security checks to prevent path traversal attacks:
     - Rejects path separators (/, \\)
     - Rejects parent directory references (..)
-    - Ensures resolved path stays within base_path
+    - Ensures logical path stays within base_path (before symlink resolution)
 
-    Note on symlinks: Both base_path and adapter directories may be symlinks.
-    The validation resolves all symlinks before checking containment, so a
-    symlinked adapter directory is allowed as long as its real path is within
-    the real base_path. This enables sharing adapter weights across deployments
-    while maintaining security boundaries.
+    Symlinks are supported: adapter directories may be symlinks pointing
+    outside base_path (e.g., to a shared registry). Containment is checked
+    before resolving symlinks, so the user input is validated against the
+    logical path structure. Symlink targets are operator-controlled and trusted.
 
     Args:
         adapter_id: The adapter name to validate.
-        base_path: The base directory adapters must reside in.
+        base_path: The base directory containing adapter entries.
 
     Returns:
         Resolved Path if valid, None if validation fails.
@@ -41,14 +40,13 @@ def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
     if "/" in adapter_id or "\\" in adapter_id or ".." in adapter_id:
         return None
 
-    resolved_base = base_path.resolve()
-    adapter_path = (base_path / adapter_id).resolve()
-
-    # Ensure resolved path stays within base_path
-    if not adapter_path.is_relative_to(resolved_base):
+    # Check containment BEFORE resolving symlinks (validates user input)
+    adapter_path_logical = base_path / adapter_id
+    if not adapter_path_logical.is_relative_to(base_path):
         return None
 
-    return adapter_path
+    # Resolve symlinks for actual use (symlink targets are operator-controlled)
+    return adapter_path_logical.resolve()
 
 
 @dataclass

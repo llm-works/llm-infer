@@ -399,23 +399,31 @@ class Factory:
 
     def _create_rate_limiter(
         self, rate_limit_config: dict[str, Any] | None
-    ) -> RateLimiter | None:
+    ) -> RateLimiter:
         """Create rate limiter from config.
 
         Args:
             rate_limit_config: Rate limit configuration with per_minute.
 
         Returns:
-            RateLimiter if configured, None otherwise.
+            RateLimiter from config, or default (60/min) if not configured.
         """
-        if rate_limit_config is None:
-            return None
-
         from appinfra.rate_limit import RateLimiter
+
+        if rate_limit_config is None:
+            self._lg.warning(
+                "no rate_limit configured, using default 60/min",
+                extra={"per_minute": 60},
+            )
+            return RateLimiter(self._lg, per_minute=60)
 
         per_minute = rate_limit_config.get("per_minute")
         if per_minute is None:
-            return None
+            self._lg.warning(
+                "no rate_limit configured, using default 60/min",
+                extra={"per_minute": 60},
+            )
+            return RateLimiter(self._lg, per_minute=60)
 
         return RateLimiter(self._lg, per_minute=per_minute)
 
@@ -510,8 +518,12 @@ class Factory:
             Configured LLMClient instance.
         """
         backend = self.create_backend(config)
+        rate_limiter = self._create_rate_limiter(None)
         return LLMClient(
-            lg=self._lg, backend=backend, default_model=config.get("model")
+            lg=self._lg,
+            backend=backend,
+            default_model=config.get("model"),
+            rate_limiter=rate_limiter,
         )
 
     def openai(
@@ -541,7 +553,10 @@ class Factory:
             api_key=api_key,
             timeout=timeout,
         )
-        return LLMClient(lg=self._lg, backend=backend, default_model=model)
+        rate_limiter = self._create_rate_limiter(None)
+        return LLMClient(
+            lg=self._lg, backend=backend, default_model=model, rate_limiter=rate_limiter
+        )
 
     def anthropic(
         self,
@@ -575,4 +590,7 @@ class Factory:
             "timeout": timeout,
         }
         backend = self.create_backend(config)
-        return LLMClient(lg=self._lg, backend=backend, default_model=model)
+        rate_limiter = self._create_rate_limiter(None)
+        return LLMClient(
+            lg=self._lg, backend=backend, default_model=model, rate_limiter=rate_limiter
+        )

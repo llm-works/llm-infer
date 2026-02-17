@@ -470,6 +470,74 @@ class TestLLMClientRateLimiting:
         # Should be rate limited (less than 1 second since last call)
         assert client.can_call() is False
 
+    def test_rate_limiter_enforced_on_chat(self, mock_lg: Logger) -> None:
+        """Test rate limiter is enforced (not just informational) on chat calls."""
+        from unittest.mock import MagicMock
+
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = MagicMock(spec=RateLimiter)
+        backend = MockBackend(responses=[ChatResponse(content="Hello")])
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
+
+        client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        # Verify rate limiter's next() was called (blocking wait)
+        rate_limiter.next.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_enforced_on_chat_async(self, mock_lg: Logger) -> None:
+        """Test rate limiter is enforced on async chat calls."""
+        from unittest.mock import MagicMock
+
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = MagicMock(spec=RateLimiter)
+        backend = MockBackend(responses=[ChatResponse(content="Hello")])
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
+
+        await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
+
+        # Verify rate limiter's next() was called (via asyncio.to_thread)
+        rate_limiter.next.assert_called_once()
+
+    def test_rate_limiter_enforced_on_chat_stream(self, mock_lg: Logger) -> None:
+        """Test rate limiter is enforced on streaming chat calls."""
+        from unittest.mock import MagicMock
+
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = MagicMock(spec=RateLimiter)
+        backend = MockBackend(responses=[ChatResponse(content="Hello")])
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
+
+        list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        # Verify rate limiter's next() was called (blocking wait)
+        rate_limiter.next.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_enforced_on_chat_stream_async(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test rate limiter is enforced on async streaming chat calls."""
+        from unittest.mock import MagicMock
+
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = MagicMock(spec=RateLimiter)
+        backend = MockBackend(responses=[ChatResponse(content="Hello")])
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
+
+        tokens = []
+        async for token in client.chat_stream_async(
+            messages=[{"role": "user", "content": "Hi"}]
+        ):
+            tokens.append(token)
+
+        # Verify rate limiter's next() was called (via asyncio.to_thread)
+        rate_limiter.next.assert_called_once()
+
 
 class TestFactoryRateLimitConfig:
     """Test Factory rate limit configuration parsing."""
@@ -494,8 +562,8 @@ class TestFactoryRateLimitConfig:
         assert client._rate_limiter.per_minute == 30
         router.close()
 
-    def test_from_config_without_rate_limit(self, mock_lg: Logger) -> None:
-        """Test from_config without rate_limit creates client without rate limiting."""
+    def test_from_config_without_rate_limit_uses_default(self, mock_lg: Logger) -> None:
+        """Test from_config without rate_limit creates default rate limiter."""
         factory = Factory(mock_lg)
         config = {
             "backends": {
@@ -508,8 +576,12 @@ class TestFactoryRateLimitConfig:
         router = factory.from_config(config, discover_models=False)
 
         client = router.get_client()
-        assert client._rate_limiter is None
+        # Default rate limiter is created when not configured
+        assert client._rate_limiter is not None
+        assert client._rate_limiter.per_minute == 60
         assert client._backoff is None
+        # Warning should be logged
+        mock_lg.warning.assert_called()
         router.close()
 
     def test_from_config_rate_limit_applies_to_all_backends(
@@ -566,6 +638,27 @@ class TestLLMClientRetry:
         assert backend.chat.call_count == 2
         # Verify warning was logged
         mock_lg.warning.assert_called()
+
+    def test_retry_on_500_internal_server_error(self, mock_lg: Logger) -> None:
+        """Test client retries on 500 internal server error."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+        backend.chat.side_effect = [
+            BackendRequestError("Internal server error", status_code=500),
+            response,
+        ]
+        backend.last_response = response
+
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success"
+        assert backend.chat.call_count == 2
 
     def test_retry_on_503_service_unavailable(self, mock_lg: Logger) -> None:
         """Test client retries on 503 service unavailable."""
