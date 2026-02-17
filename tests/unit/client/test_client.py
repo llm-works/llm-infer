@@ -567,6 +567,27 @@ class TestLLMClientRetry:
         # Verify warning was logged
         mock_lg.warning.assert_called()
 
+    def test_retry_on_500_internal_server_error(self, mock_lg: Logger) -> None:
+        """Test client retries on 500 internal server error."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+        backend.chat.side_effect = [
+            BackendRequestError("Internal server error", status_code=500),
+            response,
+        ]
+        backend.last_response = response
+
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success"
+        assert backend.chat.call_count == 2
+
     def test_retry_on_503_service_unavailable(self, mock_lg: Logger) -> None:
         """Test client retries on 503 service unavailable."""
         from appinfra.rate_limit import Backoff

@@ -491,10 +491,13 @@ class VLLMServerEngine:
         cmd.extend(["--max-loras", str(cfg.lora.max_loras)])
         cmd.extend(["--max-lora-rank", str(cfg.lora.max_lora_rank)])
 
-        # Pre-register all scanned adapters
+        # Pre-register all scanned adapters (all specs in single --lora-modules)
         if self._adapter_paths:
-            for adapter_name, adapter_path in self._adapter_paths.items():
-                cmd.extend(["--lora-modules", f"{adapter_name}={adapter_path}"])
+            adapter_specs = [
+                f"{name}={path}" for name, path in self._adapter_paths.items()
+            ]
+            cmd.append("--lora-modules")
+            cmd.extend(adapter_specs)
             self._lg.info(
                 "pre-registering LoRA adapters",
                 extra={"count": len(self._adapter_paths)},

@@ -40,8 +40,9 @@ from .base import ChatClient
 from .exceptions import BackendRequestError, BackendUnavailableError
 from .types import ChatResponse
 
-# Transient HTTP status codes that should trigger retry
-TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({429, 502, 503, 529})
+# Non-5xx status codes that should trigger retry (5xx are always retried)
+# 429 = rate limited, 529 = site overloaded (Cloudflare)
+TRANSIENT_4XX_CODES: frozenset[int] = frozenset({429, 529})
 
 T = TypeVar("T")
 
@@ -91,7 +92,7 @@ class LLMClient(ChatClient):
             default_model: Default model to use if not specified per-request.
             rate_limiter: Optional rate limiter for throttling requests.
             backoff: Optional backoff for retrying transient errors. Retries on
-                connection failures and HTTP 429/502/503/529 with exponential delay.
+                connection failures and HTTP 5xx/429 errors with exponential delay.
             timeout: Total timeout in seconds for retry attempts. 0 = retry forever.
                 Only used when backoff is configured.
         """
@@ -137,11 +138,27 @@ class LLMClient(ChatClient):
         return True
 
     def _is_transient_error(self, exc: Exception) -> bool:
-        """Check if exception is a transient error that should be retried."""
+        """Check if exception is a transient error that should be retried.
+
+        Retries on:
+        - BackendUnavailableError (connection failures)
+        - All 5xx server errors (500-599)
+        - 429 (rate limited) and 529 (Cloudflare overloaded)
+
+        Does NOT retry:
+        - 4xx client errors (except 429/529) - these indicate bad requests
+        """
         if isinstance(exc, BackendUnavailableError):
             return True
         if isinstance(exc, BackendRequestError):
-            return exc.status_code in TRANSIENT_STATUS_CODES
+            code = exc.status_code
+            if code is None:
+                return False
+            # All 5xx server errors are retryable
+            if 500 <= code < 600:
+                return True
+            # Specific 4xx codes that are retryable
+            return code in TRANSIENT_4XX_CODES
         return False
 
     def _apply_backoff_cooldown(self) -> None:
