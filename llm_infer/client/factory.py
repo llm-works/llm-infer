@@ -518,8 +518,12 @@ class Factory:
             Configured LLMClient instance.
         """
         backend = self.create_backend(config)
+        rate_limiter = self._create_rate_limiter(None)
         return LLMClient(
-            lg=self._lg, backend=backend, default_model=config.get("model")
+            lg=self._lg,
+            backend=backend,
+            default_model=config.get("model"),
+            rate_limiter=rate_limiter,
         )
 
     def openai(

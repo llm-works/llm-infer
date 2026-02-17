@@ -501,6 +501,43 @@ class TestLLMClientRateLimiting:
         # Verify rate limiter's next() was called (via asyncio.to_thread)
         rate_limiter.next.assert_called_once()
 
+    def test_rate_limiter_enforced_on_chat_stream(self, mock_lg: Logger) -> None:
+        """Test rate limiter is enforced on streaming chat calls."""
+        from unittest.mock import MagicMock
+
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = MagicMock(spec=RateLimiter)
+        backend = MockBackend(responses=[ChatResponse(content="Hello")])
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
+
+        list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        # Verify rate limiter's next() was called (blocking wait)
+        rate_limiter.next.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_enforced_on_chat_stream_async(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test rate limiter is enforced on async streaming chat calls."""
+        from unittest.mock import MagicMock
+
+        from appinfra.rate_limit import RateLimiter
+
+        rate_limiter = MagicMock(spec=RateLimiter)
+        backend = MockBackend(responses=[ChatResponse(content="Hello")])
+        client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
+
+        tokens = []
+        async for token in client.chat_stream_async(
+            messages=[{"role": "user", "content": "Hi"}]
+        ):
+            tokens.append(token)
+
+        # Verify rate limiter's next() was called (via asyncio.to_thread)
+        rate_limiter.next.assert_called_once()
+
 
 class TestFactoryRateLimitConfig:
     """Test Factory rate limit configuration parsing."""

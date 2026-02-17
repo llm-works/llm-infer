@@ -290,7 +290,7 @@ class LLMClient(ChatClient):
         """Send a chat completion request (sync).
 
         When backoff is configured, automatically retries on transient errors
-        (connection failures and HTTP 429/502/503/529) with exponential backoff.
+        (connection failures and HTTP 5xx/429/529) with exponential backoff.
 
         Args:
             messages: List of chat messages.
@@ -360,6 +360,10 @@ class LLMClient(ChatClient):
         Yields:
             String tokens as they arrive.
         """
+        # Enforce rate limit (blocks until allowed)
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
+
         yield from self._backend.chat_stream(
             messages=messages,
             model=model or self._default_model,
@@ -393,7 +397,7 @@ class LLMClient(ChatClient):
         """Send a chat completion request (async).
 
         When backoff is configured, automatically retries on transient errors
-        (connection failures and HTTP 429/502/503/529) with exponential backoff.
+        (connection failures and HTTP 5xx/429/529) with exponential backoff.
 
         Args:
             messages: List of chat messages.
@@ -463,6 +467,10 @@ class LLMClient(ChatClient):
         Yields:
             String tokens as they arrive.
         """
+        # Enforce rate limit (run blocking call in thread to not block event loop)
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
+
         async for token in self._backend.chat_stream_async(
             messages=messages,
             model=model or self._default_model,
