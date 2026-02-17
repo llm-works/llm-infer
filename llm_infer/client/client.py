@@ -90,9 +90,14 @@ class LLMClient(ChatClient):
             lg: Logger instance.
             backend: The backend to use for API calls.
             default_model: Default model to use if not specified per-request.
-            rate_limiter: Optional rate limiter for throttling requests.
+            rate_limiter: Optional rate limiter for throttling requests. When set,
+                blocks before each request until the rate limit allows. This caps
+                the maximum request rate regardless of errors or retries.
             backoff: Optional backoff for retrying transient errors. Retries on
-                connection failures and HTTP 5xx/429 errors with exponential delay.
+                connection failures and HTTP 5xx/429/529 errors with exponential delay.
+                Also acts as a gatekeeper, applying cooldown after any error to slow
+                down subsequent requests. For production use, configure both rate_limiter
+                (caps steady-state rate) and backoff (slows down during errors).
             timeout: Total timeout in seconds for retry attempts. 0 = retry forever.
                 Only used when backoff is configured.
         """
@@ -123,15 +128,16 @@ class LLMClient(ChatClient):
         return self._backend.last_response
 
     def can_call(self) -> bool:
-        """Check if a call is allowed (non-blocking).
+        """Check if a call would be allowed right now (non-blocking).
 
         Returns False if rate limited (exceeded per_minute).
 
-        This is an informational check that doesn't consume rate limit slots.
-        Use this in event loops to skip cycles when the backend is unavailable.
+        Note: Rate limiting is enforced automatically on each request, so
+        calling this method is optional. Use this in event loops to skip
+        cycles when the rate limit would block.
 
         Returns:
-            True if a call is allowed, False otherwise.
+            True if a call would be allowed, False otherwise.
         """
         if self._rate_limiter is not None and not self._rate_limiter.can_proceed():
             return False
@@ -222,6 +228,10 @@ class LLMClient(ChatClient):
             BackendRequestError: If HTTP error occurs and retries exhausted,
                 or if error is non-transient (e.g., 400 Bad Request).
         """
+        # Enforce rate limit (blocks until allowed)
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
+
         if self._backoff is None:
             return fn()
         self._apply_backoff_cooldown()
@@ -243,6 +253,10 @@ class LLMClient(ChatClient):
             BackendRequestError: If HTTP error occurs and retries exhausted,
                 or if error is non-transient (e.g., 400 Bad Request).
         """
+        # Enforce rate limit (run blocking call in thread to not block event loop)
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
+
         if self._backoff is None:
             return await fn()
         await self._apply_backoff_cooldown_async()
