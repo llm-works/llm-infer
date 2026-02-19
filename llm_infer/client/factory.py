@@ -198,8 +198,8 @@ class Factory:
             Configured LLMRouter instance with all enabled backends.
 
         Raises:
-            ValueError: If configuration is invalid, no backends are enabled,
-                or model conflict detected.
+            ValueError: If configuration is invalid or no backends are enabled.
+            ModelConflictError: If the same model appears in multiple backend configs.
         """
         backends_config = config.get("backends", {})
         rate_limit_config = config.get("rate_limit")

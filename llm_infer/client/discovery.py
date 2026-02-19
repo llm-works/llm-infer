@@ -112,6 +112,10 @@ class ModelDiscovery:
     def _discover_model(self, model: str) -> str | None:
         """Probe unprobed backends to find a model.
 
+        Backends are probed in config order (dict insertion order). The first
+        backend that contains the model wins. This means if the same model
+        exists in multiple backends, routing depends on config ordering.
+
         Args:
             model: Model ID to search for.
 
