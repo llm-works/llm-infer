@@ -3,6 +3,9 @@
 LLMRouter routes requests to named LLMClient instances, enabling multi-backend
 support with runtime backend selection.
 
+Model discovery is lazy - backends are only probed when first used. This avoids
+startup errors when backends are configured but not running.
+
 Example:
     from appinfra.log import Logger
     from llm_infer.client import Factory
@@ -29,13 +32,16 @@ from __future__ import annotations
 import types
 from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from appinfra.log import Logger
 
 from .base import ChatClient
 from .client import LLMClient
 from .types import ChatResponse
+
+if TYPE_CHECKING:
+    from .discovery import ModelDiscovery
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,7 @@ class LLMRouter(ChatClient):
         clients: dict[str, LLMClient],
         default: str,
         model_to_backend: dict[str, str] | None = None,
+        discovery: ModelDiscovery | None = None,
     ) -> None:
         """Initialize the router with named clients.
 
@@ -80,7 +87,10 @@ class LLMRouter(ChatClient):
             clients: Dictionary mapping backend names to LLMClient instances.
             default: Name of the default backend to use when not specified.
             model_to_backend: Optional mapping from model ID to backend name
-                for intelligent model-based routing.
+                for intelligent model-based routing. If discovery is provided,
+                this is ignored (discovery manages the routing table).
+            discovery: Optional ModelDiscovery for lazy model discovery.
+                If provided, backends will be probed for models on first use.
 
         Raises:
             ValueError: If default backend is not in clients dict.
@@ -88,7 +98,13 @@ class LLMRouter(ChatClient):
         self._lg = lg
         self._clients = clients
         self._default = default
-        self._model_to_backend = model_to_backend or {}
+        self._discovery = discovery
+
+        # Use discovery's routing table if available, otherwise use provided mapping
+        if discovery is not None:
+            self._model_to_backend = discovery.models
+        else:
+            self._model_to_backend = model_to_backend or {}
 
         if default not in clients:
             raise ValueError(f"Default backend '{default}' not in clients")
@@ -112,8 +128,19 @@ class LLMRouter(ChatClient):
 
     @property
     def models(self) -> Mapping[str, str]:
-        """Mapping from model ID to backend name (read-only)."""
+        """Mapping from model ID to backend name (read-only).
+
+        Note: This returns the current known mappings. If lazy discovery is
+        enabled, additional models may be discovered on first use.
+        """
+        if self._discovery is not None:
+            return types.MappingProxyType(self._discovery.models)
         return types.MappingProxyType(self._model_to_backend)
+
+    @property
+    def discovery(self) -> ModelDiscovery | None:
+        """Model discovery instance, if configured."""
+        return self._discovery
 
     def resolve(
         self, model: str | None = None, backend: str | None = None
@@ -129,11 +156,17 @@ class LLMRouter(ChatClient):
         Resolution priority:
             1. Explicit backend name
             2. Model-based lookup (if model is in the routing table)
-            3. Default backend
+            3. Lazy discovery (if discovery is configured)
+            4. Default backend
 
         Model resolution:
             - Uses explicit model if provided
             - Falls back to the target backend's default_model
+
+        Lazy discovery:
+            If a model is requested that isn't in the routing table, and
+            discovery is configured, unprobed backends will be queried
+            to find the model.
 
         Args:
             model: Model to use (for routing and as the resolved model).
@@ -153,8 +186,9 @@ class LLMRouter(ChatClient):
                     f"Backend '{backend}' not found. Available: {available}"
                 )
             backend_name = backend
-        elif model is not None and model in self._model_to_backend:
-            backend_name = self._model_to_backend[model]
+        elif model is not None:
+            # Try routing table first, then lazy discovery
+            backend_name = self._resolve_model_backend(model)
         else:
             backend_name = self._default
 
@@ -163,6 +197,30 @@ class LLMRouter(ChatClient):
         resolved_model = model if model is not None else client.default_model
 
         return ResolvedTarget(backend=backend_name, model=resolved_model)
+
+    def _resolve_model_backend(self, model: str) -> str:
+        """Resolve backend for a model, using lazy discovery if needed.
+
+        Args:
+            model: Model ID to look up.
+
+        Returns:
+            Backend name (falls back to default if not found).
+        """
+        # Check static routing table
+        if model in self._model_to_backend:
+            return self._model_to_backend[model]
+
+        # Try lazy discovery if configured
+        if self._discovery is not None:
+            found = self._discovery.get_backend_for_model(model)
+            if found is not None:
+                # Update our cached routing table
+                self._model_to_backend = self._discovery.models
+                return found
+
+        # Fall back to default
+        return self._default
 
     def get_client(
         self, model: str | None = None, backend: str | None = None

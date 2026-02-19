@@ -1,7 +1,7 @@
-"""Exception hierarchy for LLM client backends.
+"""Exception hierarchy for LLM client.
 
-All backend-specific errors are translated to these exceptions, providing
-a consistent error interface regardless of the underlying backend.
+All backend-specific errors and routing errors are translated to these
+exceptions, providing a consistent error interface.
 """
 
 from __future__ import annotations
@@ -13,6 +13,34 @@ class BackendError(Exception):
     All backend implementations translate their native exceptions to this
     hierarchy, enabling consistent error handling across different backends.
     """
+
+
+class ConfigurationError(Exception):
+    """Base exception for configuration errors.
+
+    Raised when client configuration is invalid or inconsistent.
+    """
+
+
+class ModelConflictError(ConfigurationError):
+    """Same model found in multiple backends.
+
+    Raised when the model routing table has a conflict - the same model ID
+    is configured in multiple backends, making routing ambiguous.
+
+    Attributes:
+        model: The conflicting model ID.
+        backend1: First backend containing the model.
+        backend2: Second backend containing the model.
+    """
+
+    def __init__(self, model: str, backend1: str, backend2: str) -> None:
+        self.model = model
+        self.backend1 = backend1
+        self.backend2 = backend2
+        super().__init__(
+            f"Model '{model}' found in multiple backends: '{backend1}' and '{backend2}'"
+        )
 
 
 class BackendUnavailableError(BackendError):

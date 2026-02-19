@@ -39,6 +39,7 @@ from appinfra.log import Logger
 from .backends.base import Backend
 from .backends.openai import OpenAICompatibleBackend
 from .client import LLMClient
+from .discovery import ModelDiscovery
 from .router import LLMRouter
 
 if TYPE_CHECKING:
@@ -174,10 +175,10 @@ class Factory:
             base_url: http://localhost:8000/v1
 
         Model-based routing:
-            When discover_models=True (default), the factory queries each backend
-            for available models and builds a routing table. If config specifies
-            a `models` list, only those models are allowed (validated against
-            discovered models). If the same model appears in multiple backends,
+            When discover_models=True (default), the router performs LAZY model
+            discovery - backends are only probed when first used. If config
+            specifies a `models` list, those models are used directly without
+            probing the backend. If the same model appears in multiple backends,
             raises ValueError.
 
         Rate limiting:
@@ -190,15 +191,15 @@ class Factory:
 
         Args:
             config: Configuration dictionary.
-            discover_models: If True, query backends for available models
-                and enable model-based routing. Defaults to True.
+            discover_models: If True, enable lazy model discovery when backends
+                are first used. Defaults to True.
 
         Returns:
             Configured LLMRouter instance with all enabled backends.
 
         Raises:
             ValueError: If configuration is invalid, no backends are enabled,
-                config models not found in backend, or model conflict detected.
+                or model conflict detected.
         """
         backends_config = config.get("backends", {})
         rate_limit_config = config.get("rate_limit")
@@ -226,15 +227,25 @@ class Factory:
     ) -> LLMRouter:
         """Create router wrapping a single backend config.
 
-        On failure during model discovery or router init, closes client before re-raising.
+        On failure during router init, closes client before re-raising.
         """
         client = self._create_client(config, rate_limit_config, retry_config)
         try:
             name = "default"
-            model_to_backend = self._discover_models_for_backend(
-                name, client, config, discover_models
+            clients = {name: client}
+            configs = {name: config}
+
+            # Create discovery - always loads from config, lazy probing only if enabled
+            discovery = ModelDiscovery(
+                self._lg, clients, configs, lazy_probe=discover_models
             )
-            return LLMRouter(self._lg, {name: client}, name, model_to_backend)
+
+            return LLMRouter(
+                self._lg,
+                clients,
+                name,
+                discovery=discovery,
+            )
         except Exception:
             client.close()
             raise
@@ -249,7 +260,7 @@ class Factory:
     ) -> LLMRouter:
         """Create router from multi-backend config.
 
-        On failure during model routing, closes all clients before re-raising.
+        On failure during router init, closes all clients before re-raising.
         """
         clients, backend_configs = self._create_enabled_clients(
             backends_config, rate_limit_config, retry_config
@@ -266,10 +277,17 @@ class Factory:
             default_name = next(iter(clients.keys()))
 
         try:
-            model_to_backend = self._build_model_routing(
-                clients, backend_configs, discover_models
+            # Create discovery - always loads from config, lazy probing only if enabled
+            discovery = ModelDiscovery(
+                self._lg, clients, backend_configs, lazy_probe=discover_models
             )
-            return LLMRouter(self._lg, clients, default_name, model_to_backend)
+
+            return LLMRouter(
+                self._lg,
+                clients,
+                default_name,
+                discovery=discovery,
+            )
         except Exception:
             self._close_clients_safely(clients)
             raise
@@ -297,95 +315,6 @@ class Factory:
             self._close_clients_safely(clients)
             raise
         return clients, configs
-
-    def _build_model_routing(
-        self,
-        clients: dict[str, LLMClient],
-        backend_configs: dict[str, dict[str, Any]],
-        discover_models: bool,
-    ) -> dict[str, str]:
-        """Build model-to-backend routing table.
-
-        Args:
-            clients: Backend name to client mapping.
-            backend_configs: Backend name to config mapping.
-            discover_models: Whether to query backends for models.
-
-        Returns:
-            Mapping from model ID to backend name.
-
-        Raises:
-            ValueError: If config model not in backend, or model conflict.
-        """
-        model_to_backend: dict[str, str] = {}
-
-        for name, client in clients.items():
-            config = backend_configs[name]
-            models = self._discover_models_for_backend(
-                name, client, config, discover_models
-            )
-
-            for model, backend_name in models.items():
-                if model in model_to_backend:
-                    conflict = model_to_backend[model]
-                    raise ValueError(
-                        f"Model '{model}' found in multiple backends: "
-                        f"'{conflict}' and '{backend_name}'"
-                    )
-                model_to_backend[model] = backend_name
-
-        return model_to_backend
-
-    def _discover_models_for_backend(
-        self,
-        name: str,
-        client: LLMClient,
-        config: dict[str, Any],
-        discover_models: bool,
-    ) -> dict[str, str]:
-        """Discover and validate models for a single backend."""
-        config_models: list[str] | None = config.get("models")
-
-        if not discover_models:
-            if config_models:
-                return {model: name for model in config_models}
-            return {}
-
-        discovered = self._query_backend_models(name, client)
-        if config_models:
-            self._validate_config_models(name, config_models, discovered)
-            return {model: name for model in config_models}
-
-        return {model: name for model in discovered}
-
-    def _query_backend_models(self, name: str, client: LLMClient) -> set[str]:
-        """Query backend for available models."""
-        try:
-            return set(client.backend.list_models())
-        except Exception as e:
-            self._lg.warning(
-                f"Failed to discover models from backend '{name}'",
-                extra={"exception": e},
-            )
-            return set()
-
-    def _validate_config_models(
-        self, name: str, config_models: list[str], discovered: set[str]
-    ) -> None:
-        """Validate config models exist in discovered set."""
-        if not discovered:
-            # Can't validate if discovery failed - warn and trust config
-            self._lg.warning(
-                f"Backend '{name}' model discovery failed; "
-                f"trusting config models without validation: {config_models}"
-            )
-            return
-        missing = set(config_models) - discovered
-        if missing:
-            raise ValueError(
-                f"Backend '{name}' config specifies models not available: "
-                f"{sorted(missing)}. Available: {sorted(discovered)}"
-            )
 
     def _close_clients_safely(self, clients: dict[str, LLMClient]) -> None:
         """Close all clients, handling individual failures gracefully."""

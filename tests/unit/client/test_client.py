@@ -6,7 +6,13 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client import ChatResponse, Factory, LLMClient, LLMRouter
+from llm_infer.client import (
+    ChatResponse,
+    Factory,
+    LLMClient,
+    LLMRouter,
+    ModelConflictError,
+)
 from llm_infer.client.backends import Backend, OpenAICompatibleBackend
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
 
@@ -282,8 +288,10 @@ class TestFactory:
                 },
             },
         }
-        with pytest.raises(ValueError, match="Model 'shared-model' found in multiple"):
+        with pytest.raises(ModelConflictError) as exc_info:
             factory.from_config(config, discover_models=False)
+
+        assert exc_info.value.model == "shared-model"
         # If we get here without resource leak, the fix is working
         # (We can't easily verify clients were closed without more intrusive mocking,
         # but the exception path now has cleanup code)
