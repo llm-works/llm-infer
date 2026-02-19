@@ -148,6 +148,7 @@ class LLMClient(ChatClient):
 
         Retries on:
         - BackendUnavailableError (connection failures)
+        - Transport errors (no status code - connection dropped mid-request)
         - All 5xx server errors (500-599)
         - 429 (rate limited) and 529 (Cloudflare overloaded)
 
@@ -159,7 +160,8 @@ class LLMClient(ChatClient):
         if isinstance(exc, BackendRequestError):
             code = exc.status_code
             if code is None:
-                return False
+                # Transport error (connection dropped, stale connection, etc.)
+                return True
             # All 5xx server errors are retryable
             if 500 <= code < 600:
                 return True
