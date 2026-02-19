@@ -62,11 +62,14 @@ llm-infer Extensions:
 from .backends import Backend, OpenAICompatibleBackend
 from .base import ChatClient
 from .client import LLMClient
+from .discovery import ModelDiscovery
 from .exceptions import (
     BackendError,
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
+    ConfigurationError,
+    ModelConflictError,
 )
 from .factory import Factory
 from .router import LLMRouter, ResolvedTarget
@@ -81,6 +84,7 @@ __all__ = [
     # Router (multi-backend)
     "LLMRouter",
     "ResolvedTarget",
+    "ModelDiscovery",
     # Response types
     "ChatResponse",
     # Backend base class
@@ -91,6 +95,8 @@ __all__ = [
     "BackendRequestError",
     "BackendTimeoutError",
     "BackendUnavailableError",
+    "ConfigurationError",
+    "ModelConflictError",
 ]
 
 # Optional SAIA integration (requires: pip install llm-infer[saia])

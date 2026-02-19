@@ -6,7 +6,13 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client import ChatResponse, Factory, LLMClient, LLMRouter
+from llm_infer.client import (
+    ChatResponse,
+    Factory,
+    LLMClient,
+    LLMRouter,
+    ModelConflictError,
+)
 from llm_infer.client.backends import Backend, OpenAICompatibleBackend
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
 
@@ -282,8 +288,10 @@ class TestFactory:
                 },
             },
         }
-        with pytest.raises(ValueError, match="Model 'shared-model' found in multiple"):
+        with pytest.raises(ModelConflictError) as exc_info:
             factory.from_config(config, discover_models=False)
+
+        assert exc_info.value.model == "shared-model"
         # If we get here without resource leak, the fix is working
         # (We can't easily verify clients were closed without more intrusive mocking,
         # but the exception path now has cleanup code)
@@ -713,6 +721,28 @@ class TestLLMClientRetry:
         response = ChatResponse(content="Success")
         backend.chat.side_effect = [
             BackendUnavailableError("Connection refused"),
+            response,
+        ]
+        backend.last_response = response
+
+        client = LLMClient(lg=mock_lg, backend=backend, backoff=backoff)
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success"
+        assert backend.chat.call_count == 2
+
+    def test_retry_on_transport_error(self, mock_lg: Logger) -> None:
+        """Test client retries on transport error (no status code)."""
+        from appinfra.rate_limit import Backoff
+
+        from llm_infer.client.exceptions import BackendRequestError
+
+        backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
+        backend = MagicMock(spec=Backend)
+        response = ChatResponse(content="Success")
+        # Transport error has no status_code (e.g., connection dropped mid-request)
+        backend.chat.side_effect = [
+            BackendRequestError("Transport error: Server disconnected"),
             response,
         ]
         backend.last_response = response
