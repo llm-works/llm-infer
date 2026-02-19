@@ -43,6 +43,9 @@ from .types import ChatResponse
 if TYPE_CHECKING:
     from .discovery import ModelDiscovery
 
+# Reserved model names that trigger special resolution logic
+RESERVED_MODEL_NAMES = frozenset({"auto", "default"})
+
 
 @dataclass(frozen=True)
 class ResolvedTarget:
@@ -156,17 +159,15 @@ class LLMRouter(ChatClient):
         Resolution priority:
             1. Explicit backend name
             2. Model-based lookup (if model is in the routing table)
-            3. Lazy discovery (if discovery is configured)
-            4. Default backend
+            3. Default backend
 
-        Model resolution:
-            - Uses explicit model if provided
-            - Falls back to the target backend's default_model
+        Reserved model names:
+            - "auto": Probe the target backend, pick an available model
+            - "default": Use the backend's configured default_model
+              (if default_model="auto", falls back to auto logic)
 
-        Lazy discovery:
-            If a model is requested that isn't in the routing table, and
-            discovery is configured, unprobed backends will be queried
-            to find the model.
+        These reserved names skip routing lookup and are resolved on
+        the target backend.
 
         Args:
             model: Model to use (for routing and as the resolved model).
@@ -186,15 +187,16 @@ class LLMRouter(ChatClient):
                     f"Backend '{backend}' not found. Available: {available}"
                 )
             backend_name = backend
-        elif model is not None:
-            # Try routing table first, then lazy discovery
+        elif model is not None and model not in RESERVED_MODEL_NAMES:
+            # Try routing table for non-reserved model names
             backend_name = self._resolve_model_backend(model)
         else:
+            # Reserved models or no model specified -> use default backend
             backend_name = self._default
 
-        # Resolve model (explicit or client's default)
+        # Resolve model on target backend
         client = self._clients[backend_name]
-        resolved_model = model if model is not None else client.default_model
+        resolved_model = self._resolve_model(client, model)
 
         return ResolvedTarget(backend=backend_name, model=resolved_model)
 
@@ -221,6 +223,67 @@ class LLMRouter(ChatClient):
 
         # Fall back to default
         return self._default
+
+    def _resolve_model(self, client: LLMClient, model: str | None) -> str | None:
+        """Resolve model name, handling reserved names.
+
+        Args:
+            client: Target client to resolve model for.
+            model: Model name (may be reserved like "auto" or "default").
+
+        Returns:
+            Resolved model name, or None if no model configured.
+        """
+        if model is None:
+            return client.default_model
+
+        if model == "default":
+            default = client.default_model
+            if default == "auto" or default is None:
+                return self._resolve_auto_model(client)
+            return default
+
+        if model == "auto":
+            return self._resolve_auto_model(client)
+
+        return model
+
+    def _resolve_auto_model(self, client: LLMClient) -> str | None:
+        """Resolve "auto" to an actual model by probing the backend.
+
+        Resolution order:
+            1. If only one model available, use it
+            2. If backend has configured default_model (non-auto), use it
+            3. Use first model from list_models()
+
+        Args:
+            client: Client to probe for available models.
+
+        Returns:
+            Resolved model name, or None if no models available.
+        """
+        try:
+            models = client.backend.list_models()
+        except Exception as e:
+            self._lg.warning(
+                "failed to discover models for auto resolution",
+                extra={"exception": e},
+            )
+            # Fall back to configured default (even if it's None)
+            return client.default_model if client.default_model != "auto" else None
+
+        if not models:
+            return None
+
+        if len(models) == 1:
+            return models[0]
+
+        # Multiple models: prefer configured default if valid
+        default = client.default_model
+        if default and default != "auto" and default in models:
+            return default
+
+        return models[0]
 
     def get_client(
         self, model: str | None = None, backend: str | None = None

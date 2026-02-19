@@ -95,8 +95,8 @@ class TestModelDiscovery:
         assert result is None
         assert not backend._list_models_called
 
-    def test_lazy_probe_on_unknown_model(self, mock_lg: Logger) -> None:
-        """Test that unknown models trigger lazy discovery."""
+    def test_unknown_model_returns_none(self, mock_lg: Logger) -> None:
+        """Test that unknown models return None without probing."""
         backend = MockBackend(models=["discovered-model"])
         client = LLMClient(lg=mock_lg, backend=backend)
 
@@ -104,15 +104,13 @@ class TestModelDiscovery:
             mock_lg,
             clients={"test": client},
             configs={"test": {}},
-            lazy_probe=True,
         )
 
-        # Request a model not in config - should trigger discovery
-        result = discovery.get_backend_for_model("discovered-model")
+        # Request a model not in config - should return None, no probing
+        result = discovery.get_backend_for_model("unknown-model")
 
-        assert result == "test"
-        assert backend._list_models_called
-        assert "discovered-model" in discovery.models
+        assert result is None
+        assert not backend._list_models_called
 
     def test_no_probe_for_config_models(self, mock_lg: Logger) -> None:
         """Test that config models don't require backend probing."""
@@ -131,31 +129,28 @@ class TestModelDiscovery:
         assert result == "test"
         assert not backend._list_models_called
 
-    def test_only_probes_unprobed_backends(self, mock_lg: Logger) -> None:
-        """Test that backends are only probed once."""
-        backend1 = MockBackend(models=["model-1"])
-        backend2 = MockBackend(models=["model-2"])
-        client1 = LLMClient(lg=mock_lg, backend=backend1)
-        client2 = LLMClient(lg=mock_lg, backend=backend2)
+    def test_explicit_discover_only_probes_once(self, mock_lg: Logger) -> None:
+        """Test that discover_backend() only probes once per backend."""
+        backend = MockBackend(models=["model-1"])
+        client = LLMClient(lg=mock_lg, backend=backend)
 
         discovery = ModelDiscovery(
             mock_lg,
-            clients={"backend1": client1, "backend2": client2},
-            configs={"backend1": {}, "backend2": {}},
+            clients={"test": client},
+            configs={"test": {}},
         )
 
-        # First lookup - should probe backend1 first
-        discovery.get_backend_for_model("model-1")
-        assert backend1._list_models_called
-        assert not backend2._list_models_called
+        # First explicit discovery
+        discovery.discover_backend("test")
+        assert backend._list_models_called
+        assert "model-1" in discovery.models
 
         # Reset call tracking
-        backend1._list_models_called = False
+        backend._list_models_called = False
 
-        # Second lookup for same model - should not probe again
-        discovery.get_backend_for_model("model-1")
-        assert not backend1._list_models_called
-        assert not backend2._list_models_called
+        # Second call should not probe again
+        discovery.discover_backend("test")
+        assert not backend._list_models_called
 
     def test_config_model_conflict_raises(self, mock_lg: Logger) -> None:
         """Test that conflicting models in config raise ModelConflictError."""
@@ -248,8 +243,8 @@ class TestFactoryLazyDiscovery:
 
         router.close()
 
-    def test_lazy_probe_on_model_request(self, mock_lg: Logger) -> None:
-        """Test that model-based routing triggers lazy discovery."""
+    def test_auto_model_probes_default_backend(self, mock_lg: Logger) -> None:
+        """Test that model='auto' probes only the default backend."""
         Factory.register("mock", MockBackend)
 
         factory = Factory(mock_lg)
@@ -269,13 +264,16 @@ class TestFactoryLazyDiscovery:
 
         router = factory.from_config(config)
 
-        # Request a model from local - should probe local first
-        resolved = router.resolve(model="local-model")
+        # model="auto" should route to default and probe it
+        resolved = router.resolve(model="auto")
 
         local_backend: MockBackend = router.clients["local"].backend  # type: ignore
+        remote_backend: MockBackend = router.clients["remote"].backend  # type: ignore
 
         assert resolved.backend == "local"
+        assert resolved.model == "local-model"  # Resolved to actual model
         assert local_backend._list_models_called
+        assert not remote_backend._list_models_called  # Remote not probed
 
         router.close()
 
@@ -336,5 +334,67 @@ class TestFactoryLazyDiscovery:
         local_backend: MockBackend = router.clients["local"].backend  # type: ignore
         assert resolved.backend == "local"
         assert not local_backend._list_models_called
+
+        router.close()
+
+    def test_default_model_uses_backend_default(self, mock_lg: Logger) -> None:
+        """Test that model='default' uses the backend's configured default_model."""
+        Factory.register("mock", MockBackend)
+
+        factory = Factory(mock_lg)
+        config = {
+            "default": "local",
+            "backends": {
+                "local": {
+                    "type": "mock",
+                    "model": "my-default-model",  # Configured default
+                    "_test_models": ["my-default-model", "other-model"],
+                },
+            },
+        }
+
+        router = factory.from_config(config)
+
+        # model="default" should resolve to configured default_model
+        resolved = router.resolve(model="default")
+
+        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
+        assert resolved.backend == "local"
+        assert resolved.model == "my-default-model"
+        assert not local_backend._list_models_called  # No probing needed
+
+        router.close()
+
+    def test_unknown_model_falls_back_to_default_backend(self, mock_lg: Logger) -> None:
+        """Test that unknown models route to default backend without probing."""
+        Factory.register("mock", MockBackend)
+
+        factory = Factory(mock_lg)
+        config = {
+            "default": "local",
+            "backends": {
+                "local": {
+                    "type": "mock",
+                    "_test_models": ["local-model"],
+                },
+                "remote": {
+                    "type": "mock",
+                    "_test_models": ["remote-model"],
+                },
+            },
+        }
+
+        router = factory.from_config(config)
+
+        # Unknown model should route to default without probing any backend
+        resolved = router.resolve(model="unknown-model")
+
+        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
+        remote_backend: MockBackend = router.clients["remote"].backend  # type: ignore
+
+        assert resolved.backend == "local"
+        assert resolved.model == "unknown-model"  # Passed through
+        assert not local_backend._list_models_called
+        assert not remote_backend._list_models_called
 
         router.close()

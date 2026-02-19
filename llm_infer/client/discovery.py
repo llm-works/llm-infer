@@ -17,23 +17,23 @@ if TYPE_CHECKING:
 
 
 class ModelDiscovery:
-    """Lazy model discovery from backends.
+    """Model discovery for multi-backend routing.
 
     Builds a model-to-backend routing table by:
     1. Using config-specified `models` lists immediately (no probing)
-    2. Probing backends lazily when a model is requested that isn't in the table
-       (only if lazy_probe=True)
+    2. Allowing explicit probing via discover_backend() or discover_all()
 
-    This avoids startup errors when backends are configured but not running.
-    Only backends that are actually used get probed.
+    Unknown models return None from get_backend_for_model(), letting the
+    router fall back to the default backend. This avoids probing backends
+    that may be unavailable.
 
     Example:
         discovery = ModelDiscovery(lg, clients, configs)
 
-        # Get backend for a model (probes lazily if needed)
+        # Get backend for a model (routing table only, no probing)
         backend = discovery.get_backend_for_model("gpt-4")
 
-        # Explicitly probe a backend
+        # Explicitly probe a backend to populate routing table
         discovery.discover_backend("openai")
 
         # Check current routing table
@@ -45,7 +45,7 @@ class ModelDiscovery:
         lg: Logger,
         clients: dict[str, LLMClient],
         configs: dict[str, dict[str, Any]],
-        lazy_probe: bool = True,
+        lazy_probe: bool = True,  # Kept for API compatibility, no longer used
     ) -> None:
         """Initialize model discovery.
 
@@ -53,13 +53,12 @@ class ModelDiscovery:
             lg: Logger instance.
             clients: Backend name to LLMClient mapping.
             configs: Backend name to config mapping.
-            lazy_probe: If True, probe backends lazily when models are requested.
-                If False, only use config-specified models (no backend probing).
+            lazy_probe: Deprecated, kept for API compatibility. Probing now
+                only happens via explicit discover_backend() or discover_all().
         """
         self._lg = lg
         self._clients = clients
         self._configs = configs
-        self._lazy_probe = lazy_probe
         self._model_to_backend: dict[str, str] = {}
         self._discovered_backends: set[str] = set()
 
@@ -91,47 +90,18 @@ class ModelDiscovery:
         return set(self._discovered_backends)
 
     def get_backend_for_model(self, model: str) -> str | None:
-        """Get backend for a model, discovering lazily if needed.
+        """Get backend for a model from the routing table.
+
+        Does NOT probe backends. Returns None for unknown models, letting
+        the router fall back to the default backend.
 
         Args:
             model: Model ID to look up.
 
         Returns:
-            Backend name if found, None otherwise.
+            Backend name if found in routing table, None otherwise.
         """
-        # Check existing routing table
-        if model in self._model_to_backend:
-            return self._model_to_backend[model]
-
-        # Try lazy discovery of unprobed backends (if enabled)
-        if self._lazy_probe:
-            return self._discover_model(model)
-
-        return None
-
-    def _discover_model(self, model: str) -> str | None:
-        """Probe unprobed backends to find a model.
-
-        Backends are probed in config order (dict insertion order). The first
-        backend that contains the model wins. This means if the same model
-        exists in multiple backends, routing depends on config ordering.
-
-        Args:
-            model: Model ID to search for.
-
-        Returns:
-            Backend name if found, None otherwise.
-        """
-        for name in self._clients:
-            if name in self._discovered_backends:
-                continue
-
-            self.discover_backend(name)
-
-            if model in self._model_to_backend:
-                return self._model_to_backend[model]
-
-        return None
+        return self._model_to_backend.get(model)
 
     def discover_backend(self, name: str) -> set[str]:
         """Probe a specific backend for its models.
