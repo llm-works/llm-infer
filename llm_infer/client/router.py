@@ -217,7 +217,9 @@ class LLMRouter(ChatClient):
         if self._discovery is not None:
             found = self._discovery.get_backend_for_model(model)
             if found is not None:
-                # Update our cached routing table
+                # Refresh cached routing table. This is eventually consistent under
+                # concurrent access (last write wins), but always returns correct
+                # results since discovery.models is the source of truth.
                 self._model_to_backend = self._discovery.models
                 return found
 

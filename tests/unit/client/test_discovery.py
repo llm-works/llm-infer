@@ -76,25 +76,6 @@ class TestModelDiscovery:
         # Backend should NOT have been probed
         assert not backend._list_models_called
 
-    def test_lazy_probe_disabled(self, mock_lg: Logger) -> None:
-        """Test that lazy_probe=False prevents backend probing."""
-        backend = MockBackend(models=["discovered-model"])
-        client = LLMClient(lg=mock_lg, backend=backend)
-
-        discovery = ModelDiscovery(
-            mock_lg,
-            clients={"test": client},
-            configs={"test": {}},
-            lazy_probe=False,
-        )
-
-        # Request a model not in config
-        result = discovery.get_backend_for_model("discovered-model")
-
-        # Should return None (no probing)
-        assert result is None
-        assert not backend._list_models_called
-
     def test_unknown_model_returns_none(self, mock_lg: Logger) -> None:
         """Test that unknown models return None without probing."""
         backend = MockBackend(models=["discovered-model"])

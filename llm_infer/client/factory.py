@@ -235,10 +235,8 @@ class Factory:
             clients = {name: client}
             configs = {name: config}
 
-            # Create discovery - always loads from config, lazy probing only if enabled
-            discovery = ModelDiscovery(
-                self._lg, clients, configs, lazy_probe=discover_models
-            )
+            # Create discovery - loads model mappings from config
+            discovery = ModelDiscovery(self._lg, clients, configs)
 
             return LLMRouter(
                 self._lg,
@@ -277,10 +275,8 @@ class Factory:
             default_name = next(iter(clients.keys()))
 
         try:
-            # Create discovery - always loads from config, lazy probing only if enabled
-            discovery = ModelDiscovery(
-                self._lg, clients, backend_configs, lazy_probe=discover_models
-            )
+            # Create discovery - loads model mappings from config
+            discovery = ModelDiscovery(self._lg, clients, backend_configs)
 
             return LLMRouter(
                 self._lg,

@@ -45,7 +45,6 @@ class ModelDiscovery:
         lg: Logger,
         clients: dict[str, LLMClient],
         configs: dict[str, dict[str, Any]],
-        lazy_probe: bool = True,  # Kept for API compatibility, no longer used
     ) -> None:
         """Initialize model discovery.
 
@@ -53,8 +52,6 @@ class ModelDiscovery:
             lg: Logger instance.
             clients: Backend name to LLMClient mapping.
             configs: Backend name to config mapping.
-            lazy_probe: Deprecated, kept for API compatibility. Probing now
-                only happens via explicit discover_backend() or discover_all().
         """
         self._lg = lg
         self._clients = clients
