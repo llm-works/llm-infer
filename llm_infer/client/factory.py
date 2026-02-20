@@ -457,6 +457,7 @@ class Factory:
         model: str = "default",
         api_key: str | None = None,
         timeout: float = 120.0,
+        rate_limit: dict[str, Any] = {"per_minute": 60},
     ) -> LLMClient:
         """Create LLMClient for OpenAI-compatible API.
 
@@ -467,6 +468,7 @@ class Factory:
             model: Default model name.
             api_key: Optional API key.
             timeout: Request timeout in seconds.
+            rate_limit: Rate limit config. Defaults to 60 requests/minute.
 
         Returns:
             LLMClient configured for OpenAI-compatible API.
@@ -478,7 +480,7 @@ class Factory:
             api_key=api_key,
             timeout=timeout,
         )
-        rate_limiter = self._create_rate_limiter(None)
+        rate_limiter = self._create_rate_limiter(rate_limit)
         return LLMClient(
             lg=self._lg, backend=backend, default_model=model, rate_limiter=rate_limiter
         )
@@ -489,6 +491,7 @@ class Factory:
         api_key: str | None = None,
         max_tokens: int = 4096,
         timeout: float = 120.0,
+        rate_limit: dict[str, Any] = {"per_minute": 60},
     ) -> LLMClient:
         """Create LLMClient for Anthropic Claude API.
 
@@ -499,6 +502,7 @@ class Factory:
             api_key: Anthropic API key (uses ANTHROPIC_API_KEY env var if not provided).
             max_tokens: Default max tokens for responses.
             timeout: Request timeout in seconds.
+            rate_limit: Rate limit config. Defaults to 60 requests/minute.
 
         Returns:
             LLMClient configured for Anthropic API.
@@ -515,7 +519,7 @@ class Factory:
             "timeout": timeout,
         }
         backend = self.create_backend(config)
-        rate_limiter = self._create_rate_limiter(None)
+        rate_limiter = self._create_rate_limiter(rate_limit)
         return LLMClient(
             lg=self._lg, backend=backend, default_model=model, rate_limiter=rate_limiter
         )
