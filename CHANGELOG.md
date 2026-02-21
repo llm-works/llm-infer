@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Use relative imports consistently within package
+- Entry point script (`llm-infer.py`) now prefers local source over installed package
+
 ## [0.1.0] - 2026-02-20
 
 Initial public release.

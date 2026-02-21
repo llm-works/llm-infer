@@ -43,7 +43,7 @@ from .mappers import (
 from .streaming_generators import ChatStreamingGenerator, CompletionStreamingGenerator
 
 if TYPE_CHECKING:
-    from llm_infer.models.config import ModelConfig
+    from ....models.config import ModelConfig
 
 
 def _build_completion_usage(response: Any) -> ChatCompletionUsage:

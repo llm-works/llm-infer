@@ -32,7 +32,7 @@ from llm_saia.core.backend import (
 )
 
 if TYPE_CHECKING:
-    from llm_infer.client.client import LLMClient
+    from .client import LLMClient
 
 
 class SAIAAdapter(Backend):
