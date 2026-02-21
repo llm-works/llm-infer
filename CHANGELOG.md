@@ -7,65 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-- Pin minimum versions for transitive dependencies to fix CVEs:
-  - aiohttp >= 3.13.3 (CVE-2025-69223 through CVE-2025-69230)
-  - filelock >= 3.20.1 (CVE-2025-68146)
-  - urllib3 >= 2.6.3 (CVE-2026-21441)
-  - werkzeug >= 3.1.5 (CVE-2026-21860)
+## [0.1.0] - 2026-02-20
 
-### Fixed
-- Circular import between `llm_infer.client` and `llm_infer.api` modules
-- Circular import in `llm_infer.serving.api` preventing use of streaming utilities
+Initial public release.
 
-### Changed
-- Server-side think mode handling: server injects model-specific suffixes and normalizes output tags
-- Server-side system prompt injection from model config (default and think-specific)
-- QueryTool simplified to be model-agnostic (passes `think` flag to API, no model config dependency)
-- Metrics API response structure reorganized: GPU stats split into `torch` and `device` sections,
-  KV cache fields renamed (`bytes` → `allocated_bytes`, added `usage_perc`)
-- Default logging level changed from debug to info
-- Model configuration moved from `llm_infer.cli.config.models` to `llm_infer.models`
-- Request handlers refactored to use Template Method pattern (common logic in base class)
-- Streaming response generation refactored to use Template Method pattern
-- Config overrides refactored to use Strategy pattern (env vars, CLI args)
-- Request dispatch refactored to use Chain of Responsibility pattern
-- Metrics response construction refactored to use Builder pattern
-- Move OpenAI schemas to `llm_infer.schemas.openai` (leaf module with no dependencies)
-- Remove `importlib.util` hack from `llm_infer.api` module
+### CLI & Server
 
-### Added
-- PEP 561 `py.typed` marker for type checker support in downstream packages
-- `think` field in `ChatCompletionRequest` for API-level think mode control (llm-infer extension)
-- `ThinkTagNormalizer` class for streaming-safe normalization of think tags to canonical form
-- pynvml-based GPU stats for vLLM backend: device-level memory (used/total/free), model memory
-  estimation, and real-time KV cache usage from vLLM metrics API
-- `disable_log_stats` config option for vLLM to control stats collection for `get_metrics()` API
-- `max_cudagraph_capture_size` config option for vLLM to limit CUDA graph batch sizes (reduces startup from ~2min to ~2sec)
-- Generic `-o KEY=VALUE` CLI flag for `serve` command to override any config value at runtime
-- `llm_infer.response` package with streaming response processing framework:
-  - `ResponseProcessor` for event-based stream processing
-  - `ThinkTagParser` for parsing `<think>`/`<thinking>` blocks into events
-  - `LatexConverter` for converting LaTeX math to Unicode
-  - `Utf8StreamBuffer` for handling incomplete UTF-8 sequences
-- `llm_infer.models` package for model configuration and path resolution (usable without CLI)
-- `ModelResolver` class for unified model path resolution with priority chain
-- OpenAI-compatible `/v1/embeddings` endpoint for vLLM backend with embedding models
-- Model-specific config in `models.yaml`: `task` and `max_model_len` override vLLM settings per model
-- `supports_embeddings()` method on engines for capability detection
-- Embedding schemas: `EmbeddingRequest`, `EmbeddingResponse`, `EmbeddingObject`, `EmbeddingUsage`
-- New public import path `llm_infer.schemas.openai` for schemas without client dependencies
-- Regression tests for circular import issues (`TestCircularImportRegression`)
-- Initial release
-- Native inference engine with paged attention and continuous batching
-- vLLM engine backend for production deployments
-- OpenAI-compatible API (`/v1/completions`, `/v1/chat/completions`)
-- Support for Llama, Mistral, Qwen, and Granite model architectures
-- AWQ (4-bit) and FP8 (8-bit) quantization support
-- FlashInfer attention backend
-- CLI tools: `serve`, `query`, `metrics`, `compat`
-- Streaming token generation with SSE
-- Health and metrics endpoints
-- Public API module (`llm_infer.api`) exporting OpenAI-compatible schemas for downstream use
-- OpenAI-compatible async client (`llm_infer.client`) for consuming SSE streams from OpenAI-compatible
-  APIs, enabling downstream packages to proxy streaming responses without reimplementing SSE parsing
+- **Inference engines**: Ollama (default), vLLM, vLLM-server, and native torch
+- **OpenAI-compatible API**: `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`
+- **Model support**: Llama, Mistral, Qwen, Granite architectures
+- **Quantization**: AWQ (4-bit) and FP8 (8-bit)
+- **Function calling**: OpenAI-compatible tool/function call support
+- **Structured output**: `response_format` for JSON mode
+- **LoRA adapters**: Dynamic adapter loading with fallback (vLLM engine)
+- **Thinking mode**: `think` parameter for extended reasoning with `<think>` tags
+- **CLI tools**: `serve`, `query`, `metrics`, `compat`
+
+### Client Library
+
+- **Multiple backends**: OpenAI-compatible APIs, Anthropic Claude
+- **All execution modes**: Sync, async, and streaming
+- **Rate limiting**: Per-backend request throttling
+- **Retry with backoff**: Configurable exponential backoff on transient errors
+- **Multi-backend routing**: Route requests by model name via `LLMRouter`
+- **Factory pattern**: `Factory.openai()`, `Factory.anthropic()` for easy client creation
+- **Lazy discovery**: Backends discovered on first use (no import-time failures)
+
+### Documentation
+
+- Engine comparison guide (`docs/ENGINES.md`)
+- Configuration reference (`docs/CONFIG.md`)
+- Client library guide (`docs/CLIENT.md`)
+- Contributing guide (`CONTRIBUTING.md`)
