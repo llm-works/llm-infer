@@ -157,8 +157,8 @@ class ChatCompletionRequest(BaseModel):
 
     model: str = Field(
         ...,
-        description="Model to use. Use 'default' or 'auto' to use the loaded model. "
-        "Server ignores this value and uses its loaded model.",
+        description="Model to use. Reserved values 'default' and 'auto' route to the "
+        "base model. Any other value is treated as an adapter key (OpenAI compatibility).",
     )
     messages: list[ChatMessage] = Field(..., min_length=1)
 
@@ -197,9 +197,9 @@ class ChatCompletionRequest(BaseModel):
     seed: int | None = None
 
     # llm-infer extension: LoRA adapter selection
-    adapter_id: str | None = Field(
+    adapter: str | None = Field(
         None,
-        description="Name of LoRA adapter to use for this request (llm-infer extension)",
+        description="LoRA adapter key to use for this request (llm-infer extension)",
     )
 
     # llm-infer extension: Think mode control
@@ -323,8 +323,8 @@ class CompletionRequest(BaseModel):
 
     model: str = Field(
         ...,
-        description="Model to use. Use 'default' or 'auto' to use the loaded model. "
-        "Server ignores this value and uses its loaded model.",
+        description="Model to use. Reserved values 'default' and 'auto' route to the "
+        "base model. Any other value is treated as an adapter key (OpenAI compatibility).",
     )
     prompt: str | list[str] = Field(...)
 
@@ -347,9 +347,9 @@ class CompletionRequest(BaseModel):
     user: str | None = None
 
     # llm-infer extension: LoRA adapter selection
-    adapter_id: str | None = Field(
+    adapter: str | None = Field(
         None,
-        description="Name of LoRA adapter to use for this request (llm-infer extension)",
+        description="LoRA adapter key to use for this request (llm-infer extension)",
     )
 
     @model_validator(mode="after")

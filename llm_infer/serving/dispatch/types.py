@@ -57,7 +57,8 @@ class Request:
     use_chat_template: bool | None = None
     stop_sequences: list[str] | None = None
     messages: list[dict[str, Any]] | None = None  # Chat messages for multi-turn
-    adapter_id: str | None = None  # LoRA adapter name for vLLM
+    model: str | None = None  # Requested model (may be adapter key for compatibility)
+    adapter: str | None = None  # Explicit LoRA adapter key (takes priority over model)
     # Tool calling support
     tools: list[dict[str, Any]] | None = None  # OpenAI-format tool definitions
     tool_choice: str | dict[str, Any] | None = (
@@ -173,9 +174,11 @@ class EmbeddingResponse:
 class AdapterInfo:
     """Serializable adapter information for IPC responses."""
 
-    adapter_id: str
-    description: str | None
+    key: str
     loaded_at: str  # ISO timestamp
+    description: str | None = None
+    md5: str | None = None
+    mtime: str | None = None
 
 
 @dataclass
@@ -198,7 +201,7 @@ class AdapterRefreshRequest:
     """Request to refresh adapters (sent from API subprocess)."""
 
     id: str
-    adapter_id: str | None = None  # None = full rescan, else refresh single adapter
+    key: str | None = None  # None = full rescan, else refresh single adapter
 
 
 @dataclass
@@ -206,6 +209,6 @@ class AdapterRefreshResponse:
     """Response from adapter refresh operation."""
 
     id: str
-    adapter_id: str | None  # Echo back which adapter (None if full scan)
+    key: str | None  # Echo back which adapter (None if full scan)
     adapters_loaded: int  # Count of enabled adapters after refresh
     status: str  # 'loaded', 'unloaded', or 'scanned'

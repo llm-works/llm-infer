@@ -497,7 +497,7 @@ class OpenAICompatibleBackend(Backend):
         if think is not None:
             payload["think"] = think
         if adapter is not None:
-            payload["adapter_id"] = adapter
+            payload["adapter"] = adapter
 
     # =========================================================================
     # Response parsing

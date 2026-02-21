@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Wire protocol: `adapter_id` field renamed to `adapter` in request body
+
+### Added
+
+- OpenAI compatibility: `model` field can select adapters (external clients can use standard
+  `{"model": "my-adapter"}` pattern)
+- Reserved model names (`auto`, `default`) always use base model, not adapter lookup
+- Adapter metadata (md5, mtime) included in log messages and API responses
+
+### Changed
+
+- Internal adapter representation uses `key` instead of `adapter_id`
+- vllm-server engine: single source of truth for adapter scanning via AdapterManager (removed
+  duplicate scanning)
+
 ### Fixed
 
 - Use relative imports consistently within package

@@ -13,9 +13,11 @@ from pathlib import Path
 import yaml
 from appinfra.log import Logger
 
+from ..adapter_meta import compute_adapter_metadata
 
-def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
-    """Validate adapter_id and resolve to safe path.
+
+def validate_adapter_key(adapter_key: str, base_path: Path) -> Path | None:
+    """Validate adapter key and resolve to safe path.
 
     Performs security checks to prevent path traversal attacks:
     - Rejects path separators (/, \\)
@@ -28,20 +30,20 @@ def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
     logical path structure. Symlink targets are operator-controlled and trusted.
 
     Args:
-        adapter_id: The adapter name to validate.
+        adapter_key: The adapter key to validate.
         base_path: The base directory containing adapter entries.
 
     Returns:
         Resolved Path if valid, None if validation fails.
     """
     # Reject empty, ".", path separators, and traversal sequences
-    if not adapter_id or adapter_id == ".":
+    if not adapter_key or adapter_key == ".":
         return None
-    if "/" in adapter_id or "\\" in adapter_id or ".." in adapter_id:
+    if "/" in adapter_key or "\\" in adapter_key or ".." in adapter_key:
         return None
 
     # Check containment BEFORE resolving symlinks (validates user input)
-    adapter_path_logical = base_path / adapter_id
+    adapter_path_logical = base_path / adapter_key
     if not adapter_path_logical.is_relative_to(base_path):
         return None
 
@@ -51,10 +53,22 @@ def validate_adapter_id(adapter_id: str, base_path: Path) -> Path | None:
 
 @dataclass
 class LoadedAdapter:
-    """An adapter that has been discovered and is enabled."""
+    """An adapter that has been discovered and is enabled.
 
-    adapter_id: str
+    Attributes:
+        key: Lookup identifier (directory name, or structured id in future).
+        path: Filesystem path to the adapter directory.
+        md5: First 12 chars of MD5 hash of weights file (for verification).
+        mtime: ISO-8601 modification time of weights file.
+        enabled: Whether the adapter is enabled for inference.
+        description: Optional human-readable description from config.yaml.
+        loaded_at: Timestamp when the adapter was loaded/refreshed.
+    """
+
+    key: str
     path: Path
+    md5: str | None = None
+    mtime: str | None = None
     enabled: bool = True
     description: str | None = None
     loaded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -120,24 +134,24 @@ class AdapterManager:
                 continue
             adapter = self._load_adapter(entry)
             if adapter and adapter.enabled:
-                self._adapters[adapter.adapter_id] = adapter
+                self._adapters[adapter.key] = adapter
                 count += 1
                 self._lg.debug(
                     "adapter loaded",
                     extra={
-                        "adapter_id": adapter.adapter_id,
+                        "key": adapter.key,
                         "path": str(adapter.path),
+                        "md5": adapter.md5,
+                        "mtime": adapter.mtime,
                     },
                 )
 
         self._lg.info("adapter scan complete", extra={"enabled_count": count})
         return count
 
-    def _load_adapter(self, path: Path) -> LoadedAdapter | None:
-        """Load adapter config from a directory."""
-        config_path = path / self.CONFIG_FILENAME
+    def _read_config(self, config_path: Path) -> dict | None:
+        """Read and validate adapter config.yaml file."""
         if not config_path.exists():
-            # No config = skip silently
             return None
 
         try:
@@ -157,9 +171,26 @@ class AdapterManager:
             )
             return None
 
+        return config
+
+    def _load_adapter(self, path: Path, key: str | None = None) -> LoadedAdapter | None:
+        """Load adapter config and compute metadata from a directory.
+
+        Args:
+            path: Path to the adapter directory (may be resolved symlink target).
+            key: Override key to use instead of path.name. Use when path is a
+                resolved symlink but you want the original symlink name as key.
+        """
+        config = self._read_config(path / self.CONFIG_FILENAME)
+        if config is None:
+            return None
+
+        metadata = compute_adapter_metadata(path)
         return LoadedAdapter(
-            adapter_id=path.name,
+            key=key if key is not None else path.name,
             path=path,
+            md5=metadata.md5 if metadata.md5 != "unknown" else None,
+            mtime=metadata.mtime if metadata.mtime != "unknown" else None,
             enabled=config.get("enabled", False),
             description=config.get("description"),
         )
@@ -168,56 +199,52 @@ class AdapterManager:
         """List all enabled adapters."""
         return list(self._adapters.values())
 
-    def get(self, adapter_id: str) -> LoadedAdapter | None:
-        """Get an adapter by ID."""
-        return self._adapters.get(adapter_id)
+    def get(self, key: str) -> LoadedAdapter | None:
+        """Get an adapter by key."""
+        return self._adapters.get(key)
 
-    def is_available(self, adapter_id: str) -> bool:
+    def is_available(self, key: str) -> bool:
         """Check if an adapter is available for use."""
-        return adapter_id in self._adapters
+        return key in self._adapters
 
-    def resolve_path(self, adapter_id: str) -> Path | None:
-        """Resolve adapter_id to its full path.
+    def resolve_path(self, key: str) -> Path | None:
+        """Resolve adapter key to its full path.
 
         Returns None if adapter is not registered (but inference may still
         work if the path exists - this is just for validation).
         """
-        adapter = self._adapters.get(adapter_id)
+        adapter = self._adapters.get(key)
         return adapter.path if adapter else None
 
-    def refresh_one(self, adapter_id: str) -> LoadedAdapter | None:
-        """Refresh a single adapter by re-reading its config.
-
-        Args:
-            adapter_id: The adapter directory name to refresh.
-
-        Returns:
-            The adapter if enabled, None if disabled or not found.
-        """
+    def _validate_refresh_path(self, key: str) -> Path | None:
+        """Validate key and return path for refresh, or None if invalid."""
         if not self._base_path:
             return None
-
-        # Validate adapter_id to prevent path traversal
-        path = validate_adapter_id(adapter_id, self._base_path)
+        path = validate_adapter_key(key, self._base_path)
         if path is None:
             self._lg.warning(
-                "rejected adapter_id with invalid characters",
-                extra={"adapter_id": adapter_id},
+                "rejected adapter key with invalid characters", extra={"key": key}
             )
+        return path
+
+    def refresh_one(self, key: str) -> LoadedAdapter | None:
+        """Refresh a single adapter by re-reading its config and metadata."""
+        path = self._validate_refresh_path(key)
+        if path is None or not path.exists() or not path.is_dir():
+            self._adapters.pop(key, None)
             return None
 
-        if not path.exists() or not path.is_dir():
-            # Remove if it was previously loaded but no longer exists
-            self._adapters.pop(adapter_id, None)
-            return None
-
-        adapter = self._load_adapter(path)
+        # Pass original key to handle symlinked adapters correctly
+        adapter = self._load_adapter(path, key=key)
         if adapter and adapter.enabled:
-            self._adapters[adapter_id] = adapter
-            self._lg.debug("adapter refreshed", extra={"adapter_id": adapter_id})
+            self._adapters[key] = adapter
+            self._lg.debug(
+                "adapter refreshed",
+                extra={"key": key, "md5": adapter.md5, "mtime": adapter.mtime},
+            )
             return adapter
-        else:
-            # Disabled or invalid - remove from loaded set
-            self._adapters.pop(adapter_id, None)
-            self._lg.debug("adapter unloaded", extra={"adapter_id": adapter_id})
-            return None
+
+        # Disabled or invalid - remove from loaded set
+        self._adapters.pop(key, None)
+        self._lg.debug("adapter unloaded", extra={"key": key})
+        return None

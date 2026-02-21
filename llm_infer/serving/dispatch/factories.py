@@ -203,6 +203,11 @@ class VLLMServerEngineFactory(EngineFactory):
 
     Connects to a `vllm serve` process via OpenAI-compatible HTTP API.
     Like OllamaEngineFactory, resolves model path and creates the engine.
+
+    Unlike the vllm (Python API) engine which loads adapters dynamically,
+    vllm-server requires adapters to be pre-registered at server startup.
+    This factory scans for adapters via AdapterManager and passes them to
+    the engine constructor, ensuring a single source of truth.
     """
 
     def _validate_model_path(self, config: InferenceConfig) -> None:
@@ -212,6 +217,21 @@ class VLLMServerEngineFactory(EngineFactory):
                 "models.path is required for vllm-server engine "
                 "(set via config, --model-path, or MODEL_PATH)"
             )
+
+    def _scan_adapters(self, lg: Logger, config: InferenceConfig) -> list[Any]:
+        """Scan for LoRA adapters if enabled.
+
+        Returns list of LoadedAdapter objects for enabled adapters.
+        """
+        from ..adapters import AdapterManager
+
+        lora_cfg = config.engines.vllm_server.lora
+        if not (lora_cfg.enabled and lora_cfg.base_path):
+            return []
+
+        manager = AdapterManager(lg, lora_cfg.base_path)
+        manager.scan()
+        return manager.list()
 
     def create(
         self, lg: Logger, config: InferenceConfig, on_progress: Any = None
@@ -230,7 +250,11 @@ class VLLMServerEngineFactory(EngineFactory):
         vllm_server_cfg = replace(
             config.engines.vllm_server, model_path=str(config.models.path)
         )
-        return VLLMServerEngine(lg, vllm_server_cfg)
+
+        # Scan adapters once via AdapterManager (single source of truth)
+        adapters = self._scan_adapters(lg, config)
+
+        return VLLMServerEngine(lg, vllm_server_cfg, adapters=adapters or None)
 
     def warmup_enabled(self, config: InferenceConfig) -> bool:
         return config.engines.vllm_server.warmup

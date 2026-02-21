@@ -41,7 +41,7 @@ These fields extend the standard OpenAI API:
 | Field | Type | Description |
 |-------|------|-------------|
 | `think` | `bool \| None` | Enable thinking mode (returns reasoning in separate field) |
-| `adapter_id` | `str \| None` | LoRA adapter name to use for this request |
+| `adapter` | `str \| None` | LoRA adapter key to use for this request |
 
 **Response fields**:
 | Field | Location | Description |

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from ...context import Event, RequestContext
-from ..adapters import validate_adapter_id
+from ..adapters import validate_adapter_key
 from .types import Request, RequestStatus, Response, ResponseAdapterInfo, StreamChunk
 
 
@@ -19,19 +19,19 @@ class AdapterError(Exception):
     """Raised when adapter resolution fails."""
 
 
-def _stable_adapter_id(adapter_id: str) -> int:
-    """Generate deterministic integer ID from adapter name.
+def _stable_adapter_int_id(adapter: str) -> int:
+    """Generate deterministic integer ID from adapter key.
 
     Uses SHA-256 hash to ensure consistent IDs across process restarts.
     Python's built-in hash() is randomized per-process since Python 3.3.
 
     Args:
-        adapter_id: The adapter name string.
+        adapter: The adapter key string.
 
     Returns:
         Positive 31-bit integer suitable for vLLM's lora_int_id.
     """
-    return int(hashlib.sha256(adapter_id.encode()).hexdigest(), 16) % (2**31)
+    return int(hashlib.sha256(adapter.encode()).hexdigest(), 16) % (2**31)
 
 
 if TYPE_CHECKING:
@@ -77,7 +77,7 @@ class RequestHandler(ABC):
     def set_adapter_manager(self, manager: AdapterManager | None) -> None:
         """Set the adapter manager for validation.
 
-        When set, adapter_id must be registered (enabled) in the manager
+        When set, adapter key must be registered (enabled) in the manager
         for inference to proceed. This enforces the `enabled` field in
         adapter config.yaml files.
 
@@ -96,7 +96,7 @@ class RequestHandler(ABC):
 
         Args:
             path: Base directory for adapter weights. Adapter paths are
-                constructed as base_path / adapter_id.
+                constructed as base_path / adapter_key.
         """
         self._lora_base_path = Path(path).expanduser() if path else None
 
@@ -195,31 +195,31 @@ class RequestHandler(ABC):
             return self._process_streaming_request(request)
         return self._process_blocking_request(request)
 
-    def _validate_adapter_path(self, adapter_id: str) -> Path:
-        """Validate adapter_id and return resolved path.
+    def _validate_adapter_path(self, adapter: str) -> Path:
+        """Validate adapter key and return resolved path.
 
         Raises:
-            AdapterError: If LoRA not configured or adapter_id is invalid.
+            AdapterError: If LoRA not configured or adapter key is invalid.
         """
         if not self._lora_base_path:
             raise AdapterError(
-                f"adapter_id '{adapter_id}' specified but LoRA not configured "
+                f"adapter '{adapter}' specified but LoRA not configured "
                 "(lora.base_path not set)"
             )
 
-        adapter_path = validate_adapter_id(adapter_id, self._lora_base_path)
+        adapter_path = validate_adapter_key(adapter, self._lora_base_path)
         if adapter_path is None:
             if self._lg:
                 self._lg.warning(
-                    "rejected invalid adapter_id", extra={"adapter_id": adapter_id}
+                    "rejected invalid adapter key", extra={"adapter": adapter}
                 )
             raise AdapterError(
-                f"invalid adapter_id '{adapter_id}': must be a simple name without "
+                f"invalid adapter '{adapter}': must be a simple name without "
                 "path separators or parent references"
             )
         return adapter_path
 
-    def _check_adapter_enabled(self, adapter_id: str, adapter_path: Path) -> None:
+    def _check_adapter_enabled(self, adapter: str, adapter_path: Path) -> None:
         """Check adapter is enabled for use.
 
         If AdapterManager is set, uses its cached enabled-adapters list.
@@ -233,22 +233,22 @@ class RequestHandler(ABC):
         """
         # Use manager if available (preferred - avoids per-request disk I/O)
         if self._adapter_manager is not None:
-            if not self._adapter_manager.is_available(adapter_id):
+            if not self._adapter_manager.is_available(adapter):
                 raise AdapterError(
-                    f"adapter '{adapter_id}' is not enabled. "
+                    f"adapter '{adapter}' is not enabled. "
                     "Enable it in the adapter's config.yaml and call /v1/adapters/refresh."
                 )
             return
 
         # Fallback: read config.yaml directly (for testing or when manager not set)
-        self._check_adapter_config_file(adapter_id, adapter_path)
+        self._check_adapter_config_file(adapter, adapter_path)
 
-    def _check_adapter_config_file(self, adapter_id: str, adapter_path: Path) -> None:
+    def _check_adapter_config_file(self, adapter: str, adapter_path: Path) -> None:
         """Check adapter config.yaml exists and has enabled: true."""
         config_path = adapter_path / "config.yaml"
         if not config_path.exists():
             raise AdapterError(
-                f"adapter '{adapter_id}' has no config.yaml. "
+                f"adapter '{adapter}' has no config.yaml. "
                 "Create config.yaml with 'enabled: true'."
             )
 
@@ -256,23 +256,21 @@ class RequestHandler(ABC):
             with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
         except Exception as e:
-            raise AdapterError(
-                f"failed to read adapter '{adapter_id}' config: {e}"
-            ) from e
+            raise AdapterError(f"failed to read adapter '{adapter}' config: {e}") from e
 
         if not isinstance(config, dict):
             raise AdapterError(
-                f"adapter '{adapter_id}' config.yaml must be a mapping, "
+                f"adapter '{adapter}' config.yaml must be a mapping, "
                 f"got {type(config).__name__}"
             )
 
         if not config.get("enabled", False):
             raise AdapterError(
-                f"adapter '{adapter_id}' is not enabled. "
+                f"adapter '{adapter}' is not enabled. "
                 "Set 'enabled: true' in the adapter's config.yaml."
             )
 
-    def _import_lora_request_class(self, adapter_id: str) -> type[Any]:
+    def _import_lora_request_class(self, adapter: str) -> type[Any]:
         """Import and return vLLM LoRARequest class, raising AdapterError if unavailable."""
         try:
             from vllm.lora.request import LoRARequest
@@ -281,64 +279,99 @@ class RequestHandler(ABC):
         except ImportError as e:
             if self._lg:
                 self._lg.warning(
-                    "vLLM LoRA module not available", extra={"adapter_id": adapter_id}
+                    "vLLM LoRA module not available", extra={"adapter": adapter}
                 )
             raise AdapterError(
-                f"adapter_id '{adapter_id}' specified but vLLM LoRA module not available"
+                f"adapter '{adapter}' specified but vLLM LoRA module not available"
             ) from e
 
-    def _log_and_track_adapter(self, adapter_id: str, adapter_path: Path) -> None:
+    def _log_and_track_adapter(self, adapter: str, adapter_path: Path) -> None:
         """Log adapter usage and track as loaded. Warns on first load."""
         if self._loaded_adapters is None:
             self._loaded_adapters = set()
-        is_first_load = adapter_id not in self._loaded_adapters
+        is_first_load = adapter not in self._loaded_adapters
         if self._lg:
+            # Build extra dict - use "key" when we have full metadata, "adapter" otherwise
+            extra: dict[str, Any] = {}
+            if self._adapter_manager and (loaded := self._adapter_manager.get(adapter)):
+                extra["key"] = adapter
+                extra["md5"] = loaded.md5
+                extra["mtime"] = loaded.mtime
+            else:
+                extra["adapter"] = adapter
             if is_first_load:
+                extra["path"] = str(adapter_path)
                 self._lg.info(
                     "loading LoRA adapter (first use, kernel compilation may take 1-2 min)",
-                    extra={"adapter_id": adapter_id, "path": str(adapter_path)},
+                    extra=extra,
                 )
             else:
-                self._lg.debug("using LoRA adapter", extra={"adapter_id": adapter_id})
-        self._loaded_adapters.add(adapter_id)
+                self._lg.debug("using LoRA adapter", extra=extra)
+        self._loaded_adapters.add(adapter)
 
     def _resolve_lora_request(
-        self, adapter_id: str | None
+        self, adapter: str | None
     ) -> tuple[Any | None, str | None]:
-        """Resolve adapter_id to a vLLM LoRARequest.
+        """Resolve adapter key to a vLLM LoRARequest.
 
         Returns:
-            Tuple of (lora_request, fallback_adapter_id):
+            Tuple of (lora_request, fallback_adapter):
             - (LoRARequest, None) if adapter resolved successfully
             - (None, None) if no adapter requested
-            - (None, adapter_id) if adapter not found (fallback to base model)
+            - (None, adapter) if adapter not found (fallback to base model)
 
         Raises:
-            AdapterError: If adapter_id is empty string, adapter is disabled,
+            AdapterError: If adapter is empty string, adapter is disabled,
                 or LoRA module unavailable.
         """
-        if adapter_id is None:
+        if adapter is None:
             return None, None
-        if not adapter_id:
-            raise AdapterError("adapter_id cannot be empty")
+        if not adapter:
+            raise AdapterError("adapter cannot be empty")
 
-        adapter_path = self._validate_adapter_path(adapter_id)
+        adapter_path = self._validate_adapter_path(adapter)
         if not adapter_path.exists():
             if self._lg:
                 self._lg.warning(
                     "adapter not found, falling back to base model",
-                    extra={"adapter_id": adapter_id, "path": str(adapter_path)},
+                    extra={"adapter": adapter, "path": str(adapter_path)},
                 )
-            return None, adapter_id  # Fallback to base model
-        self._check_adapter_enabled(adapter_id, adapter_path)
-        self._log_and_track_adapter(adapter_id, adapter_path)
+            return None, adapter  # Fallback to base model
+        self._check_adapter_enabled(adapter, adapter_path)
+        self._log_and_track_adapter(adapter, adapter_path)
 
-        lora_request = self._import_lora_request_class(adapter_id)(
-            lora_name=adapter_id,
-            lora_int_id=_stable_adapter_id(adapter_id),
+        lora_request = self._import_lora_request_class(adapter)(
+            lora_name=adapter,
+            lora_int_id=_stable_adapter_int_id(adapter),
             lora_path=str(adapter_path),
         )
         return lora_request, None
+
+    # Reserved model names that should not be looked up as adapters
+    _RESERVED_MODEL_NAMES = frozenset({"auto", "default"})
+
+    def _resolve_effective_adapter(self, request: Request) -> str | None:
+        """Resolve effective adapter from request.
+
+        Priority:
+        1. Explicit `adapter` field (our extension)
+        2. `model` field if it matches a known adapter (OpenAI compatibility)
+
+        Reserved model names (auto, default) use the base model, not adapters.
+
+        This allows external clients using standard OpenAI protocol to select
+        adapters via the model field, while our clients can use the explicit
+        adapter field.
+        """
+        if request.adapter:
+            return request.adapter
+        # Fallback: check if model field matches a known adapter
+        # Skip reserved names like "auto" and "default"
+        if request.model and self._adapter_manager:
+            if request.model not in self._RESERVED_MODEL_NAMES:
+                if self._adapter_manager.is_available(request.model):
+                    return request.model
+        return None
 
     def _build_engine_params(
         self, request: Request
@@ -346,7 +379,7 @@ class RequestHandler(ABC):
         """Build parameters for engine generate/stream methods from request.
 
         Returns:
-            Tuple of (params_dict, fallback_adapter_id). fallback_adapter_id is
+            Tuple of (params_dict, fallback_adapter). fallback_adapter is
             set if adapter was requested but not found (fell back to base model).
         """
         params: dict[str, Any] = {
@@ -361,9 +394,8 @@ class RequestHandler(ABC):
             "context": request.context,
             "messages": request.messages,
         }
-        lora_request, fallback_adapter_id = self._resolve_lora_request(
-            request.adapter_id
-        )
+        effective_adapter = self._resolve_effective_adapter(request)
+        lora_request, fallback_adapter = self._resolve_lora_request(effective_adapter)
         if lora_request is not None:
             params["lora_request"] = lora_request
         # Tool calling support
@@ -374,7 +406,7 @@ class RequestHandler(ABC):
         # Structured output support
         if request.response_format is not None:
             params["response_format"] = request.response_format
-        return params, fallback_adapter_id
+        return params, fallback_adapter
 
     def _parse_generate_result(
         self, result: str | dict[str, Any]
@@ -433,7 +465,7 @@ class RequestHandler(ABC):
     def _process_blocking_request(self, request: Request) -> Response:
         """Process request with blocking generation (non-streaming)."""
         try:
-            params, fallback_adapter_id = self._build_engine_params(request)
+            params, fallback_adapter = self._build_engine_params(request)
             result = self.engine.generate(**params)
             if request.context:
                 request.context.mark(Event.DECODED)
@@ -442,7 +474,7 @@ class RequestHandler(ABC):
             )
             # Build adapter info from engine response or pre-request fallback
             adapter_info = self._build_adapter_info_from_result(
-                adapter_dict, fallback_adapter_id
+                adapter_dict, fallback_adapter
             )
             return self._build_success_response(
                 request, result_text, tool_calls, usage, adapter_info
@@ -466,13 +498,13 @@ class RequestHandler(ABC):
     def _build_adapter_info_from_result(
         self,
         adapter_dict: dict[str, Any] | None,
-        fallback_adapter_id: str | None,
+        fallback_adapter: str | None,
     ) -> ResponseAdapterInfo | None:
         """Build AdapterInfo from engine result or pre-request fallback.
 
         Args:
             adapter_dict: Adapter info from engine (has requested/actual/fallback/mtime/md5)
-            fallback_adapter_id: Pre-request fallback (adapter not found before calling engine)
+            fallback_adapter: Pre-request fallback (adapter not found before calling engine)
         """
         # Engine returned adapter info (success or mismatch)
         if adapter_dict is not None:
@@ -484,16 +516,16 @@ class RequestHandler(ABC):
                 md5=adapter_dict.get("md5"),
             )
         # Pre-request fallback (adapter not available)
-        if fallback_adapter_id is not None:
-            return ResponseAdapterInfo(requested=fallback_adapter_id, fallback=True)
+        if fallback_adapter is not None:
+            return ResponseAdapterInfo(requested=fallback_adapter, fallback=True)
         return None
 
     def _build_adapter_info(
         self,
-        fallback_adapter_id: str | None,
+        fallback_adapter: str | None,
         stream: Any | None = None,
     ) -> ResponseAdapterInfo | None:
-        """Build AdapterInfo from fallback ID and/or stream mismatch.
+        """Build AdapterInfo from fallback adapter and/or stream mismatch.
 
         Returns None if no adapter was involved in the request.
         """
@@ -514,8 +546,8 @@ class RequestHandler(ABC):
                 requested = getattr(stream, "adapter_requested", None)
                 return ResponseAdapterInfo(requested=requested, fallback=True)
 
-        if fallback_adapter_id is not None:
-            return ResponseAdapterInfo(requested=fallback_adapter_id, fallback=True)
+        if fallback_adapter is not None:
+            return ResponseAdapterInfo(requested=fallback_adapter, fallback=True)
 
         return None
 
@@ -523,11 +555,10 @@ class RequestHandler(ABC):
         self,
         request: Request,
         stream: Any,
-        fallback_adapter_id: str | None = None,
+        adapter_info: ResponseAdapterInfo | None = None,
     ) -> None:
         """Send final chunk with metadata after streaming completes."""
         assert self._response_q is not None
-        adapter_info = self._build_adapter_info(fallback_adapter_id, stream)
         final_chunk = StreamChunk(
             id=request.id,
             token="",
@@ -544,20 +575,21 @@ class RequestHandler(ABC):
         self,
         request: Request,
         stream: Any,
-        fallback_adapter_id: str | None = None,
+        fallback_adapter: str | None = None,
     ) -> Response:
         """Finalize streaming: send final chunk, mark context, return response."""
         ctx = request.context
         if ctx:
             ctx.mark(Event.DECODED)
-        self._send_stream_final_chunk(request, stream, fallback_adapter_id)
+        # Build adapter info once and reuse
+        adapter_info = self._build_adapter_info(fallback_adapter, stream)
+        self._send_stream_final_chunk(request, stream, adapter_info)
         if ctx:
             ctx.mark(
                 Event.COMPLETE,
                 prompt_tokens=stream.prompt_tokens,
                 completion_tokens=stream.completion_tokens,
             )
-        adapter_info = self._build_adapter_info(fallback_adapter_id, stream)
         return Response(
             id=request.id,
             status=RequestStatus.COMPLETED,
@@ -569,12 +601,12 @@ class RequestHandler(ABC):
     def _process_streaming_request(self, request: Request) -> Response:
         """Process request with streaming generation."""
         try:
-            params, fallback_adapter_id = self._build_engine_params(request)
+            params, fallback_adapter = self._build_engine_params(request)
             stream = self.engine.generate_stream_sync(**params)
             self._stream_tokens_to_queue(request, stream)
-            return self._finalize_stream(request, stream, fallback_adapter_id)
+            return self._finalize_stream(request, stream, fallback_adapter)
         except AdapterError as e:
-            # Adapter validation errors (invalid ID, not enabled, not found)
+            # Adapter validation errors (invalid key, not enabled, not found)
             if self._lg:
                 self._lg.warning(
                     "adapter error", extra={"request_id": request.id, "error": str(e)}

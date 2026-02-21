@@ -152,7 +152,7 @@ class TestOpenAICompatibleBackendHelpers:
             tool_choice="auto",
         )
         assert payload["max_tokens"] == 100
-        assert payload["adapter_id"] == "my-lora"
+        assert payload["adapter"] == "my-lora"
         assert payload["think"] is True
         assert payload["tools"] is not None
         assert payload["tool_choice"] == "auto"
