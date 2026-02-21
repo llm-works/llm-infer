@@ -1,8 +1,11 @@
 # llm-infer
 
-[![PyPI](https://img.shields.io/pypi/v/llm-infer.svg)](https://pypi.org/project/llm-infer/)
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Coverage](https://img.shields.io/badge/coverage-53%25-yellow.svg)
+[![Typed](https://img.shields.io/badge/typed-PEP%20561-brightgreen.svg)](https://peps.python.org/pep-0561/)
+[![Linting: Ruff](https://img.shields.io/badge/linting-ruff-brightgreen)](https://github.com/astral-sh/ruff)
 [![CI](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml/badge.svg)](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/llm-infer.svg)](https://pypi.org/project/llm-infer/)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 
 Unified CLI and client library for local LLM inference. Wraps Ollama, vLLM, and a native engine
