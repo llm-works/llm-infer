@@ -31,7 +31,23 @@ from llm_infer.schemas.openai import ChatCompletionRequest, ChatMessage, Role
 
 | Schema | Description |
 |--------|-------------|
-| `ChatMessage` | A single chat message with `role`, `content`, and optional `name` |
+| `ChatMessage` | A single chat message with `role`, `content`, optional `name`, and `thinking` |
+
+### llm-infer Protocol Extensions
+
+These fields extend the standard OpenAI API:
+
+**Request fields** (in `ChatCompletionRequest`):
+| Field | Type | Description |
+|-------|------|-------------|
+| `think` | `bool \| None` | Enable thinking mode (returns reasoning in separate field) |
+| `adapter_id` | `str \| None` | LoRA adapter name to use for this request |
+
+**Response fields**:
+| Field | Location | Description |
+|-------|----------|-------------|
+| `thinking` | `ChatMessage` | Extracted reasoning content from `<think>` blocks |
+| `adapter` | `ChatCompletionResponse` | Adapter metadata (requested, actual, fallback, mtime, md5) |
 
 ### Chat Completions (Non-Streaming)
 

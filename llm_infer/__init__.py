@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from . import client, models
 from .adapter_meta import AdapterMetadata, compute_adapter_metadata
 
 try:
@@ -9,4 +10,10 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0.dev0"
 
-__all__ = ["__version__", "AdapterMetadata", "compute_adapter_metadata"]
+__all__ = [
+    "__version__",
+    "client",
+    "models",
+    "AdapterMetadata",
+    "compute_adapter_metadata",
+]

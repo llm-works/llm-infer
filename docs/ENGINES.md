@@ -1,0 +1,345 @@
+# Inference Engines
+
+llm-infer supports multiple inference backends through a unified interface. Each engine has
+different trade-offs for ease of use, performance, and features.
+
+## Quick Reference
+
+| Engine | How It Works | LoRA Support | Best For |
+|--------|--------------|--------------|----------|
+| `ollama` | HTTP to Ollama server | No | Getting started, CPU inference |
+| `vllm-server` | HTTP to `vllm serve` subprocess | Pre-registered only | Production (full optimizations) |
+| `vllm` | Python API (in-process) | Dynamic loading | Dynamic LoRA adapters |
+| `native` | Custom torch implementation | No | Learning, experimentation |
+
+## Ollama Engine (Default)
+
+Connects to an [Ollama](https://ollama.com) server via HTTP. llm-infer can auto-start Ollama if not
+running.
+
+### How It Works
+
+```text
+┌─────────────┐       HTTP       ┌─────────────┐
+│  llm-infer  │ ──────────────── │   Ollama    │
+│   server    │    /api/chat     │   server    │
+└─────────────┘                  └─────────────┘
+```
+
+- llm-infer starts its own HTTP server (OpenAI-compatible)
+- Requests are proxied to Ollama's HTTP API
+- Ollama manages model loading, GPU memory, and inference
+- If `auto_start: true`, llm-infer starts Ollama as a subprocess
+
+### Prerequisites
+
+Install Ollama from [ollama.ai](https://ollama.com), then pull a model:
+
+```bash
+ollama pull qwen2.5:0.5b
+```
+
+### Usage
+
+```bash
+# Ollama is the default engine
+llm-infer serve --model qwen2.5:0.5b
+
+# Explicit
+llm-infer serve --engine ollama --model qwen2.5:0.5b
+```
+
+### Configuration
+
+```yaml
+# etc/ollama.yaml
+host: http://localhost:11434  # Ollama server URL
+timeout: 300                   # Request timeout (seconds)
+models_path: ~/.ollama/models  # Model storage (sets OLLAMA_MODELS)
+auto_start: true               # Start Ollama if not running
+keep_alive: 5m                 # How long to keep model loaded
+num_ctx: null                  # Context window (null = model default)
+num_gpu: null                  # GPU layers (null = auto, 0 = CPU only)
+```
+
+### Model Name Mapping
+
+Ollama uses its own model naming. Map llm-infer names in `etc/models.yaml`:
+
+```yaml
+models:
+  qwen2.5-0.5b:
+    ollama: qwen2.5:0.5b  # Ollama model name
+```
+
+### When to Use
+
+- Getting started quickly
+- CPU-only machines
+- Simple deployments without LoRA adapters
+
+---
+
+## vLLM Server Engine (HTTP API) - Recommended for Production
+
+Runs `vllm serve` as a subprocess and connects via OpenAI-compatible HTTP API. This is the
+**recommended production engine** as it includes all vLLM optimizations.
+
+### How It Works
+
+```
+┌─────────────┐       HTTP      ┌─────────────┐
+│  llm-infer  │ ─────────────── │ vllm serve  │
+│   server    │  /v1/chat/...   │ subprocess  │
+└─────────────┘                 └─────────────┘
+```
+
+- llm-infer starts `vllm serve` as a subprocess (if `auto_start: true`)
+- Requests are proxied to vLLM's OpenAI-compatible API
+- Process isolation: vLLM crash doesn't take down llm-infer
+- Output streams to stderr (visible but separable)
+
+### vLLM Server Optimizations
+
+`vllm serve` runs the full `AsyncLLMEngine` with production optimizations not available in the
+Python API:
+
+**Inference optimizations:**
+- **Continuous batching** - Dynamic batch formation for maximum throughput
+- **Chunked prefill** - Interleave prefill and decode for better latency
+- **Prefix caching** - Cache and reuse common prefixes across requests
+- **Speculative decoding** - Use draft model for faster generation
+
+**Post-processing (delegated to server):**
+- **Tool call parsing** - Server extracts function calls from model output, returns structured
+  `tool_calls` in the response (via `--enable-auto-tool-choice` and `--tool-call-parser`)
+- **Guided decoding** - Server constrains generation to valid JSON via `response_format`
+- **Chat templating** - Server applies the model's chat template
+
+### Prerequisites
+
+```bash
+pip install vllm
+```
+
+### Usage
+
+```bash
+llm-infer serve --engine vllm-server --model-path /path/to/model
+```
+
+### Configuration
+
+```yaml
+# etc/vllm-server.yaml
+host: http://localhost
+port: 8001                     # vLLM server port (llm-infer uses 8000)
+auto_start: true               # Start vllm serve subprocess
+startup_timeout: 300           # Seconds to wait for vLLM to start
+timeout: 120                   # Request timeout
+
+# Engine options
+gpu_memory_utilization: 0.9
+max_model_len: 16384
+tensor_parallel_size: 1
+max_num_seqs: 256
+enable_prefix_caching: true
+dtype: auto
+
+# LoRA configuration
+lora:
+  enabled: true
+  base_path: /path/to/adapters
+```
+
+### LoRA Limitation
+
+`vllm-server` only supports **pre-registered adapters**:
+
+- Adapters are registered at server startup via `--lora-modules`
+- Adapters created after server startup require a server restart
+- For dynamic adapter loading, use the `vllm` engine instead
+
+This is a limitation of vLLM's HTTP API, which doesn't expose runtime adapter loading.
+
+### When to Use
+
+- Production deployments (recommended)
+- Maximum throughput with all optimizations
+- Process isolation needed
+- Static adapter configurations
+
+---
+
+## vLLM Engine (Python API)
+
+Uses vLLM's Python `LLM` class directly in the same process. Simpler but **lacks the full
+optimizations** of `vllm serve`. Primary advantage: dynamic LoRA adapter loading.
+
+### How It Works
+
+```
+┌─────────────────────────────────────┐
+│            llm-infer process        │
+│  ┌───────────┐    ┌──────────────┐  │
+│  │  FastAPI  │────│  vLLM LLM()  │  │
+│  │  server   │    │  (in-process)│  │
+│  └───────────┘    └──────────────┘  │
+└─────────────────────────────────────┘
+```
+
+- vLLM's `LLM` class runs in the same Python process
+- Direct function calls (no HTTP overhead)
+- Simpler sync API without full async engine optimizations
+
+### What's Missing vs vllm-server
+
+The Python `LLM` class is a simplified wrapper. Compared to `vllm serve`, it lacks:
+
+**Inference:**
+- Full continuous batching (limited batching via `LLM.generate()`)
+- Chunked prefill scheduling
+- Some speculative decoding optimizations
+
+**Post-processing:**
+- **No tool call support** - `tools`/`tool_choice` params are accepted but ignored; you must parse
+  tool calls from the model's text output yourself
+- Chat templating must be handled by llm-infer
+
+### Why Use It
+
+The main advantage is **dynamic LoRA adapter loading**:
+
+```python
+# Adapters can be loaded at request time
+response = client.chat(messages, adapter="my-adapter")
+```
+
+This is useful when:
+- Adapters are created dynamically (e.g., training pipeline)
+- Running e2e tests that create temporary adapters
+- Need to switch adapters without server restart
+
+### Prerequisites
+
+```bash
+pip install vllm
+```
+
+### Usage
+
+```bash
+llm-infer serve --engine vllm --model-path /path/to/model
+```
+
+### Configuration
+
+```yaml
+# etc/vllm.yaml
+gpu_memory_utilization: 0.9
+max_model_len: 16384
+tensor_parallel_size: 1
+max_num_seqs: 256
+enable_prefix_caching: true
+dtype: auto
+
+# LoRA configuration
+lora:
+  enabled: true
+  max_loras: 4
+  max_lora_rank: 64
+  base_path: /path/to/adapters
+```
+
+### When to Use
+
+- Dynamic LoRA adapter loading required
+- E2E tests with temporary adapters
+- Simpler deployment (single process)
+
+---
+
+## Native Engine
+
+Custom torch implementation with PagedAttention and FlashInfer. Full visibility into the inference
+pipeline for learning and experimentation.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────┐
+│               llm-infer process                 │
+│  ┌─────────┐    ┌─────────────────────────────┐ │
+│  │ FastAPI │────│     Native Engine           │ │
+│  │ server  │    │  ┌─────────┐ ┌────────────┐ │ │
+│  └─────────┘    │  │Scheduler│ │Transformer │ │ │
+│                 │  └─────────┘ │  + KVCache │ │ │
+│                 │              └────────────┘ │ │
+│                 └─────────────────────────────┘ │
+└─────────────────────────────────────────────────┘
+```
+
+- Pure Python/PyTorch implementation
+- PagedAttention for memory efficiency
+- FlashInfer or naive attention backends
+- Supports AWQ and FP8 quantization
+
+### Prerequisites
+
+```bash
+pip install llm-infer[runtime]
+```
+
+Requires CUDA GPU.
+
+### Usage
+
+```bash
+llm-infer serve --engine native --model-path /path/to/model
+```
+
+### Configuration
+
+```yaml
+# etc/native.yaml
+num_blocks: 1024              # KV cache blocks
+block_size: 16                # Tokens per block
+max_batch_size: 4             # Maximum batch size
+device: cuda                  # Device (cuda only)
+dtype: float16                # Model dtype
+attention_backend: flashinfer # flashinfer | naive
+torch_compile: false          # Enable torch.compile (incompatible with FlashInfer)
+warmup: true                  # Warmup on startup
+```
+
+### When to Use
+
+- Learning how LLM inference works
+- Experimenting with custom modifications
+- Debugging inference issues (naive attention backend)
+
+---
+
+## Engine Selection Guide
+
+| Scenario | Recommended Engine |
+|----------|-------------------|
+| Just getting started | `ollama` |
+| CPU-only machine | `ollama` |
+| Production deployment | `vllm-server` |
+| Maximum throughput | `vllm-server` |
+| Dynamic LoRA adapters | `vllm` |
+| E2E tests with temp adapters | `vllm` |
+| Process isolation | `vllm-server` |
+| Multi-GPU (tensor parallel) | `vllm-server` |
+| Learning/experimentation | `native` |
+
+## Overriding Engine at Runtime
+
+```bash
+# CLI flag overrides config
+llm-infer serve --engine vllm-server --model-path /path/to/model
+
+# Or via -o override
+llm-infer serve -o backends.engine=vllm-server --model-path /path/to/model
+```

@@ -1,22 +1,37 @@
-# Multi-Backend LLM Client
+# Client Package
 
-This document describes the unified LLM client supporting multiple backends with sync/async
-operations.
+`llm_infer.client` is a Python client library for LLM inference with a unified interface across
+backends. Built for autonomous agents and production use.
 
 ## Overview
 
-The `llm_infer.client` module provides a multi-backend client for interacting with LLM APIs. It
-supports both synchronous and asynchronous operations, SSE streaming, and llm-infer-specific
-extensions like LoRA adapters and thinking mode.
+**Core Features:**
+- **Multiple backends** - OpenAI, Anthropic, and any OpenAI-compatible API
+- **Sync, async, streaming** - All execution modes supported
+- **Rate limiting** - Per-backend request throttling
+- **Retry with backoff** - Configurable exponential backoff on failures
+- **Model routing** - Route requests to backends by model name
+- **Extensible** - Register custom backends via `Factory.register()`
+- **Protocol extensions** - LoRA adapter selection, thinking mode
+
+**Installation:**
+- Client-only (lightweight): `pip install llm-infer`
+- With Anthropic: `pip install llm-infer[anthropic]`
 
 **Supported Backends:**
 - **OpenAI-compatible**: OpenAI, llm-infer server, vLLM, Ollama
-- **Anthropic**: Claude models (requires `pip install llm-infer[anthropic]`)
+- **Anthropic**: Claude models
 
-**Public API path:**
+**Public API paths:**
 ```python
+# Preferred: import from root package
+from llm_infer import client
+factory = client.Factory(lg)
+
+# Or import specific classes directly
 from llm_infer.client import Factory, LLMClient, ChatResponse, Backend
-# or
+
+# Alternative path (deprecated, use llm_infer.client instead)
 from llm_infer.api import Factory, LLMClient, ChatResponse, Backend
 ```
 
@@ -93,7 +108,8 @@ with factory.openai() as client:
         print(f"\nTokens: {client.last_response.usage.total_tokens}")
 
 # Async streaming
-async with factory.openai() as client:
+async with factory.openai(base_url="http://localhost:8000/v1") as client:
+    messages = [{"role": "user", "content": "Tell me a story"}]
     async for token in client.chat_stream_async(messages):
         print(token, end="", flush=True)
 ```
@@ -196,6 +212,7 @@ factory.openai(
     model: str = "default",
     api_key: str | None = None,
     timeout: float = 120.0,
+    rate_limit: dict = {"per_minute": 60},  # Rate limiting config
 ) -> LLMClient
 
 # Anthropic Claude API
@@ -204,6 +221,7 @@ factory.anthropic(
     api_key: str | None = None,
     max_tokens: int = 4096,
     timeout: float = 120.0,
+    rate_limit: dict = {"per_minute": 60},  # Rate limiting config
 ) -> LLMClient
 
 # From configuration dict
@@ -263,14 +281,28 @@ class ChatResponse:
 For `Factory.from_config()`:
 
 ```yaml
-# Multi-backend configuration
-default: local  # Which backend to use
+# Multi-backend configuration with rate limiting and retry
+default: local
+
+rate_limit:
+  per_minute: 60  # Requests per minute per backend
+
+retry:
+  enabled: true
+  timeout: 120    # Total retry timeout in seconds
+  backoff:
+    base: 1.0     # Initial delay
+    max: 60.0     # Maximum delay
+
 backends:
   local:
     type: openai_compatible
     base_url: http://localhost:8000/v1
     model: qwen2.5-72b
     timeout: 120.0
+    # Per-backend overrides (optional)
+    rate_limit:
+      per_minute: 120
   anthropic:
     type: anthropic
     model: claude-sonnet-4-20250514

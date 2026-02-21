@@ -4,9 +4,17 @@ This document describes the system architecture of the LLM inference engine.
 
 ## Overview
 
-The system is organized into four layers:
+The system is organized into two main parts: a **client library** for consuming LLM APIs, and a
+**server** for running local inference.
 
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Client Package                             │
+│                   (llm_infer/client/)                           │
+│  Unified interface to OpenAI, Anthropic, and local servers      │
+│  Rate limiting, retry with backoff, model routing               │
+└─────────────────────────────────────────────────────────────────┘
+
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLI Layer                               │
 │                     (llm_infer/cli/)                            │
@@ -24,7 +32,7 @@ The system is organized into four layers:
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Engines Layer                              │
 │                   (llm_infer/engines/)                          │
-│  Inference backends: native, vLLM, Ollama                       │
+│  Inference backends: Ollama (default), vLLM, native             │
 │  Protocol interfaces for engine abstraction                     │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -38,6 +46,20 @@ The system is organized into four layers:
 ```
 
 ## Layer Details
+
+### Client Package (`llm_infer/client/`)
+
+Standalone client library for LLM inference. Works independently of the server components.
+
+| Component | Description |
+|-----------|-------------|
+| `Factory` | Creates client instances for different backends |
+| `LLMClient` | Unified interface with sync/async/streaming methods |
+| `LLMRouter` | Routes requests to backends by model name |
+| `Backend` | Abstract base for backend implementations |
+
+Features: rate limiting, retry with exponential backoff, model discovery, custom backend
+registration.
 
 ### CLI Layer (`llm_infer/cli/`)
 
@@ -167,10 +189,11 @@ Key protocols in `llm_infer/engines/protocol.py` and `llm_infer/engines/native/p
 
 The system supports multiple engine backends:
 
-**Native Engine** (default for learning/research)
-- Custom implementation in pure Python/PyTorch
-- Full visibility into inference pipeline
-- FlashInfer for optimized attention
+**Ollama Engine** (default)
+- Uses Ollama for model management and inference
+- Simple setup: just `ollama pull <model>` to download models
+- Auto-detects CPU/GPU, works on any machine
+- Good for quick experimentation without GPU configuration
 
 **vLLM Engine** (for production, Python API)
 - Production-grade with PagedAttention
@@ -186,16 +209,15 @@ The system supports multiple engine backends:
   - Cannot load adapters created after server startup (requires server restart)
   - Use native `vllm` engine for dynamic adapter use cases (e.g., e2e tests)
 
-**Ollama Engine** (for local development)
-- Uses Ollama for model management and inference
-- Requires Ollama installed on host; llm-infer can auto-start and manage the server if configured
-- Simple setup: just `ollama pull <model>` to download models
-- Good for quick experimentation without GPU configuration
+**Native Engine** (for learning/research)
+- Custom implementation in pure Python/PyTorch
+- Full visibility into inference pipeline
+- FlashInfer for optimized attention
 
 Select via configuration:
 ```yaml
 backends:
-  engine: native  # or vllm, vllm-server, ollama
+  engine: ollama  # ollama (default) | vllm | vllm-server | native
 ```
 
 ## Request Lifecycle
@@ -230,8 +252,8 @@ engines:
 ### Block Allocation
 
 ```
-┌─────────────────────────────────────────┐
-│              Block Pool                 │
+┌────────────────────────────────────────┐
+│              Block Pool                │
 ├─────┬─────┬─────┬─────┬─────┬─────┬────┤
 │ B0  │ B1  │ B2  │ B3  │ B4  │ ... │ Bn │
 └─────┴─────┴─────┴─────┴─────┴─────┴────┘
