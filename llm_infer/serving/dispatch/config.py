@@ -55,7 +55,7 @@ class BackendsConfig:
     Higher levels override lower levels.
     """
 
-    engine: str = "vllm-server"  # native | vllm | vllm-server | ollama
+    engine: str = "ollama"  # native | vllm | vllm-server | ollama
     model: str = "native"  # native | gptqmodel
     linear: str = "pytorch"  # pytorch | marlin
 
@@ -387,7 +387,7 @@ class InferenceConfig:
         return cls(
             models=ModelsConfig.from_dict(data.get("models", {}) or {}),
             backends=BackendsConfig(
-                engine=backends.get("engine", "vllm-server"),
+                engine=backends.get("engine", "ollama"),
                 model=backends.get("model", "native"),
                 linear=backends.get("linear", "pytorch"),
             ),

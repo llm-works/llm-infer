@@ -45,20 +45,43 @@ class EngineFactory(ABC):
 class NativeEngineFactory(EngineFactory):
     """Factory for native inference engine."""
 
-    def create(
-        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
-    ) -> Any:
-        from ...engines.native import EngineConfig, InferenceEngine, TransformerConfig
+    def _import_native_deps(self) -> tuple[Any, Any, Any]:
+        """Import native engine dependencies with helpful error message."""
+        try:
+            from ...engines.native import (
+                EngineConfig,
+                InferenceEngine,
+                TransformerConfig,
+            )
 
+            return EngineConfig, InferenceEngine, TransformerConfig
+        except ImportError as e:
+            raise ImportError(
+                "Native engine requested (backends.engine=native) but torch is not installed. "
+                "Install with: pip install llm-infer[runtime]\n"
+                "Or use Ollama engine: llm-infer serve --engine ollama"
+            ) from e
+
+    def _validate_model_path(self, config: InferenceConfig) -> None:
+        """Validate model path is set."""
         if config.models.path is None:
             raise ValueError(
                 "models.path is required for native engine "
                 "(set via config, --model-path, or MODEL_PATH)"
             )
+
+    def create(
+        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
+    ) -> Any:
+        engine_config_cls, engine_cls, transformer_config_cls = (
+            self._import_native_deps()
+        )
+        self._validate_model_path(config)
+
         native_cfg = config.engines.native
         model_path = str(config.models.path)
-        model_config = TransformerConfig.from_hf_config(model_path)
-        engine_config = EngineConfig(
+        model_config = transformer_config_cls.from_hf_config(model_path)
+        engine_config = engine_config_cls(
             model=model_config,
             model_path=model_path,
             num_blocks=native_cfg.num_blocks,
@@ -69,8 +92,7 @@ class NativeEngineFactory(EngineFactory):
             torch_compile=native_cfg.torch_compile,
             warmup=native_cfg.warmup,
         )
-
-        return InferenceEngine(lg, engine_config, on_progress=on_progress)
+        return engine_cls(lg, engine_config, on_progress=on_progress)
 
     def warmup_enabled(self, config: InferenceConfig) -> bool:
         return config.engines.native.warmup
@@ -98,7 +120,8 @@ class VLLMEngineFactory(EngineFactory):
         except ImportError as e:
             raise ImportError(
                 "vLLM engine requested (backends.engine=vllm) but vLLM is not installed. "
-                "Install with: pip install vllm\nOr use native engine: backends.engine=native"
+                "Install with: pip install vllm\n"
+                "Or use Ollama engine: llm-infer serve --engine ollama"
             ) from e
 
         self._validate_model_path(config)
@@ -157,7 +180,8 @@ class OllamaEngineFactory(EngineFactory):
         except ImportError as e:
             raise ImportError(
                 "Ollama engine requested (backends.engine=ollama) but httpx is not installed. "
-                "Install with: pip install httpx\nOr use native engine: backends.engine=native"
+                "Install with: pip install httpx\n"
+                "Also ensure Ollama is installed: https://ollama.ai"
             ) from e
 
         ollama_model = self._get_ollama_model_name(lg, config)
@@ -196,7 +220,8 @@ class VLLMServerEngineFactory(EngineFactory):
             raise ImportError(
                 "vLLM server engine requested (backends.engine=vllm-server) "
                 "but httpx is not installed. "
-                "Install with: pip install httpx"
+                "Install with: pip install httpx\n"
+                "Also ensure vLLM is installed: pip install vllm"
             ) from e
 
         self._validate_model_path(config)
