@@ -22,7 +22,7 @@ behind a single interface.
 ```bash
 pip install llm-infer
 
-# With Ollama (https://ollama.ai)
+# With Ollama (https://ollama.com)
 ollama pull qwen2.5:0.5b
 llm-infer serve --model qwen2.5:0.5b
 
@@ -57,12 +57,14 @@ with factory.openai(base_url="http://localhost:8000/v1") as client:
     print(response.content)
 
 # Streaming
-with factory.openai() as client:
+with factory.openai(base_url="http://localhost:8000/v1") as client:
+    messages = [{"role": "user", "content": "Hello!"}]
     for token in client.chat_stream(messages):
         print(token, end="", flush=True)
 
 # Async
-async with factory.openai() as client:
+async with factory.openai(base_url="http://localhost:8000/v1") as client:
+    messages = [{"role": "user", "content": "Hello!"}]
     response = await client.chat_async(messages)
 ```
 
@@ -123,7 +125,7 @@ with factory.openai(base_url="https://api.openai.com/v1", api_key="sk-...") as c
 
 | Engine | Description | Install |
 |--------|-------------|---------|
-| `ollama` (default) | Wraps Ollama server | [ollama.ai](https://ollama.ai) |
+| `ollama` (default) | Wraps Ollama server | [ollama.com](https://ollama.com) |
 | `vllm` | vLLM Python API | `pip install vllm` |
 | `vllm-server` | vLLM HTTP subprocess | `pip install vllm` |
 | `native` | Custom torch implementation | `pip install llm-infer[runtime]` |

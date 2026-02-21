@@ -91,6 +91,8 @@ class NativeEngineFactory(EngineFactory):
             linear_backend=config.backends.linear,
             torch_compile=native_cfg.torch_compile,
             warmup=native_cfg.warmup,
+            device=native_cfg.device,
+            dtype=native_cfg.dtype,
         )
         return engine_cls(lg, engine_config, on_progress=on_progress)
 
@@ -181,7 +183,7 @@ class OllamaEngineFactory(EngineFactory):
             raise ImportError(
                 "Ollama engine requested (backends.engine=ollama) but httpx is not installed. "
                 "Install with: pip install httpx\n"
-                "Also ensure Ollama is installed: https://ollama.ai"
+                "Also ensure Ollama is installed: https://ollama.com"
             ) from e
 
         ollama_model = self._get_ollama_model_name(lg, config)

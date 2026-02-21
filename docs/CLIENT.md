@@ -108,7 +108,8 @@ with factory.openai() as client:
         print(f"\nTokens: {client.last_response.usage.total_tokens}")
 
 # Async streaming
-async with factory.openai() as client:
+async with factory.openai(base_url="http://localhost:8000/v1") as client:
+    messages = [{"role": "user", "content": "Tell me a story"}]
     async for token in client.chat_stream_async(messages):
         print(token, end="", flush=True)
 ```

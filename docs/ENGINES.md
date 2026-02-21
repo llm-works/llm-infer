@@ -14,15 +14,15 @@ different trade-offs for ease of use, performance, and features.
 
 ## Ollama Engine (Default)
 
-Connects to an [Ollama](https://ollama.ai) server via HTTP. llm-infer can auto-start Ollama if not
+Connects to an [Ollama](https://ollama.com) server via HTTP. llm-infer can auto-start Ollama if not
 running.
 
 ### How It Works
 
-```
+```text
 ┌─────────────┐       HTTP       ┌─────────────┐
 │  llm-infer  │ ──────────────── │   Ollama    │
-│   server    │  /api/generate   │   server    │
+│   server    │    /api/chat     │   server    │
 └─────────────┘                  └─────────────┘
 ```
 
@@ -33,7 +33,7 @@ running.
 
 ### Prerequisites
 
-Install Ollama from [ollama.ai](https://ollama.ai), then pull a model:
+Install Ollama from [ollama.ai](https://ollama.com), then pull a model:
 
 ```bash
 ollama pull qwen2.5:0.5b
