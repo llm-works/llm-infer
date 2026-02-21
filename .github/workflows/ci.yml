@@ -121,7 +121,7 @@ jobs:
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           for i in {1..30}; do
-            if curl -s http://localhost:8000/health | grep -q healthy; then
+            if curl -s http://localhost:8000/health | grep -q '"status":"ok"'; then
               echo "Server is ready"
               break
             fi
@@ -129,7 +129,7 @@ jobs:
             sleep 2
           done
           # Fail explicitly if server never became healthy
-          if ! curl -s http://localhost:8000/health | grep -q healthy; then
+          if ! curl -s http://localhost:8000/health | grep -q '"status":"ok"'; then
             echo "ERROR: Server failed to start within 60 seconds"
             exit 1
           fi
