@@ -1,23 +1,23 @@
 """Main entry point for the inference server."""
 
-import logging
 import multiprocessing as mp
 import signal
-import sys
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    import argparse
+from typing import Any, cast
 
 from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
+from appinfra.log import Logger
+from appinfra.size import size_str
 from appinfra.time import ETA, Ticker, delta_str, since, start
 
+from ..adapters import AdapterManager
+from ..api.adapters import create_adapter_router
 from ..api.openai.router import create_openai_router
 from ..api.routes import create_health_handler, create_routes
 from .config import InferenceConfig
+from .factories import get_engine_factory, get_handler_factory
 from .handler import RequestHandler
 from .loop import run_engine_loop
 
@@ -43,7 +43,7 @@ _PHASE_ACTIONS = {
 class ProgressTracker:
     """Tracks loading progress with timing and ETA for each phase."""
 
-    def __init__(self, lg: Any) -> None:
+    def __init__(self, lg: Logger) -> None:
         self._lg = lg
         self._start_times: dict[str, float] = {}
         self._last_logged: dict[str, int] = {}
@@ -111,131 +111,44 @@ class ProgressTracker:
 
 
 # ---------------------------------------------------------------------------
-# Engine creation (deferred imports to avoid loading torch at module level)
+# Engine and handler creation via factories
 # ---------------------------------------------------------------------------
 
 
-def create_engine(config: InferenceConfig, lg: Any = None) -> Any:
+def create_engine(lg: Logger, config: InferenceConfig) -> Any:
     """Create engine from configuration.
 
-    Dispatches to native or vLLM engine based on backends.engine setting.
-    Returns an engine implementing InferenceEngineProtocol.
+    Uses factory pattern to dispatch to native or vLLM engine based on
+    backends.engine setting. Returns an engine implementing InferenceEngineProtocol.
     """
-    if not config.model.path:
+    if not config.models.path:
         raise ValueError(
-            "model.path is required (set via config, --model-path, or MODEL_PATH)"
+            "models.path is required (set via config, --model-path, or MODEL_PATH)"
         )
 
     engine_type = config.backends.engine
-    model_name = Path(config.model.path).name
-    if lg:
-        lg.info(
-            "initializing engine & loading model...",
-            extra={"engine": engine_type, "model": model_name},
-        )
+    model_name = Path(config.models.path).name
+    lg.info(
+        "initializing engine & loading model...",
+        extra={"engine": engine_type, "model": model_name},
+    )
     t0 = start()
 
-    if engine_type == "vllm":
-        engine = _create_vllm_engine(config, lg)
-    else:
-        engine = _create_native_engine(config, lg)
+    factory = get_engine_factory(engine_type)
+    on_progress = ProgressTracker(lg) if engine_type == "native" else None
+    engine = factory.create(lg, config, on_progress=on_progress)
 
-    if lg:
-        lg.info(
-            "engine initialized & model loaded",
-            extra={"after": since(t0), "engine": engine_type, "model": model_name},
-        )
-
+    lg.info(
+        "engine initialized & model loaded",
+        extra={"after": since(t0), "engine": engine_type, "model": model_name},
+    )
     return engine
 
 
-def _create_native_engine(config: InferenceConfig, lg: Any = None) -> Any:
-    """Create native inference engine."""
-    from ...pipelines import EngineConfig, InferenceEngine, ModelConfig
-
-    assert config.model.path is not None  # Validated in create_engine
-    native_cfg = config.engines.native
-    model_config = ModelConfig.from_hf_config(config.model.path)
-    engine_config = EngineConfig(
-        model=model_config,
-        model_path=config.model.path,
-        num_blocks=native_cfg.num_blocks,
-        block_size=native_cfg.block_size,
-        max_batch_size=native_cfg.max_batch_size,
-        attention_backend=native_cfg.attention_backend,
-        linear_backend=config.backends.linear,
-        torch_compile=native_cfg.torch_compile,
-        warmup=native_cfg.warmup,
-    )
-
-    on_progress = ProgressTracker(lg) if lg else None
-    return InferenceEngine(lg, engine_config, on_progress=on_progress)
-
-
-def _build_vllm_config(model_path: str, vllm_cfg) -> Any:
-    """Build VLLMConfig from dispatch config."""
-    from ...pipelines.engines.vllm_engine import VLLMConfig
-
-    return VLLMConfig(
-        model_path=model_path,
-        gpu_memory_utilization=vllm_cfg.gpu_memory_utilization,
-        cpu_offload_gb=vllm_cfg.cpu_offload_gb,
-        swap_space=vllm_cfg.swap_space,
-        max_model_len=vllm_cfg.max_model_len,
-        tensor_parallel_size=vllm_cfg.tensor_parallel_size,
-        pipeline_parallel_size=vllm_cfg.pipeline_parallel_size,
-        max_num_seqs=vllm_cfg.max_num_seqs,
-        max_num_batched_tokens=vllm_cfg.max_num_batched_tokens,
-        scheduling_policy=vllm_cfg.scheduling_policy,
-        enable_prefix_caching=vllm_cfg.enable_prefix_caching,
-        kv_cache_dtype=vllm_cfg.kv_cache_dtype,
-        enforce_eager=vllm_cfg.enforce_eager,
-        disable_custom_all_reduce=vllm_cfg.disable_custom_all_reduce,
-        quantization=vllm_cfg.quantization,
-        speculative_model=vllm_cfg.speculative_model,
-        num_speculative_tokens=vllm_cfg.num_speculative_tokens,
-        dtype=vllm_cfg.dtype,
-        trust_remote_code=vllm_cfg.trust_remote_code,
-    )
-
-
-def _create_vllm_engine(config: InferenceConfig, lg: Any = None) -> Any:
-    """Create vLLM-backed inference engine."""
-    try:
-        from ...pipelines.engines.vllm_engine import VLLMEngine
-    except ImportError as e:
-        raise ImportError(
-            "vLLM engine requested (backends.engine=vllm) but vLLM is not installed. "
-            "Install with: pip install vllm\nOr use native engine: backends.engine=native"
-        ) from e
-
-    assert config.model.path is not None  # Validated in create_engine
-    return VLLMEngine(_build_vllm_config(config.model.path, config.engines.vllm), lg)
-
-
-def create_handler(engine: Any, config: InferenceConfig) -> RequestHandler:
-    """Create a request handler for the engine."""
-    from .handlers import BoundedQueueHandler, SequentialHandler
-
-    handler_type = config.dispatch.handler
-
-    if handler_type == "sequential":
-        return SequentialHandler(engine)
-    elif handler_type == "bounded":
-        # vLLM handles batching internally, use max_batch_size=1
-        max_batch_size = (
-            1
-            if config.backends.engine == "vllm"
-            else config.engines.native.max_batch_size
-        )
-        return BoundedQueueHandler(
-            engine,
-            max_pending=config.dispatch.max_pending,
-            max_batch_size=max_batch_size,
-            batch_streaming=getattr(config.dispatch, "batch_streaming", False),
-        )
-    else:
-        raise ValueError(f"Unknown handler type: {handler_type}")
+def create_handler(lg: Logger, engine: Any, config: InferenceConfig) -> Any:
+    """Create a request handler for the engine using factory pattern."""
+    factory = get_handler_factory(config.dispatch.handler)
+    return factory.create(lg, engine, config)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +168,7 @@ class BootSequence:
         6. run_loop() - Process requests until shutdown
     """
 
-    def __init__(self, config: InferenceConfig, lg: Any) -> None:
+    def __init__(self, config: InferenceConfig, lg: Logger) -> None:
         self._config = config
         self._lg = lg
 
@@ -271,6 +184,7 @@ class BootSequence:
         self._engine: Any = None
         self._handler: RequestHandler | None = None
         self._memory_ticker: Ticker | None = None
+        self._adapter_manager: AdapterManager | None = None
 
         # Shutdown coordination
         self._shutdown = threading.Event()
@@ -285,7 +199,9 @@ class BootSequence:
         Health endpoint returns 'initializing' until mark_ready() is called.
         """
         model_name = (
-            Path(self._config.model.path).name if self._config.model.path else "unknown"
+            Path(self._config.models.path).name
+            if self._config.models.path
+            else "unknown"
         )
 
         self._server = self._build_server(model_name)
@@ -305,7 +221,7 @@ class BootSequence:
 
         This is the heavy phase - triggers torch import and loads weights.
         """
-        self._engine = create_engine(self._config, lg=self._lg)
+        self._engine = create_engine(self._lg, self._config)
 
         self._log_gpu_stats()
         if self._config.backends.engine == "native":
@@ -316,24 +232,53 @@ class BootSequence:
 
     def create_handler(self) -> None:
         """Phase 3: Create request handler."""
-        self._handler = create_handler(self._engine, self._config)
-        self._handler.set_logger(self._lg)
+        self._handler = create_handler(self._lg, self._engine, self._config)
         self._lg.info("handler created", extra={"type": self._config.dispatch.handler})
+
+        # Configure LoRA if enabled (use engine-specific config)
+        engine_type = self._config.backends.engine
+        if engine_type == "vllm":
+            lora_cfg = self._config.engines.vllm.lora
+        elif engine_type == "vllm-server":
+            lora_cfg = self._config.engines.vllm_server.lora
+        else:
+            lora_cfg = None
+
+        if lora_cfg and lora_cfg.enabled and lora_cfg.base_path:
+            self._handler.set_lora_base_path(lora_cfg.base_path)
+
+            # Initialize adapter manager and scan for adapters
+            self._adapter_manager = AdapterManager(self._lg, lora_cfg.base_path)
+            count = self._adapter_manager.scan()
+            self._handler.set_adapter_manager(self._adapter_manager)
+            self._lg.info(
+                "LoRA enabled",
+                extra={"base_path": lora_cfg.base_path, "adapters_loaded": count},
+            )
 
     def warmup(self) -> None:
         """Phase 4: Run warmup query if configured."""
-        cfg = self._config
-        should_warmup = (
-            cfg.backends.engine == "native" and cfg.engines.native.warmup
-        ) or (cfg.backends.engine == "vllm" and cfg.engines.vllm.warmup)
+        factory = get_engine_factory(self._config.backends.engine)
+        if not factory.warmup_enabled(self._config):
+            return
 
-        if should_warmup:
-            self._lg.debug("running warmup query...")
-            t0 = start()
+        self._lg.debug("running warmup query...")
+        t0 = start()
+
+        # Use embed() for embedding models, generate() for generative
+        if getattr(self._engine, "supports_embeddings", lambda: False)():
+            self._engine.embed(["warmup"])
+            self._lg.info(
+                "warmup complete", extra={"after": since(t0), "type": "embed"}
+            )
+        else:
             output = self._engine.generate("Say hello", max_tokens=8)
+            # Handle both str and dict responses (some engines include usage data)
+            text = output["content"] if isinstance(output, dict) else output
+            # Limit split to first 100 chars for token counting (warmup output is tiny anyway)
             self._lg.info(
                 "warmup complete",
-                extra={"after": since(t0), "tokens": len(output.split())},
+                extra={"after": since(t0), "tokens": len(text[:100].split())},
             )
 
     def mark_ready(self) -> None:
@@ -345,11 +290,11 @@ class BootSequence:
         """Phase 6: Run main request loop until shutdown."""
         assert self._handler is not None, "create_handler() must be called first"
         run_engine_loop(
+            self._lg,
             self._handler,
             self._request_q,
             self._response_q,
             self._shutdown,
-            lg=self._lg,
         )
 
     # -----------------------------------------------------------------------
@@ -391,7 +336,7 @@ class BootSequence:
             try:
                 self._engine.shutdown()
             except Exception as e:
-                self._lg.warning("engine shutdown error", extra={"error": str(e)})
+                self._lg.warning("engine shutdown error", extra={"exception": e})
 
         if self._server and self._server.is_running:
             self._lg.debug("stopping server...")
@@ -406,33 +351,55 @@ class BootSequence:
     # Internal helpers
     # -----------------------------------------------------------------------
 
-    def _build_server(self, model_name: str) -> Server:
-        """Build the HTTP server."""
-        cfg = self._config
-        health_handler = create_health_handler(self._ready)
+    def _add_lora_routes(self, builder: Any) -> Any:
+        """Add LoRA adapter routes if enabled (call in routes mode)."""
+        lora_cfg = self._config.engines.vllm.lora
+        if lora_cfg.enabled and lora_cfg.base_path:
+            builder = builder.with_router(create_adapter_router(), prefix="/v1")
+        return builder
 
+    def _build_server_builder(self) -> Any:
+        """Build initial ServerBuilder with host/port/metadata."""
+        cfg = self._config.api
         return (
             ServerBuilder("inference")
-            .with_host(cfg.api.host)
-            .with_port(cfg.api.port)
-            .with_title(cfg.api.title)
-            .with_description(cfg.api.description)
-            .with_version(cfg.api.version)
+            .with_host(cfg.host)
+            .with_port(cfg.port)
+            .with_title(cfg.title)
+            .with_description(cfg.description)
+            .with_version(cfg.version)
+        )
+
+    def _build_server(self, model_name: str) -> Server:
+        """Build the HTTP server."""
+        cfg = self._config.api
+        health_handler = create_health_handler(self._ready)
+
+        # Get model config for server-side handling of system prompts and think mode
+        model_config = self._config.models.get(model_name)
+
+        routes_builder = (
+            self._build_server_builder()
             .routes.with_route("/health", health_handler)
             .with_router(create_routes(model_name))
-            .with_router(create_openai_router(model_name), prefix="/v1")
-            .done()
+            .with_router(create_openai_router(model_name, model_config), prefix="/v1")
+        )
+        routes_builder = self._add_lora_routes(routes_builder)
+
+        return cast(
+            Server,
+            routes_builder.done()
             .subprocess.with_ipc(self._request_q, self._response_q)
-            .with_log_file(cfg.api.log_file)
+            .with_log_file(cfg.log_file)
             .with_auto_restart(enabled=True)
-            .with_response_timeout(cfg.api.response_timeout)
+            .with_response_timeout(cfg.response_timeout)
             .done()
-            .uvicorn.with_workers(cfg.api.uvicorn.workers)
-            .with_timeout_keep_alive(cfg.api.uvicorn.timeout_keep_alive)
-            .with_log_level(cfg.api.uvicorn.log_level)
-            .with_access_log(cfg.api.uvicorn.access_log)
+            .uvicorn.with_workers(cfg.uvicorn.workers)
+            .with_timeout_keep_alive(cfg.uvicorn.timeout_keep_alive)
+            .with_log_level(cfg.uvicorn.log_level)
+            .with_access_log(cfg.uvicorn.access_log)
             .done()
-            .build()
+            .build(),
         )
 
     def _install_signal_handlers(self) -> None:
@@ -446,24 +413,35 @@ class BootSequence:
         signal.signal(signal.SIGTERM, handler)
 
     def _log_gpu_stats(self) -> None:
-        """Log current GPU memory stats."""
-        import torch
+        """Log current GPU memory stats from engine."""
+        stats = self._engine.memory_stats()
 
-        if not torch.cuda.is_available():
-            return
+        # Prefer device-level stats (pynvml) for vLLM, fall back to torch stats
+        if stats.get("device_used", 0) > 0:
+            # Calculate KV cache used from usage percentage
+            kv_total = stats.get("kv_cache_bytes", 0)
+            kv_usage_perc = stats.get("kv_cache_usage_perc", 0.0)
+            kv_used = int(kv_total * kv_usage_perc) if kv_total else 0
 
-        allocated = torch.cuda.memory_allocated() / (1024**3)
-        reserved = torch.cuda.memory_reserved() / (1024**3)
-        peak = torch.cuda.max_memory_allocated() / (1024**3)
-
-        self._lg.info(
-            "GPU stats",
-            extra={
-                "allocated_gb": f"{allocated:.2f}",
-                "reserved_gb": f"{reserved:.2f}",
-                "peak_gb": f"{peak:.2f}",
-            },
-        )
+            self._lg.info(
+                "GPU memory",
+                extra={
+                    "total": size_str(stats["device_total"]),
+                    "used": size_str(stats["device_used"]),
+                    "free": size_str(stats["device_free"]),
+                    "model": size_str(stats.get("model_memory", 0)),
+                    "kv": f"total[{size_str(kv_total)}] used[{size_str(kv_used)}]",
+                },
+            )
+        elif stats.get("allocated", 0) > 0:
+            self._lg.info(
+                "GPU memory",
+                extra={
+                    "allocated": size_str(stats["allocated"]),
+                    "reserved": size_str(stats["reserved"]),
+                    "peak": size_str(stats["peak"]),
+                },
+            )
 
     def _log_kv_cache_info(self) -> None:
         """Log KV cache allocation info (native engine only)."""
@@ -483,22 +461,9 @@ class BootSequence:
 
     def _start_memory_ticker(self) -> None:
         """Start periodic GPU memory logging."""
-        import torch
 
         def log_stats() -> None:
-            if not torch.cuda.is_available():
-                return
-            allocated = torch.cuda.memory_allocated() / (1024**3)
-            reserved = torch.cuda.memory_reserved() / (1024**3)
-            peak = torch.cuda.max_memory_allocated() / (1024**3)
-            self._lg.info(
-                "GPU stats",
-                extra={
-                    "allocated_gb": f"{allocated:.2f}",
-                    "reserved_gb": f"{reserved:.2f}",
-                    "peak_gb": f"{peak:.2f}",
-                },
-            )
+            self._log_gpu_stats()
 
         self._memory_ticker = Ticker(self._lg, log_stats, secs=120.0, initial=False)
         threading.Thread(target=self._memory_ticker.run, daemon=True).start()
@@ -509,71 +474,12 @@ class BootSequence:
 # ---------------------------------------------------------------------------
 
 
-def run_server(
-    lg: Any,
-    config: InferenceConfig | None = None,
-    host: str | None = None,
-    port: int | None = None,
-) -> None:
-    """Run the inference server (main entry point).
+def run_server(lg: Logger, config: InferenceConfig) -> None:
+    """Run the inference server.
 
     Args:
         lg: Logger instance.
-        config: Inference configuration.
-        host: Override host from config.
-        port: Override port from config.
+        config: Inference configuration (required).
     """
-    if config is None:
-        config = InferenceConfig.load()
-    if host is not None:
-        config.api.host = host
-    if port is not None:
-        config.api.port = port
-
     boot = BootSequence(config, lg)
     boot.run()
-
-
-def _setup_argparser() -> "argparse.ArgumentParser":
-    """Setup CLI argument parser."""
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Inference server with process isolation"
-    )
-    parser.add_argument("--config", type=Path, help="Path to config file")
-    parser.add_argument("--host", help="Host to bind to")
-    parser.add_argument("--port", type=int, help="Port to bind to")
-    parser.add_argument(
-        "--handler", choices=["sequential", "bounded"], help="Request handler type"
-    )
-    parser.add_argument("--model-path", help="Path to model weights")
-    parser.add_argument("--log-file", help="Log file for uvicorn output")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
-    return parser
-
-
-def main() -> int:
-    """CLI entry point."""
-    args = _setup_argparser().parse_args()
-
-    level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
-
-    config = InferenceConfig.load(args.config)
-    config.apply_env_overrides()
-    config.apply_cli_overrides(
-        host=args.host,
-        port=args.port,
-        handler=args.handler,
-        log_file=args.log_file,
-        model_path=args.model_path,
-    )
-    run_server(config)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

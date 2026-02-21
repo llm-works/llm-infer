@@ -18,7 +18,7 @@ def main() -> int:
     app = (
         AppBuilder("inference")
         .with_description("LLM inference server with paged attention")
-        .with_config_file("inference.yaml")
+        .with_config_file("llm-infer.yaml")
         .tools.with_tool(CompatTool())
         .with_tool(MetricsTool())
         .with_tool(QueryTool())

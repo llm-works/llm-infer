@@ -855,7 +855,7 @@ explicitly want raw completion behavior.
 
 **Date:** 2025-12-09
 
-**Files:** `llm_infer/serving/dispatch/handlers/bounded.py`, `etc/inference.yaml`
+**Files:** `llm_infer/serving/dispatch/handlers/bounded.py`, `etc/llm-infer.yaml`
 
 **Problem:** Streaming requests ran sequentially, blocking other requests. When multiple agents hit
 the server concurrently, each streaming request had to complete before the next could start. With
@@ -872,7 +872,7 @@ handled in a separate single-request path.
 decode loop:
 
 ```yaml
-# etc/inference.yaml
+# etc/llm-infer.yaml
 dispatch:
   handler: bounded
   max_pending: 10
@@ -1180,4 +1180,250 @@ This gives the same streaming UI effect while avoiding all token-boundary Unicod
 rather than re-tokenizing and re-decoding. The tokenizer's byte-level tokens don't align with
 Unicode character boundaries, making per-token decoding fundamentally broken for multi-byte
 characters.
+
+
+### 15. appinfra `with_on_startup` Breaks IPC Response Queue
+
+**Date:** 2026-01-16
+
+**File:** `llm_infer/serving/dispatch/main.py`
+
+**Problem:** When using appinfra's `with_on_startup()` callback with subprocess mode
+(`.subprocess.with_ipc()`), the response queue stopped delivering messages. The main process
+completed requests successfully, but responses never reached the API subprocess, causing client
+timeouts.
+
+**Symptom:**
+```text
+# Server logs show successful processing (81ms):
+[D] requested   request_id[chatcmpl-22bbd67...] stream[False]
+[D] decoded     [79ms]
+[D] complete    [81ms] prompt_tokens[30] completion_tokens[34]
+[T] queueing response  response_id[chatcmpl-22bbd67...]
+[T] response queued    response_id[chatcmpl-22bbd67...]
+
+# But client times out after 180s:
+TimeoutError: Request chatcmpl-22bbd67... timed out after 180.0s
+```
+
+**Root cause:** A bug in appinfra's handling of startup callbacks when combined with subprocess IPC
+mode. The startup callback execution interfered with the response queue listener thread in the API
+subprocess. The exact mechanism was in appinfra's internal code.
+
+**Debugging approach:**
+1. Added trace logging around `response_q.put()` - confirmed responses WERE being queued
+2. Confirmed engine completed requests in ~80ms but API timed out at 180s
+3. Disabled `with_on_startup()` callback - IPC started working immediately
+4. Re-enabled callback after appinfra fix - confirmed fix worked
+
+**Code that triggered the bug:**
+```python
+# This startup callback broke IPC when combined with subprocess mode
+def _add_lora_startup(self, builder: Any) -> Any:
+    lora_cfg = self._config.engines.vllm.lora
+    if lora_cfg.enabled and lora_cfg.base_path:
+        builder = builder.with_on_startup(
+            self._create_adapter_startup_callback(lora_cfg.base_path)
+        )
+    return builder
+
+# Used with subprocess IPC:
+builder.subprocess.with_ipc(self._request_q, self._response_q)
+```
+
+**Fix:** Bug was in appinfra - reported and fixed by appinfra team.
+
+**Trace logging added for future debugging:**
+```python
+# In loop.py - trace-level logging for response queue operations
+for response in handler.step():
+    if lg:
+        lg.trace("queueing response", extra={"response_id": response.id})
+    response_q.put(response)
+    if lg:
+        lg.trace("response queued", extra={"response_id": response.id})
+```
+
+**Insight:** When debugging IPC issues between processes, add logging on BOTH sides of the queue.
+Confirming that `put()` succeeds but the other side never receives narrows the problem to the
+queue consumer or the queue itself. In this case, it pointed to appinfra's IPC listener being
+broken by the startup callback.
+
+
+### 16. Ollama Streaming Returns Empty Content (httpx Context Manager GC)
+
+**Date:** 2026-01-26
+
+**File:** `llm_infer/pipelines/engines/ollama.py`
+
+**Problem:** Streaming responses from the Ollama engine returned empty content. The SSE chunks had
+the correct structure but `content` was always `null`, with only the role announcement and
+finish_reason chunks being sent.
+
+**Symptom:**
+```json
+data: {"choices":[{"delta":{"role":"assistant","content":null}}]}
+data: {"choices":[{"delta":{"content":null},"finish_reason":"stop"}]}
+data: [DONE]
+```
+
+Expected behavior: content chunks between role announcement and finish, e.g.:
+```json
+data: {"choices":[{"delta":{"role":"assistant","content":null}}]}
+data: {"choices":[{"delta":{"content":"1"}}]}
+data: {"choices":[{"delta":{"content":"\n"}}]}
+data: {"choices":[{"delta":{"content":"2"}}]}
+...
+data: {"choices":[{"delta":{"content":null},"finish_reason":"stop"}]}
+data: [DONE]
+```
+
+**Root cause:** The `OllamaStreamingIterator` used httpx's streaming API incorrectly. When starting
+the stream, it called `__enter__()` on the context manager but didn't keep a reference to the
+context manager itself:
+
+```python
+# Buggy code
+def _start_stream(self) -> None:
+    self._response = self._client.stream(
+        "POST", self._url, json=self._payload
+    ).__enter__()  # Context manager is a temporary, gets GC'd!
+    self._line_iter = self._response.iter_lines()
+```
+
+The context manager returned by `client.stream()` was a temporary object. After `__enter__()`
+returned the response, the context manager had no references and was garbage collected. When Python
+GC'd the context manager, it called `__exit__()` which closed the underlying stream.
+
+This caused `httpx.StreamClosed` when trying to iterate:
+```text
+httpx.StreamClosed: Attempted to read or stream content, but the stream has been closed.
+```
+
+The error was silently swallowed somewhere in the call chain, resulting in the iterator yielding
+nothing.
+
+**Fix:** Store a reference to the context manager to prevent garbage collection:
+
+```python
+# Fixed code
+def __init__(self, ...):
+    self._stream_context: Any = None  # Must hold reference to prevent GC
+    self._response: httpx.Response | None = None
+    ...
+
+def _start_stream(self) -> None:
+    # Must keep reference to context manager to prevent stream from closing
+    self._stream_context = self._client.stream(
+        "POST", self._url, json=self._payload
+    )
+    self._response = self._stream_context.__enter__()
+    self._line_iter = self._response.iter_lines()
+
+def _cleanup(self) -> None:
+    if self._stream_context is not None:
+        try:
+            self._stream_context.__exit__(None, None, None)
+        except Exception:
+            pass
+        self._stream_context = None
+        self._response = None
+```
+
+**Debugging approach:**
+1. Verified Ollama API worked directly with curl - streaming worked fine
+2. Tested httpx streaming in isolation - worked fine
+3. Tested `OllamaStreamingIterator` directly in Python - got `StreamClosed` error
+4. Realized the context manager was being GC'd between `__enter__()` and iteration
+
+**Files changed:**
+- `llm_infer/pipelines/engines/ollama.py` - Fixed `OllamaStreamingIterator` context manager handling
+
+**Insight:** When using Python context managers manually (calling `__enter__()` directly instead of
+`with`), you must keep a reference to the context manager object itself, not just the value returned
+by `__enter__()`. Otherwise the context manager may be garbage collected, triggering `__exit__()`
+and
+cleaning up resources prematurely. This is especially tricky with streaming APIs where the resource
+(the HTTP connection) needs to stay open for the duration of iteration.
+
+
+### 17. Ollama Structured Output Echoes Schema Structure
+
+**Date:** 2026-02-04
+
+**File:** `llm_infer/engines/ollama.py`
+
+**Problem:** When using `response_format` with Ollama, models echoed back the schema wrapper
+structure instead of returning flat data objects.
+
+**Symptom:**
+```json
+// Schema requested fields: passed, reason
+// Expected output:
+{"passed": true, "reason": "The content is accurate."}
+
+// Actual output - model echoed the wrapper structure:
+{"name": "VerifyResult", "description": "Result from VERIFY verb.", "schema": {"passed": true, "reason": "..."}}
+```
+
+**Initial diagnosis (incorrect):** We initially thought this was an Ollama/model issue with
+structured output and implemented a two-layer defense:
+1. Add `additionalProperties: false` to schemas
+2. Inject system guidance to prevent echoing
+
+**Actual root cause:** Customer prompt design issue. The customer was using `json_object` mode
+(basic JSON, no schema enforcement) while putting the **OpenAI schema wrapper format** directly
+in the prompt text:
+
+```text
+Respond with valid JSON matching this schema:
+{
+  "name": "VerifyResult",
+  "description": "Result from VERIFY verb.",
+  "schema": { "type": "object", "properties": {...} }
+}
+```
+
+The model correctly interpreted this as a template to fill in, echoing the structure back. This
+is expected model behavior, not a bug.
+
+**Resolution:**
+
+1. **Reverted the system guidance injection** - The `_inject_json_guidance()` workaround was
+   fighting against explicit user instructions in the prompt. You cannot server-side fix bad
+   prompts.
+
+2. **Kept the `additionalProperties: false` workaround** - This is still valid for proper
+   `json_schema` mode usage, ensuring strict schema compliance per OpenAI spec.
+
+**Proper usage patterns:**
+
+**Option A: Use `json_schema` mode with schema in `response_format`** (recommended):
+```json
+{
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "VerifyResult",
+      "schema": {"type": "object", "properties": {...}}
+    }
+  }
+}
+```
+Don't put the schema in the prompt text - let the API handle it.
+
+**Option B: Put raw schema in prompt with `json_object` mode**:
+```text
+Respond with JSON matching: {"type": "object", "properties": {"passed": {"type": "boolean"}}}
+```
+Use only the raw JSON Schema, not the OpenAI wrapper format with `name`/`description`/`schema` keys.
+
+**Files changed:**
+- `llm_infer/engines/ollama.py` - Reverted `_inject_json_guidance()`, kept `additionalProperties`
+  workaround in `_extract_ollama_format()`
+
+**Insight:** Server-side code should not try to "fix" bad user inputs. The OpenAI wrapper format
+(`{name, description, schema}`) is intended for the `response_format.json_schema` parameter, not
+for prompt text. When users put it in prompts, models naturally echo that structure back. The
+proper fix is user education, not server-side prompt manipulation.
 

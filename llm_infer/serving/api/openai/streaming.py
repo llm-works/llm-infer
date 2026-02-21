@@ -2,20 +2,21 @@
 
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
-from typing import TYPE_CHECKING
+from typing import Any
 
-from .schemas import (
+from ....schemas.openai import (
+    AdapterInfoResponse,
     ChatCompletionChunk,
     ChatCompletionChunkChoice,
     ChatCompletionChunkDelta,
     CompletionChunk,
     CompletionChunkChoice,
     FinishReason,
+    FunctionCall,
     Role,
+    ToolCallDelta,
 )
-
-if TYPE_CHECKING:
-    pass
+from .mappers import generate_tool_call_id, normalize_arguments
 
 
 def format_sse_event(data: str) -> str:
@@ -28,16 +29,66 @@ def format_sse_done() -> str:
     return "data: [DONE]\n\n"
 
 
+def _convert_tool_calls_to_deltas(
+    tool_calls: list[dict[str, Any]] | None,
+) -> list[ToolCallDelta] | None:
+    """Convert internal tool_calls format to streaming delta format.
+
+    Uses sequential indices (0, 1, 2...) for valid tool calls, skipping malformed
+    entries. This matches OpenAI's expected format where indices are contiguous.
+    """
+    if not tool_calls:
+        return None
+    result: list[ToolCallDelta] = []
+    for tc in tool_calls:
+        func = tc.get("function", {})
+        name = func.get("name", "")
+        if not name:
+            # Skip malformed tool calls with missing function name
+            continue
+        result.append(
+            ToolCallDelta(
+                index=len(result),  # Sequential index for valid tool calls
+                id=tc.get("id", generate_tool_call_id()),
+                type="function",
+                function=FunctionCall(
+                    name=name,
+                    arguments=normalize_arguments(func.get("arguments")),
+                ),
+            )
+        )
+    return result if result else None
+
+
 def create_chat_chunk(
     request_id: str,
     model: str,
     created: int,
     content: str | None = None,
+    thinking: str | None = None,
     role: Role | None = None,
     finish_reason: FinishReason | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
+    adapter: AdapterInfoResponse | None = None,
 ) -> ChatCompletionChunk:
-    """Create a chat completion chunk for streaming."""
-    delta = ChatCompletionChunkDelta(role=role, content=content)
+    """Create a chat completion chunk for streaming.
+
+    Args:
+        request_id: Unique request identifier.
+        model: Model name for response.
+        created: Unix timestamp.
+        content: Main response content delta.
+        thinking: Thinking content delta (llm-infer extension, scaffolded for
+            future streaming separation - currently only used in non-streaming).
+        role: Message role (only set on first chunk).
+        finish_reason: Finish reason (only set on final chunk).
+        tool_calls: Tool calls (only set on final chunk when model calls tools).
+        adapter: Adapter info (final chunk only, if adapter was requested).
+    """
+    tool_call_deltas = _convert_tool_calls_to_deltas(tool_calls)
+    delta = ChatCompletionChunkDelta(
+        role=role, content=content, thinking=thinking, tool_calls=tool_call_deltas
+    )
     return ChatCompletionChunk(
         id=request_id,
         created=created,
@@ -49,6 +100,7 @@ def create_chat_chunk(
                 finish_reason=finish_reason,
             )
         ],
+        adapter=adapter,
     )
 
 
@@ -58,6 +110,7 @@ def create_completion_chunk(
     created: int,
     text: str,
     finish_reason: FinishReason | None = None,
+    adapter: AdapterInfoResponse | None = None,
 ) -> CompletionChunk:
     """Create a legacy completion chunk for streaming."""
     return CompletionChunk(
@@ -71,6 +124,7 @@ def create_completion_chunk(
                 finish_reason=finish_reason,
             )
         ],
+        adapter=adapter,
     )
 
 
@@ -79,6 +133,7 @@ async def stream_chat_completion(
     model: str,
     token_iterator: AsyncIterator[str],
     get_finish_reason: Callable[[], FinishReason | None],
+    adapter: AdapterInfoResponse | None = None,
 ) -> AsyncIterator[str]:
     """Stream chat completion as SSE events."""
     created = int(time.time())
@@ -98,14 +153,15 @@ async def stream_chat_completion(
             ).model_dump_json()
         )
 
-    # Final chunk with finish_reason
+    # Final chunk with finish_reason and adapter info
     yield format_sse_event(
         create_chat_chunk(
             request_id=request_id,
             model=model,
             created=created,
             finish_reason=get_finish_reason(),
-        ).model_dump_json()
+            adapter=adapter,
+        ).model_dump_json(exclude_none=True)
     )
     yield format_sse_done()
 
@@ -115,6 +171,7 @@ def stream_chat_completion_sync(
     model: str,
     token_iterator: Iterator[str],
     get_finish_reason: Callable[[], FinishReason | None],
+    adapter: AdapterInfoResponse | None = None,
 ) -> Iterator[str]:
     """Stream chat completion as SSE events (sync version)."""
     created = int(time.time())
@@ -134,14 +191,15 @@ def stream_chat_completion_sync(
             ).model_dump_json()
         )
 
-    # Final chunk with finish_reason
+    # Final chunk with finish_reason and adapter info
     yield format_sse_event(
         create_chat_chunk(
             request_id=request_id,
             model=model,
             created=created,
             finish_reason=get_finish_reason(),
-        ).model_dump_json()
+            adapter=adapter,
+        ).model_dump_json(exclude_none=True)
     )
     yield format_sse_done()
 
@@ -151,6 +209,7 @@ def stream_completion_sync(
     model: str,
     token_iterator: Iterator[str],
     get_finish_reason: Callable[[], FinishReason | None],
+    adapter: AdapterInfoResponse | None = None,
 ) -> Iterator[str]:
     """
     Stream legacy completion as SSE events (sync version).
@@ -160,6 +219,7 @@ def stream_completion_sync(
         model: Model name for response
         token_iterator: Iterator yielding tokens
         get_finish_reason: Callback to get finish reason when done
+        adapter: Adapter info (if adapter was requested)
 
     Yields:
         SSE-formatted strings
@@ -176,7 +236,7 @@ def stream_completion_sync(
         )
         yield format_sse_event(chunk.model_dump_json())
 
-    # Final chunk with finish_reason
+    # Final chunk with finish_reason and adapter info
     finish_reason = get_finish_reason()
     final_chunk = create_completion_chunk(
         request_id=request_id,
@@ -184,6 +244,7 @@ def stream_completion_sync(
         created=created,
         text="",
         finish_reason=finish_reason,
+        adapter=adapter,
     )
-    yield format_sse_event(final_chunk.model_dump_json())
+    yield format_sse_event(final_chunk.model_dump_json(exclude_none=True))
     yield format_sse_done()

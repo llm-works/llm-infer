@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 # Configuration file paths
 INFRA_CONFIG = PROJECT_ROOT / "etc" / "infra.yaml"
-INFERENCE_CONFIG = PROJECT_ROOT / "etc" / "inference.yaml"
+INFERENCE_CONFIG = PROJECT_ROOT / "etc" / "llm-infer.yaml"
 
 # Test data directory
 TEST_DATA_DIR = PROJECT_ROOT / "tests" / "data"

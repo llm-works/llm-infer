@@ -5,94 +5,61 @@ from __future__ import annotations
 import multiprocessing as mp
 import threading
 from queue import Empty
-from typing import TYPE_CHECKING
+from typing import Any
+
+from appinfra.log import Logger
 
 from .handler import RequestHandler
-from .types import MetricsRequest, MetricsResponse, RequestStatus, Response
-
-if TYPE_CHECKING:
-    from appinfra.log import Logger
+from .processors import RequestProcessor, create_request_processor_chain
 
 
 def _process_incoming_request(
-    handler: RequestHandler, request, response_q: mp.Queue
+    handler: RequestHandler,
+    request: Any,
+    response_q: mp.Queue,  # type: ignore[type-arg]
+    processor_chain: RequestProcessor,
 ) -> None:
-    """Process a single incoming request from the queue."""
-    if isinstance(request, MetricsRequest):
-        _handle_metrics_request(request, handler, response_q)
-        return
-    if not handler.submit(request):
-        response_q.put(
-            Response(
-                id=request.id, status=RequestStatus.REJECTED, error="Server at capacity"
-            )
-        )
+    """Process a single incoming request using the processor chain."""
+    processor_chain.process(request, handler, response_q)
 
 
 def run_engine_loop(
+    lg: Logger,
     handler: RequestHandler,
-    request_q: mp.Queue,
-    response_q: mp.Queue,
+    request_q: mp.Queue,  # type: ignore[type-arg]
+    response_q: mp.Queue,  # type: ignore[type-arg]
     shutdown: threading.Event,
-    lg: Logger | None = None,
     poll_timeout: float = 0.01,
 ) -> None:
     """Main loop: read requests, process via handler, send responses."""
     handler.set_response_queue(response_q)
-    if lg:
-        handler.set_logger(lg)
+    handler.set_logger(lg)
+
+    processor_chain = create_request_processor_chain()
 
     while not shutdown.is_set():
         try:
-            _process_incoming_request(
-                handler, request_q.get(timeout=poll_timeout), response_q
-            )
+            request = request_q.get(timeout=poll_timeout)
+            _process_incoming_request(handler, request, response_q, processor_chain)
         except Empty:
             pass
         for response in handler.step():
+            lg.trace("queueing response", extra={"response_id": response.id})
             response_q.put(response)
-
-
-def _handle_metrics_request(
-    request: MetricsRequest,
-    handler: RequestHandler,
-    response_q: mp.Queue,
-) -> None:
-    """Handle a metrics request by collecting stats and sending response."""
-    engine = handler.engine
-    stats = engine.memory_stats()
-    seq_stats = handler.sequence_stats()
-
-    if request.reset_peak:
-        engine.reset_peak_memory()
-
-    response_q.put(
-        MetricsResponse(
-            id=request.id,
-            gpu_allocated_bytes=stats["allocated"],
-            gpu_reserved_bytes=stats["reserved"],
-            gpu_peak_bytes=stats["peak"],
-            kv_cache_bytes=stats["kv_cache_bytes"],
-            kv_blocks_used=stats["kv_blocks_used"],
-            kv_blocks_total=stats["kv_blocks_total"],
-            kv_block_size=stats["kv_block_size"],
-            active_sequences=seq_stats["active"],
-            total_sequence_tokens=seq_stats["total_tokens"],
-            pending_requests=handler.pending_count,
-        )
-    )
+            lg.trace("response queued", extra={"response_id": response.id})
 
 
 def run_engine_loop_async(
+    lg: Logger,
     handler: RequestHandler,
     request_q: mp.Queue,
     response_q: mp.Queue,
     shutdown: threading.Event,
 ) -> threading.Thread:
-    """
-    Start the engine loop in a background thread.
+    """Start the engine loop in a background thread.
 
     Args:
+        lg: Logger instance.
         handler: The request execution strategy.
         request_q: Queue to receive requests from uvicorn.
         response_q: Queue to send responses to uvicorn.
@@ -103,7 +70,7 @@ def run_engine_loop_async(
     """
     thread = threading.Thread(
         target=run_engine_loop,
-        args=(handler, request_q, response_q, shutdown),
+        args=(lg, handler, request_q, response_q, shutdown),
         daemon=True,
     )
     thread.start()

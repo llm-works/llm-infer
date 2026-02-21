@@ -1,0 +1,95 @@
+# Inference Server Configuration
+
+# Model configuration
+models: !include './models.yaml'
+
+# Backend configuration
+# Multi-level backend selection for flexibility in inference optimization:
+# - engine: Full inference engine (native | vllm | vllm-server | ollama) - REQUIRED
+# - model: Model implementation (native | gptqmodel) - only if engine=native
+# - linear: Kernel implementation (pytorch | marlin) - only if model=native
+#
+# Higher levels override lower levels:
+# - engine=vllm → uses engines.vllm config, ignores model/linear settings
+# - engine=vllm-server → connects to vllm serve subprocess, ignores model/linear
+# - engine=ollama → connects to Ollama server, ignores model/linear settings
+# - engine=native, model=gptqmodel → ignores linear setting
+#
+# Default: ollama (easiest, works on CPU or GPU)
+# Override with --engine or change below
+backends:
+  engine: ollama        # ollama | vllm | vllm-server | native
+  model: native         # native | gptqmodel (only if engine=native)
+  linear: marlin        # pytorch | marlin (only if model=native)
+
+# Engine configurations
+# Contains settings for each available engine backend.
+# The active engine is selected via backends.engine above.
+engines:
+  # Native engine - custom implementation for learning/reference
+  native: !include './native.yaml'
+
+  # vLLM engine - production-grade with continuous batching, PagedAttention
+  vllm: !include './vllm.yaml'
+
+  # vLLM server engine - connects to `vllm serve` subprocess
+  vllm_server: !include './vllm-server.yaml'
+
+  # Ollama engine - connects to running Ollama server
+  ollama: !include './ollama.yaml'
+
+# Dispatch configuration
+dispatch:
+  # Handler type: sequential, bounded, batching
+  handler: bounded
+
+  # Maximum pending requests before rejection (bounded/batching handlers)
+  max_pending: 10
+
+  # Engine loop settings
+  poll_timeout: 0.01      # Queue poll timeout in seconds
+
+  # Batched streaming: Allow streaming requests to batch with other requests
+  # - true: Streaming requests join the batch (better throughput, slight latency increase)
+  # - false: Streaming requests run sequentially (default, lowest latency for single stream)
+  batch_streaming: true
+
+# API configuration
+api:
+  host: 0.0.0.0
+  port: 8000
+
+  # Response timeout for client requests (seconds)
+  # Note: First LoRA request may take 2+ minutes for kernel compilation
+  response_timeout: 180.0
+
+  # Uvicorn log isolation
+  log_file: null          # Set to path to isolate uvicorn logs (e.g., .logs/uvicorn.log)
+
+  # Uvicorn server settings
+  uvicorn: !include "./uvicorn.yaml"
+
+# Third-party library logging levels
+# Values: debug, info, warning, error
+#
+# Note: Some third-party output cannot be suppressed cleanly:
+# - PyTorch C++ logs ("I1204... compile_threads") - uses internal glog, not Python logging
+# - HuggingFace tokenizers ("loading file...") - Rust library, prints to stdout
+# - HuggingFace transformers ("Special tokens...") - uses warnings.warn before we can filter
+#
+# These settings control Python-level logging where possible.
+third_party_logging:
+  # PyTorch Python-side loggers (torch._inductor, torch._dynamo, torch.distributed)
+  torch: warning
+
+  # HuggingFace transformers Python logger
+  transformers: error
+
+# Compatibility specification
+compat:
+  # Template file for generating compat spec
+  # Used by: infer compat generate
+  template: !path ./compat_template.yaml
+
+# Appinfra logging configuration
+logging: !include "./infra.yaml#logging"

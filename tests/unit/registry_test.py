@@ -1,93 +1,78 @@
 """Unit tests for backend registry."""
 
 import pytest
+from appinfra.log import create_lg
 
-from llm_infer.backends.linear.formats.base import QuantFormat
-from llm_infer.backends.linear.registry import (
-    get_available_backends,
-    get_backend,
-    get_linear_backend,
-)
+from llm_infer.engines.native.backends.linear.formats.base import QuantFormat
+from llm_infer.engines.native.backends.linear.registry import BackendRegistry
 
 pytestmark = pytest.mark.unit
 
 
-class TestGetBackend:
-    """Test get_backend function."""
+@pytest.fixture
+def lg():
+    """Create a logger for tests."""
+    return create_lg("test", "debug")
 
-    def test_get_awq_backend_returns_backend(self) -> None:
+
+@pytest.fixture
+def registry(lg):
+    """Create a BackendRegistry for tests."""
+    return BackendRegistry(lg)
+
+
+class TestBackendRegistryGet:
+    """Test BackendRegistry.get method."""
+
+    def test_get_awq_backend_returns_backend(self, registry) -> None:
         """Test that we can get an AWQ backend."""
-        backend = get_backend(QuantFormat.AWQ)
+        backend = registry.get(QuantFormat.AWQ)
         assert backend is not None
         assert backend.format == QuantFormat.AWQ
 
-    def test_get_fp8_backend_returns_backend(self) -> None:
+    def test_get_fp8_backend_returns_backend(self, registry) -> None:
         """Test that we can get an FP8 backend."""
-        backend = get_backend(QuantFormat.FP8)
+        backend = registry.get(QuantFormat.FP8)
         assert backend is not None
         assert backend.format == QuantFormat.FP8
 
-    def test_get_backend_with_pytorch_preference(self) -> None:
+    def test_get_with_pytorch_preference(self, registry) -> None:
         """Test that we can request pytorch backend specifically."""
-        backend = get_backend(QuantFormat.AWQ, preference="pytorch")
+        backend = registry.get(QuantFormat.AWQ, preference="pytorch")
         assert backend is not None
         assert backend.name == "pytorch"
 
-    def test_get_backend_with_invalid_preference_falls_back(self) -> None:
+    def test_get_with_invalid_preference_falls_back(self, registry) -> None:
         """Test that invalid preference falls back to auto-selection."""
-        backend = get_backend(QuantFormat.AWQ, preference="nonexistent")
+        backend = registry.get(QuantFormat.AWQ, preference="nonexistent")
         assert backend is not None  # Should fall back to available backend
 
 
-class TestGetAvailableBackends:
-    """Test get_available_backends function."""
+class TestBackendRegistryListAvailable:
+    """Test BackendRegistry.list_available method."""
 
-    def test_awq_has_available_backends(self) -> None:
+    def test_awq_has_available_backends(self, registry) -> None:
         """Test that AWQ has at least one available backend."""
-        backends = get_available_backends(QuantFormat.AWQ)
+        backends = registry.list_available(QuantFormat.AWQ)
         assert len(backends) >= 1
         assert "pytorch" in backends  # PyTorch backend always available
 
-    def test_fp8_has_available_backends(self) -> None:
+    def test_fp8_has_available_backends(self, registry) -> None:
         """Test that FP8 has at least one available backend."""
-        backends = get_available_backends(QuantFormat.FP8)
+        backends = registry.list_available(QuantFormat.FP8)
         assert len(backends) >= 1
         assert "pytorch" in backends  # PyTorch backend always available
 
 
-class TestGetLinearBackend:
-    """Test backward compatibility get_linear_backend function."""
+class TestBackendRegistryErrors:
+    """Test error handling in BackendRegistry."""
 
-    def test_auto_returns_backend(self) -> None:
-        """Test that 'auto' returns a backend."""
-        backend = get_linear_backend("auto")
-        assert backend is not None
-        assert backend.format == QuantFormat.AWQ
+    def test_get_unsupported_format_raises(self, registry) -> None:
+        """Test that unsupported format raises ValueError."""
+        with pytest.raises(ValueError, match="No backends defined"):
+            registry.get(QuantFormat.NONE)
 
-    def test_pytorch_returns_pytorch_backend(self) -> None:
-        """Test that 'pytorch' returns the pytorch backend."""
-        backend = get_linear_backend("pytorch")
-        assert backend.name == "pytorch"
-
-    def test_default_is_auto(self) -> None:
-        """Test that default argument is 'auto'."""
-        backend = get_linear_backend()
-        assert backend is not None
-
-
-class TestGetBackendErrors:
-    """Test error handling in get_backend."""
-
-    def test_get_backend_unregistered_format_raises(self) -> None:
-        """Test that unregistered format raises ValueError."""
-        with pytest.raises(ValueError, match="No backends registered"):
-            get_backend(QuantFormat.NONE)
-
-
-class TestGetAvailableBackendsEdgeCases:
-    """Test edge cases for get_available_backends."""
-
-    def test_none_format_returns_empty(self) -> None:
+    def test_list_available_none_format_returns_empty(self, registry) -> None:
         """Test that NONE format returns empty list."""
-        backends = get_available_backends(QuantFormat.NONE)
+        backends = registry.list_available(QuantFormat.NONE)
         assert backends == []

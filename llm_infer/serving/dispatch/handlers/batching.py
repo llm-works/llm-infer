@@ -8,13 +8,13 @@ For batched decode only, use BoundedQueueHandler with max_batch_size > 1.
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..handler import RequestHandler
 from ..types import Request, RequestStatus, Response
 
 if TYPE_CHECKING:
-    from ....primitives.protocols import InferenceEngineProtocol
+    from ....engines.protocol import InferenceEngineProtocol
 
 
 @dataclass
@@ -25,7 +25,7 @@ class RunningRequest:
     output_tokens: list[int] = field(default_factory=list)
     is_finished: bool = False
 
-    def get_output(self, tokenizer) -> str:
+    def get_output(self, tokenizer: Any) -> str:
         """Decode output tokens to string."""
         result: str = tokenizer.decode(self.output_tokens, skip_special_tokens=True)
         return result
@@ -61,6 +61,7 @@ class ContinuousBatchingHandler(RequestHandler):
             max_batch_size: Maximum requests to batch together.
             max_pending: Maximum total pending requests before rejection.
         """
+        super().__init__()
         self._engine = engine
         self.max_batch_size = max_batch_size
         self.max_pending = max_pending
@@ -87,8 +88,10 @@ class ContinuousBatchingHandler(RequestHandler):
         self.waiting.append(request)
         return True
 
-    def _process_request(self, req_id: str, running: RunningRequest) -> Response:
-        """Process a single request and return response."""
+    def _process_running_request(
+        self, req_id: str, running: RunningRequest
+    ) -> Response:
+        """Process a running request and return response."""
         try:
             result = self.engine.generate(
                 prompt=running.request.prompt,
@@ -127,7 +130,7 @@ class ContinuousBatchingHandler(RequestHandler):
         responses = []
         finished_ids = []
         for req_id, running in list(self.running.items()):
-            responses.append(self._process_request(req_id, running))
+            responses.append(self._process_running_request(req_id, running))
             finished_ids.append(req_id)
 
         for req_id in finished_ids:

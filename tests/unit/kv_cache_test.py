@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from llm_infer.primitives.kv_cache.pool import BlockPool
+from llm_infer.engines.native.kv_cache.pool import BlockPool
 
 pytestmark = pytest.mark.unit
 

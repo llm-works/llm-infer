@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
-from llm_infer.pipelines.model.architecture import (
+from llm_infer.engines.native.model.architecture import (
     ARCHITECTURES,
     GraniteArchitecture,
     LlamaArchitecture,
@@ -15,13 +15,13 @@ from llm_infer.pipelines.model.architecture import (
     get_architecture,
     get_config_defaults,
 )
-from llm_infer.pipelines.model.config import ModelConfig
+from llm_infer.engines.native.model.config import TransformerConfig
 
 pytestmark = pytest.mark.unit
 
 
-def make_config(**overrides) -> ModelConfig:
-    """Create a test ModelConfig with defaults."""
+def make_config(**overrides) -> TransformerConfig:
+    """Create a test TransformerConfig with defaults."""
     defaults = {
         "num_layers": 32,
         "num_heads": 32,
@@ -32,7 +32,7 @@ def make_config(**overrides) -> ModelConfig:
         "vocab_size": 32000,
     }
     defaults.update(overrides)
-    return ModelConfig(**defaults)
+    return TransformerConfig(**defaults)
 
 
 class TestLlamaArchitecture:

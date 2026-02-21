@@ -5,15 +5,15 @@ import tempfile
 import pytest
 import torch
 
-from llm_infer.pipelines.config import EngineConfig
-from llm_infer.pipelines.model.config import ModelConfig
+from llm_infer.engines.native.config import EngineConfig
+from llm_infer.engines.native.model.config import TransformerConfig
 
 pytestmark = pytest.mark.unit
 
 
-def make_model_config() -> ModelConfig:
-    """Create a test ModelConfig."""
-    return ModelConfig(
+def make_model_config() -> TransformerConfig:
+    """Create a test TransformerConfig."""
+    return TransformerConfig(
         num_layers=32,
         num_heads=32,
         num_kv_heads=8,

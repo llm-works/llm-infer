@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from llm_infer.pipelines.model.layers import RMSNorm
+from llm_infer.engines.native.model.layers import RMSNorm
 
 pytestmark = pytest.mark.unit
 

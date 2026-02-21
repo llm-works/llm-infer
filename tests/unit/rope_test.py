@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from llm_infer.primitives.attention.rope import (
+from llm_infer.engines.native.attention.rope import (
     apply_rope,
     precompute_rope_freqs,
     rotate_half,

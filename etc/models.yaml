@@ -1,9 +1,27 @@
 # Model-specific configurations
 # Matched by model name (from selected.yaml or --model)
 
-models:
-  # Qwen3 instruct models - support /think /no_think tokens
-  qwen3-4b-instruct-2507-awq:
+locations:
+  - !include "../.env.yaml#paths.models.huggingface"
+
+# Model selection
+# Priority: CLI --model-path > CLI --model > selection file > selection default
+selection:
+  embed:
+    path: !path ../.models/selected.embed.yaml  # Optional: ops-controlled selection file
+    default: bge-small-en-v1.5
+  generate:
+    path: !path ../.models/selected.yaml  # Optional: ops-controlled selection file
+    default: qwen3-1.7b-gptq-int8  # Fallback model name
+
+# =============================================================================
+# Templates (YAML anchors for reuse)
+# =============================================================================
+# Use <<: *anchor_name to merge template into model config
+
+templates:
+  # Qwen 2.5/3 instruct models - support /think /no_think tokens
+  qwen_think: &qwen_think
     system_prompt: null
     think:
       default: false
@@ -15,7 +33,7 @@ models:
         close: ["</think>", "</thinking>"]
 
   # DeepSeek R1 distillations - always think, uses <think> tags
-  deepseek-r1-distill-qwen-7b:
+  deepseek_r1: &deepseek_r1
     system_prompt: null
     think:
       default: true
@@ -24,6 +42,159 @@ models:
       tags:
         open: ["<think>"]
         close: ["</think>"]
+
+  # Ollama Qwen models - need explicit instruction (don't follow /think suffix)
+  ollama_qwen_think: &ollama_qwen_think
+    think:
+      default: false
+      enable_suffix: "\n\nBefore answering, show your reasoning inside <think></think> tags. Then give the final answer."
+      disable_suffix: null
+      system_prompt: null
+      tags:
+        open: ["<think>"]
+        close: ["</think>"]
+
+  # vLLM settings for small models (skip CUDA graph capture)
+  vllm_small: &vllm_small
+    vllm:
+      enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
+
+# =============================================================================
+# Models
+# =============================================================================
+
+models:
+  # ---------------------------------------------------------------------------
+  # Embedding models
+  # ---------------------------------------------------------------------------
+  bge-small-en-v1.5:
+    task: embed
+    max_model_len: null  # Use model default (512)
+    vllm:
+      # Prefix caching with concurrent embedding requests causes KeyError crash in V1 engine
+      # See: https://github.com/vllm-project/vllm/issues/25991
+      enable_prefix_caching: false
+
+  nomic-embed-text:
+    task: embed
+    ollama: nomic-embed-text
+
+  # ---------------------------------------------------------------------------
+  # Qwen2.5 instruct models
+  # ---------------------------------------------------------------------------
+  qwen2.5-0.5b-instruct:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096  # Don't need 16K for a tiny test model
+    vllm:
+      enforce_eager: true  # Must repeat - local vllm block replaces merged one
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
+  qwen2.5-coder-3b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 8192
+    vllm:
+      enforce_eager: true  # Must repeat - local vllm block replaces merged one
+      gpu_memory_utilization: 0.85  # 2GB model + LoRA + KV cache fits 8GB comfortably
+
+  qwen2.5-3b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 8192
+    vllm:
+      enforce_eager: true
+      gpu_memory_utilization: 0.85
+
+  qwen2.5-3b-instruct-unsloth-bnb-4bit:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 8192
+    vllm:
+      enforce_eager: true
+      gpu_memory_utilization: 0.85
+
+  qwen2.5-coder-7b-instruct-bnb-4bit:
+    <<: *qwen_think
+    max_model_len: 4096  # Reduced for 8GB GPU
+    vllm:
+      enforce_eager: true
+      gpu_memory_utilization: 0.85  # BNB 4-bit is compact, leave room for LoRA + KV
+      # Note: BNB quantized model - supports QLoRA training and LoRA inference
+
+  # ---------------------------------------------------------------------------
+  # Qwen3 instruct models
+  # ---------------------------------------------------------------------------
+  qwen3-0.6b-instruct:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+    vllm:
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
+  qwen3-0.6b-instruct-w4a16:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+
+  qwen3-1.7b-gptq-int8:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096  # Reduced for 8GB GPU dev environment
+
+  qwen3-1.7b-instruct-w4a16:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+    vllm:
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
+  qwen3-1.7b-instruct:
+    <<: *qwen_think
+    <<: *vllm_small
+    max_model_len: 4096
+    vllm:
+      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+
+  qwen3-4b-instruct-2507-awq:
+    <<: *qwen_think
+    max_model_len: 8192
+
+  qwen3-4b-instruct-w4a16:
+    <<: *qwen_think
+
+  # ---------------------------------------------------------------------------
+  # DeepSeek R1 distillations
+  # ---------------------------------------------------------------------------
+  deepseek-r1-distill-qwen-7b:
+    <<: *deepseek_r1
+
+  # ---------------------------------------------------------------------------
+  # Ollama models
+  # ---------------------------------------------------------------------------
+  # For Ollama, the 'ollama' field specifies the Ollama model name.
+  # Use: llm-infer serve --engine ollama --model <name-below>
+  #
+  # Note: Ollama models are stored in ~/.ollama/models (or OLLAMA_MODELS path),
+  # separate from HuggingFace models in the 'locations' directories.
+
+  llama3.1-8b:
+    ollama: llama3.1:8b
+    think:
+      default: false
+
+  llama3.2-3b:
+    ollama: llama3.2:3b
+    think:
+      default: false
+
+  qwen2.5-7b:
+    ollama: qwen2.5:7b
+    <<: *ollama_qwen_think
+
+  qwen2.5-coder-7b:
+    ollama: qwen2.5-coder:7b
+    <<: *ollama_qwen_think
 
 # Defaults for models not explicitly listed
 defaults:

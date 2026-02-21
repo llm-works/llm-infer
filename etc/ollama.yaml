@@ -1,0 +1,26 @@
+# Ollama engine configuration
+#
+# llm-infer automatically starts/stops the Ollama server with the configured
+# models_path. Set auto_start: false to connect to an external server.
+
+# Server connection
+host: http://localhost:11434  # Ollama server URL
+timeout: 300                   # Request timeout in seconds
+
+# Model storage path (sets OLLAMA_MODELS env var when starting server)
+models_path: !include "../.env.yaml#paths.models.ollama"
+
+# Server management
+auto_start: true              # Automatically start Ollama server if not running
+binary_path: !include "../.env.yaml#paths.ollama_binary"
+
+# Model lifecycle
+# How long to keep model loaded after request (e.g., "5m", "1h", "0" to unload immediately)
+keep_alive: 5m
+
+# Generation options (null = use Ollama/model defaults)
+num_ctx: null    # Context window size
+num_gpu: null    # Number of GPU layers (null = auto, 0 = CPU only)
+
+# Warmup: Run initial query on startup to ensure model is loaded
+warmup: true

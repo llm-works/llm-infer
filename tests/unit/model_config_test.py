@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from llm_infer.pipelines.model.config import ModelConfig
+from llm_infer.engines.native.model.config import TransformerConfig
 
 pytestmark = pytest.mark.unit
 
 
-class TestModelConfigFromName:
-    """Test ModelConfig.from_name factory."""
+class TestTransformerConfigFromName:
+    """Test TransformerConfig.from_name factory."""
 
     def test_llama_7b(self) -> None:
         """Test loading llama-7b config."""
-        config = ModelConfig.from_name("llama-7b")
+        config = TransformerConfig.from_name("llama-7b")
         assert config.num_layers == 32
         assert config.num_heads == 32
         assert config.num_kv_heads == 32
@@ -25,7 +25,7 @@ class TestModelConfigFromName:
 
     def test_llama_3_8b(self) -> None:
         """Test loading llama-3-8b config."""
-        config = ModelConfig.from_name("llama-3-8b")
+        config = TransformerConfig.from_name("llama-3-8b")
         assert config.num_layers == 32
         assert config.num_heads == 32
         assert config.num_kv_heads == 8  # GQA
@@ -35,22 +35,22 @@ class TestModelConfigFromName:
 
     def test_mistral_7b(self) -> None:
         """Test loading mistral-7b config."""
-        config = ModelConfig.from_name("mistral-7b")
+        config = TransformerConfig.from_name("mistral-7b")
         assert config.num_layers == 32
         assert config.num_kv_heads == 8  # GQA
 
     def test_unknown_model_raises(self) -> None:
         """Test that unknown model name raises ValueError."""
         with pytest.raises(ValueError, match="Unknown model"):
-            ModelConfig.from_name("unknown-model")
+            TransformerConfig.from_name("unknown-model")
 
 
-class TestModelConfigParseQuantConfig:
+class TestTransformerConfigParseQuantConfig:
     """Test quantization config parsing."""
 
     def test_no_quant_config(self) -> None:
         """Test parsing HF config without quantization."""
-        result = ModelConfig._parse_quant_config({})
+        result = TransformerConfig._parse_quant_config({})
         assert result == {}
 
     def test_awq_quant_config(self) -> None:
@@ -62,7 +62,7 @@ class TestModelConfigParseQuantConfig:
                 "group_size": 128,
             }
         }
-        result = ModelConfig._parse_quant_config(hf_config)
+        result = TransformerConfig._parse_quant_config(hf_config)
         assert result["quant_method"] == "awq"
         assert result["quant_bits"] == 4
         assert result["quant_group_size"] == 128
@@ -74,7 +74,7 @@ class TestModelConfigParseQuantConfig:
                 "quant_method": "awq",
             }
         }
-        result = ModelConfig._parse_quant_config(hf_config)
+        result = TransformerConfig._parse_quant_config(hf_config)
         assert result["quant_bits"] == 4  # default
         assert result["quant_group_size"] == 128  # default
 
@@ -86,7 +86,7 @@ class TestModelConfigParseQuantConfig:
                 "weight_block_size": [128, 128],
             }
         }
-        result = ModelConfig._parse_quant_config(hf_config)
+        result = TransformerConfig._parse_quant_config(hf_config)
         assert result["quant_method"] == "fp8"
         assert result["quant_bits"] == 8
         assert result["quant_group_size"] == 128
@@ -98,16 +98,16 @@ class TestModelConfigParseQuantConfig:
                 "quant_method": "unknown",
             }
         }
-        result = ModelConfig._parse_quant_config(hf_config)
+        result = TransformerConfig._parse_quant_config(hf_config)
         assert result == {}
 
 
-class TestModelConfigDefaults:
-    """Test ModelConfig default values."""
+class TestTransformerConfigDefaults:
+    """Test TransformerConfig default values."""
 
     def test_default_values(self) -> None:
         """Test default values for optional fields."""
-        config = ModelConfig(
+        config = TransformerConfig(
             num_layers=32,
             num_heads=32,
             num_kv_heads=32,
@@ -128,8 +128,8 @@ class TestModelConfigDefaults:
         assert config.qk_norm is False
 
 
-class TestModelConfigFromHfConfig:
-    """Test ModelConfig.from_hf_config factory."""
+class TestTransformerConfigFromHfConfig:
+    """Test TransformerConfig.from_hf_config factory."""
 
     def test_load_from_config_json(self) -> None:
         """Test loading config from HF config.json."""
@@ -150,7 +150,7 @@ class TestModelConfigFromHfConfig:
             with open(config_path, "w") as f:
                 json.dump(hf_config, f)
 
-            config = ModelConfig.from_hf_config(tmpdir)
+            config = TransformerConfig.from_hf_config(tmpdir)
 
             assert config.num_layers == 32
             assert config.num_heads == 32
@@ -163,7 +163,7 @@ class TestModelConfigFromHfConfig:
         """Test that missing config.json raises ValueError."""
         with tempfile.TemporaryDirectory() as tmpdir:
             with pytest.raises(ValueError, match="No config.json found"):
-                ModelConfig.from_hf_config(tmpdir)
+                TransformerConfig.from_hf_config(tmpdir)
 
     def test_head_dim_computed(self) -> None:
         """Test head_dim is computed from hidden_size when not provided."""
@@ -181,5 +181,5 @@ class TestModelConfigFromHfConfig:
             with open(config_path, "w") as f:
                 json.dump(hf_config, f)
 
-            config = ModelConfig.from_hf_config(tmpdir)
+            config = TransformerConfig.from_hf_config(tmpdir)
             assert config.head_dim == 4096 // 32  # 128

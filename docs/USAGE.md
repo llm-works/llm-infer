@@ -4,9 +4,21 @@ This document covers configuration, CLI commands, and API usage.
 
 ## Quick Start
 
+The default engine is Ollama (easiest, works on CPU or GPU).
+
 ```bash
-# Start the server
-llm-infer serve --model-path /path/to/model
+# Ollama (default)
+ollama pull qwen2.5:0.5b
+llm-infer serve --model qwen2.5:0.5b
+
+# vLLM (production - best performance, requires GPU)
+llm-infer serve --engine vllm --model-path /path/to/model
+
+# vLLM server (production - HTTP API to vllm serve subprocess)
+llm-infer serve --engine vllm-server --model-path /path/to/model
+
+# Native (research - custom implementation for learning)
+llm-infer serve --engine native --model-path /path/to/model
 
 # Query in another terminal
 llm-infer query "What is the capital of France?"
@@ -14,7 +26,7 @@ llm-infer query "What is the capital of France?"
 
 ## Configuration
 
-Configuration uses YAML files with the primary config at `etc/inference.yaml`.
+Configuration uses YAML files with the primary config at `etc/llm-infer.yaml`.
 
 ### Configuration Priority
 
@@ -27,7 +39,13 @@ Model selection follows this priority:
 ### Main Configuration File
 
 ```yaml
-# etc/inference.yaml
+# etc/llm-infer.yaml
+
+# Backend selection (default: ollama)
+backends:
+  engine: ollama      # ollama | vllm | vllm-server | native
+  model: native       # native | gptqmodel (only if engine=native)
+  linear: marlin      # pytorch | marlin (only if model=native)
 
 # Model location and selection
 models:
@@ -35,12 +53,6 @@ models:
   selection:
     path: ~/ops/models/selected.yaml  # Optional ops-controlled selection
     default: qwen2.5-1.5b              # Fallback model name
-
-# Backend selection
-backends:
-  engine: native      # native | vllm
-  model: native       # native | gptqmodel (only if engine=native)
-  linear: marlin      # pytorch | marlin (only if model=native)
 
 # Engine-specific settings
 engines:
@@ -62,6 +74,16 @@ engines:
     enable_prefix_caching: true
     warmup: true
 
+  ollama:
+    host: http://localhost:11434  # Ollama server URL
+    timeout: 300                   # Request timeout in seconds
+    models_path: /path/to/models   # Model storage (sets OLLAMA_MODELS)
+    auto_start: true               # Start Ollama server if not running
+    keep_alive: 5m                 # How long to keep model loaded
+    num_ctx: null                  # Context window (null = model default)
+    num_gpu: null                  # GPU layers (null = auto, 0 = CPU only)
+    warmup: true
+
 # Request dispatch
 dispatch:
   handler: bounded       # sequential | bounded | batching
@@ -78,16 +100,33 @@ api:
 
 ### Engine Selection
 
+The default engine is **Ollama**. Override with `--engine`.
+
+**Ollama Engine** (default) - Easiest to get started:
+- Uses Ollama for model management and inference
+- Auto-detects GPU/CPU - works on any machine
+- Simple model setup: `ollama pull <model>`
+- Auto-starts Ollama server if not running
+- **Quickstart**: `llm-infer serve --engine ollama --model qwen2.5:0.5b`
+
+**vLLM Engine** - For production (Python API):
+- Production-grade PagedAttention and continuous batching
+- Tensor parallelism for multi-GPU setups
+- Prefix caching and speculative decoding
+- Supports dynamic LoRA adapter loading
+- **Install**: `pip install vllm`
+
+**vLLM Server Engine** - For production (HTTP API):
+- Same as vLLM but uses `vllm serve` subprocess
+- OpenAI-compatible HTTP API internally
+- Pre-registered LoRA adapters only (at startup)
+- **Install**: `pip install vllm`
+
 **Native Engine** - For learning and research:
 - Full visibility into the inference pipeline
 - Custom implementation using PyTorch and FlashInfer
 - Best for understanding how inference works
-
-**vLLM Engine** - For production:
-- Production-grade PagedAttention and continuous batching
-- Tensor parallelism for multi-GPU setups
-- Prefix caching and speculative decoding
-- Drop-in replacement via `backends.engine: vllm`
+- **Install**: `pip install llm-infer[runtime]`
 
 ### Quantization
 
@@ -137,23 +176,28 @@ defaults:
 
 ### `llm-infer serve`
 
-Start the inference server.
+Start the inference server. Defaults to Ollama engine.
 
 ```bash
-# With config file
-llm-infer serve --config etc/inference.yaml
+# With Ollama (default)
+llm-infer serve --model qwen2.5:0.5b
 
-# With model path
-llm-infer serve --model-path /path/to/model
+# With vLLM
+llm-infer serve --engine vllm --model-path /path/to/model
+
+# With config file
+llm-infer serve --config etc/llm-infer.yaml
 
 # With model name (resolved from models.location)
 llm-infer serve --model qwen2.5-1.5b
 ```
 
 Options:
-- `--config, -c`: Config file path (default: `etc/inference.yaml`)
+- `--engine`: Inference backend (default: `ollama`): `ollama` | `vllm` | `vllm-server` | `native`
+- `--config, -c`: Config file path (default: `etc/llm-infer.yaml`)
 - `--model-path`: Direct path to model directory
 - `--model, -m`: Model name to load
+- `--handler`: Request handler type (`sequential` | `bounded`)
 - `--port, -p`: Override server port
 - `--host`: Override server host
 
@@ -373,6 +417,13 @@ for chunk in stream:
 2. **Prefix caching**: Enable for repeated prefixes
 3. **Tensor parallelism**: Use multiple GPUs with `tensor_parallel_size`
 4. **Speculative decoding**: Configure draft model for faster decoding
+
+### Ollama Engine
+
+1. **Context size**: Set `num_ctx` for larger context windows
+2. **GPU layers**: Use `num_gpu: 0` for CPU-only, or specific number for partial offload
+3. **Keep alive**: Adjust `keep_alive` to control model unloading (e.g., `"0"` to unload immediately)
+4. **Auto-start**: Set `auto_start: false` to connect to external Ollama server
 
 ## Debugging
 

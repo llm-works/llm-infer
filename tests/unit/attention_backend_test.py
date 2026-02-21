@@ -2,7 +2,7 @@
 
 import pytest
 
-from llm_infer.primitives.attention import (
+from llm_infer.engines.native.attention import (
     FLASHINFER_AVAILABLE,
     NaiveAttentionBackend,
     get_attention_backend,

@@ -2,6 +2,7 @@ __pycache__
 .archive
 .archives
 .claude/
+.GRADING.md
 Makefile.local
 .installed_packages
 .coverage
@@ -18,6 +19,7 @@ dist/
 *.pyd
 .DS_Store
 .env
+.env.yaml
 .venv
 venv/
 *.log

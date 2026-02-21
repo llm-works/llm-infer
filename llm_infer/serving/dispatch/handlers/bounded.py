@@ -2,15 +2,15 @@
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ....context import Event, RequestContext
+from ....context import Event
 from ..handler import RequestHandler
 from ..types import Request, RequestStatus, Response, StreamChunk
 
 if TYPE_CHECKING:
-    from ....pipelines.scheduler import Request as EngineRequest
-    from ....primitives.protocols import InferenceEngineProtocol
+    from ....engines.native.scheduler import Request as EngineRequest
+    from ....engines.protocol import InferenceEngineProtocol
 
 
 @dataclass
@@ -21,6 +21,9 @@ class RunningRequest:
     engine_request: "EngineRequest"  # Engine request with KV cache
     output_tokens: list[int] = field(default_factory=list)
     last_streamed_idx: int = 0  # Track tokens already sent to stream
+    last_streamed_len: int = (
+        0  # Track characters already streamed (for incremental decode)
+    )
 
 
 class BoundedQueueHandler(RequestHandler):
@@ -55,6 +58,7 @@ class BoundedQueueHandler(RequestHandler):
             batch_streaming: Allow streaming requests to join batched decode.
                 When True, streaming requests batch with others for better throughput.
         """
+        super().__init__()
         self._engine = engine
         self.max_pending = max_pending
         self.max_batch_size = max_batch_size
@@ -80,136 +84,6 @@ class BoundedQueueHandler(RequestHandler):
             return False
         self.queue.append(request)
         return True
-
-    def _create_context(self, request: Request) -> RequestContext | None:
-        """Create RequestContext for a request if logger is available."""
-        if self._lg is None:
-            return None
-        return RequestContext(id=request.id, lg=self._lg)
-
-    def _process_request(self, request: Request) -> Response:
-        """Process a single request and return response."""
-        # Create context and attach to request
-        ctx = self._create_context(request)
-        request.context = ctx
-        if ctx:
-            ctx.mark(
-                Event.REQUESTED, stream=request.stream, max_tokens=request.max_tokens
-            )
-
-        if request.stream and self._response_q is not None:
-            return self._process_streaming_request(request)
-        return self._process_blocking_request(request)
-
-    def _build_generate_params(self, request: Request) -> dict:
-        """Build parameters for engine.generate from request."""
-        return {
-            "prompt": request.prompt,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "top_k": request.top_k,
-            "repetition_penalty": request.repetition_penalty,
-            "use_chat_template": request.use_chat_template,
-            "stop_sequences": request.stop_sequences,
-            "context": request.context,
-            "messages": request.messages,
-        }
-
-    def _process_blocking_request(self, request: Request) -> Response:
-        """Process request with blocking generation (non-streaming)."""
-        ctx = request.context
-        try:
-            result = self.engine.generate(**self._build_generate_params(request))
-            if ctx:
-                ctx.mark(Event.DECODED)
-            prompt_tokens = self.engine.count_tokens(request.prompt)
-            completion_tokens = self.engine.count_tokens(result)
-            if ctx:
-                ctx.mark(
-                    Event.COMPLETE,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                )
-            return Response(
-                id=request.id,
-                status=RequestStatus.COMPLETED,
-                result=result,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-            )
-        except Exception as e:
-            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
-
-    def _stream_tokens_to_queue(self, request: Request, stream) -> None:
-        """Stream tokens from generator to response queue."""
-        assert self._response_q is not None
-        for token in stream:
-            chunk = StreamChunk(id=request.id, token=token)
-            self._response_q.put(chunk)
-
-    def _send_stream_final_chunk(self, request: Request, stream) -> None:
-        """Send final chunk with metadata after streaming completes."""
-        assert self._response_q is not None
-        final_chunk = StreamChunk(
-            id=request.id,
-            token="",
-            is_final=True,
-            finish_reason=stream.finish_reason,
-            prompt_tokens=stream.prompt_tokens,
-            completion_tokens=stream.completion_tokens,
-        )
-        self._response_q.put(final_chunk)
-
-    def _build_stream_params(self, request: Request) -> dict:
-        """Build parameters for generate_stream_sync from request."""
-        return {
-            "prompt": request.prompt,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "top_k": request.top_k,
-            "repetition_penalty": request.repetition_penalty,
-            "use_chat_template": request.use_chat_template,
-            "stop_sequences": request.stop_sequences,
-            "context": request.context,
-            "messages": request.messages,
-        }
-
-    def _finalize_stream(self, request: Request, stream) -> Response:
-        """Finalize streaming: send final chunk, mark context, return response."""
-        ctx = request.context
-        if ctx:
-            ctx.mark(Event.DECODED)
-        self._send_stream_final_chunk(request, stream)
-        if ctx:
-            ctx.mark(
-                Event.COMPLETE,
-                prompt_tokens=stream.prompt_tokens,
-                completion_tokens=stream.completion_tokens,
-            )
-        return Response(
-            id=request.id,
-            status=RequestStatus.COMPLETED,
-            prompt_tokens=stream.prompt_tokens,
-            completion_tokens=stream.completion_tokens,
-        )
-
-    def _process_streaming_request(self, request: Request) -> Response:
-        """Process request with streaming generation."""
-        try:
-            stream = self.engine.generate_stream_sync(
-                **self._build_stream_params(request)
-            )
-            self._stream_tokens_to_queue(request, stream)
-            return self._finalize_stream(request, stream)
-        except Exception as e:
-            if self._response_q is not None:
-                error_chunk = StreamChunk(
-                    id=request.id, token="", is_final=True, finish_reason="error"
-                )
-                self._response_q.put(error_chunk)
-            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
 
     def step(self) -> list[Response]:
         """Process requests from the queue."""
@@ -255,20 +129,35 @@ class BoundedQueueHandler(RequestHandler):
         return None
 
     def _stream_new_tokens(self) -> None:
-        """Stream new tokens for streaming requests in the batch."""
+        """Stream new tokens for streaming requests in the batch.
+
+        Uses incremental character-based decoding to handle multi-byte UTF-8
+        characters (like emojis) that may span multiple tokens. Decodes all
+        accumulated tokens and streams only the new characters.
+
+        For byte-level tokenizers (like Qwen), incomplete UTF-8 sequences
+        appear as replacement characters (U+FFFD). We filter these out and
+        don't advance our position past them, so when the complete character
+        is decoded on the next token, we'll yield it correctly.
+        """
         if self._response_q is None:
             return
         for req_id, running in self.running.items():
             if not running.request.stream:
                 continue
-            new_tokens = running.engine_request.output_tokens[
-                running.last_streamed_idx :
-            ]
-            for token_id in new_tokens:
-                token_text = self.engine.decode_tokens([token_id])
-                chunk = StreamChunk(id=req_id, token=token_text)
+            # Skip if no new tokens
+            if len(running.engine_request.output_tokens) <= running.last_streamed_idx:
+                continue
+            # Decode all tokens and extract only new characters
+            full_text = self.engine.decode_tokens(running.engine_request.output_tokens)
+            new_text = full_text[running.last_streamed_len :]
+            # Filter out replacement characters and only advance by clean text length
+            clean_text = new_text.replace("\ufffd", "")
+            if clean_text:
+                chunk = StreamChunk(id=req_id, token=clean_text)
                 self._response_q.put(chunk)
             running.last_streamed_idx = len(running.engine_request.output_tokens)
+            running.last_streamed_len += len(clean_text)
 
     def _collect_finished(self) -> list[Response]:
         """Collect responses from finished requests and clean up."""
@@ -310,22 +199,33 @@ class BoundedQueueHandler(RequestHandler):
         """Build set of stop token IDs from EOS token and stop sequences."""
         return self.engine.build_stop_token_ids(request.stop_sequences)
 
-    def _stream_first_token(self, request: Request, engine_request) -> int:
-        """Stream first token for streaming requests. Returns last_streamed_idx."""
+    def _stream_first_token(
+        self, request: Request, engine_request: Any
+    ) -> tuple[int, int]:
+        """Stream first token for streaming requests.
+
+        Returns:
+            Tuple of (last_streamed_idx, last_streamed_len) for tracking.
+        """
         if not request.stream or self._response_q is None:
-            return 0
+            return (0, 0)
         if not engine_request.output_tokens:
-            return 0
+            return (0, 0)
 
-        first_token = engine_request.output_tokens[0]
-        token_text = self.engine.decode_tokens([first_token])
-        chunk = StreamChunk(id=request.id, token=token_text)
-        self._response_q.put(chunk)
-        return 1
+        # Decode all tokens (just 1 at this point) to get proper text
+        # Filter replacement chars and only count clean text length
+        token_text = self.engine.decode_tokens(engine_request.output_tokens)
+        clean_text = token_text.replace("\ufffd", "")
+        if clean_text:
+            chunk = StreamChunk(id=request.id, token=clean_text)
+            self._response_q.put(chunk)
+        return (len(engine_request.output_tokens), len(clean_text))
 
-    def _create_engine_request(self, request: Request, tokens: list[int], ctx):
+    def _create_engine_request(
+        self, request: Request, tokens: list[int], ctx: Any
+    ) -> Any:
         """Create engine request with sampling params and stop tokens."""
-        from ....pipelines.scheduler import Request as EngineRequest
+        from ....engines.native.scheduler import Request as EngineRequest
 
         stop_token_ids = self._build_stop_token_ids(request)
         return EngineRequest.create(
@@ -339,9 +239,26 @@ class BoundedQueueHandler(RequestHandler):
             stop_token_ids=stop_token_ids,
         )
 
-    def _run_prefill(self, engine_request) -> None:
+    def _run_prefill(self, engine_request: Any) -> None:
         """Run prefill via engine abstraction."""
         self.engine.prefill_request(engine_request)
+
+    def _handle_start_failure(self, request: Request, error: Exception) -> None:
+        """Log and report startup failure to client."""
+        if self._lg:
+            self._lg.warning(
+                "request startup failed",
+                extra={"request_id": request.id, "error": str(error)},
+                exc_info=True,
+            )
+        if self._response_q is not None:
+            self._response_q.put(
+                Response(
+                    id=request.id,
+                    status=RequestStatus.FAILED,
+                    error=f"Request startup failed: {error}",
+                )
+            )
 
     def _start_request(self, request: Request) -> RunningRequest | None:
         """Initialize a request for batched processing."""
@@ -359,14 +276,18 @@ class BoundedQueueHandler(RequestHandler):
 
             engine_request = self._create_engine_request(request, tokens, ctx)
             self._run_prefill(engine_request)
-            last_streamed_idx = self._stream_first_token(request, engine_request)
+            streamed_idx, streamed_len = self._stream_first_token(
+                request, engine_request
+            )
 
             return RunningRequest(
                 request=request,
                 engine_request=engine_request,
-                last_streamed_idx=last_streamed_idx,
+                last_streamed_idx=streamed_idx,
+                last_streamed_len=streamed_len,
             )
-        except Exception:
+        except Exception as e:
+            self._handle_start_failure(request, e)
             return None
 
     def _build_response(self, running: RunningRequest) -> Response:
@@ -394,7 +315,7 @@ class BoundedQueueHandler(RequestHandler):
             completion_tokens=completion_tokens,
         )
 
-    def _get_stream_finish_reason(self, engine_req) -> str:
+    def _get_stream_finish_reason(self, engine_req: Any) -> str:
         """Determine finish reason for streaming request."""
         finish_reason = engine_req.finish_reason or "length"
         if (

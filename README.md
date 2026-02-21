@@ -1,172 +1,201 @@
-# LLM Inference Engine
+# llm-infer
 
-A readable LLM llm-infer server implementing paged attention and continuous batching.
+![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
+![Coverage](https://img.shields.io/badge/coverage-53%25-yellow.svg)
+[![Typed](https://img.shields.io/badge/typed-PEP%20561-brightgreen.svg)](https://peps.python.org/pep-0561/)
+[![Linting: Ruff](https://img.shields.io/badge/linting-ruff-brightgreen)](https://github.com/astral-sh/ruff)
+[![CI](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml/badge.svg)](https://github.com/serendip-ml/llm-infer/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/llm-infer.svg)](https://pypi.org/project/llm-infer/)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 
-## What This Is
+Unified CLI and client library for local LLM inference. Wraps Ollama, vLLM, and a native engine
+behind a single interface.
 
-A research and experimentation platform for LLM inference with a clean and modular architecture.
+**Components:**
 
-**For learning**: The codebase is structured to be understandable. If you want to learn how paged
-attention, KV caching, continuous batching, or quantized inference actually work, this is a good
-place to start. The code prioritizes clarity over micro-optimizations.
-
-**For research**: Full control over the inference pipeline. Modular architecture with clean
-interfaces (Python protocols) makes it easy to swap components, add instrumentation, or experiment
-with new techniques without fighting the framework.
-
-**For experimentation**: Streamlined developer experience through a CLI tool and YAML configuration.
-Go from model weights to running server in minutes, not hours.
-
-**For production**: When you're ready to scale, swap in vLLM as the inference backend. The
-OpenAI-compatible API means your application code stays the same—only the backend changes.
-
-## Why This Matters
-
-There's growing evidence that many smaller, specialized models may outperform a single massive
-one—at a fraction of the cost. This framework is a step in that direction: making it easy to
-experiment with, understand, and deploy efficient models.
-
-## What This Is Not
-
-- **Not a vLLM/TGI replacement at scale**: For large-scale deployments with tensor parallelism across multiple nodes, use vLLM or TGI. This project focuses on single-GPU scenarios.
-
-- **Not a training framework**: This is inference-only. For training or fine-tuning, look elsewhere.
-
-- **Not maximally optimized**: While we use FlashInfer kernels and support quantization, the primary goal is maintainable code. We avoid complexity that yields marginal gains.
-
-## Features
-
-- **Paged Attention**: Efficient KV cache management using block-based memory allocation
-- **Continuous Batching**: Dynamic request batching for optimal GPU utilization
-- **OpenAI-Compatible API**: Drop-in replacement for OpenAI's `/v1/completions` and `/v1/chat/completions`
-- **Multiple Quantization Formats**: Support for AWQ (4-bit) and FP8 (8-bit) quantized models
-- **Streaming**: Real-time token streaming with SSE
-- **FlashInfer Backend**: Optimized CUDA kernels for attention computation
-
-## Supported Models
-
-- Llama (1, 2, 3, 3.1, 3.2, 3.3)
-- Mistral
-- Qwen (1, 2, 3)
-- Granite (3.x)
-
-## Installation
-
-```bash
-git clone https://github.com/serendip-ml/inference.git
-cd inference
-pip install -e .
-```
-
-### Requirements
-
-- Python >= 3.11
-- PyTorch >= 2.0
-- CUDA-capable GPU (compute capability 8.0+ recommended)
+- **CLI & Server** - Single command to serve models via Ollama, vLLM, or native torch engine
+- **Client Package** - Standard interface to multiple LLM backends (OpenAI, Anthropic, local servers)
+- **Native Engine** - Custom torch implementation for learning and experimentation
 
 ## Quick Start
 
-### Start the Server
-
 ```bash
-# Using a model from HuggingFace
-llm-infer serve --model-path /path/to/model
+pip install llm-infer
 
-# Using a config file
-llm-infer serve --config etc/inference.yaml
+# With Ollama (https://ollama.com)
+ollama pull qwen2.5:0.5b
+llm-infer serve --model qwen2.5:0.5b
+
+# Query
+llm-infer query "What is the capital of France?"
 ```
 
-### Query the Server
+## Client Package
+
+`llm_infer.client` is a Python client library for LLM inference with a unified interface across
+backends. Built for autonomous agents and production use:
+
+- **Multiple backends** - OpenAI, Anthropic, and any OpenAI-compatible API
+- **Sync, async, streaming** - All execution modes supported
+- **Rate limiting** - Per-backend request throttling
+- **Retry with backoff** - Configurable exponential backoff on failures
+- **Model routing** - Route requests to backends by model name
+- **Extensible** - Register custom backends via `Factory.register()`
+
+```python
+from appinfra.log import Logger
+from llm_infer.client import Factory
+
+lg = Logger("my-app")
+factory = Factory(lg)
+
+with factory.openai(base_url="http://localhost:8000/v1") as client:
+    response = client.chat(
+        messages=[{"role": "user", "content": "Hello!"}],
+        system="You are a helpful assistant.",
+    )
+    print(response.content)
+
+# Streaming
+with factory.openai(base_url="http://localhost:8000/v1") as client:
+    messages = [{"role": "user", "content": "Hello!"}]
+    for token in client.chat_stream(messages):
+        print(token, end="", flush=True)
+
+# Async
+async with factory.openai(base_url="http://localhost:8000/v1") as client:
+    messages = [{"role": "user", "content": "Hello!"}]
+    response = await client.chat_async(messages)
+```
+
+### Protocol Extensions
+
+The server extends the OpenAI chat completions API:
+
+**Request** - adds `think` and `adapter_id` fields:
+```json
+{
+  "model": "default",
+  "messages": [{"role": "user", "content": "What is 15 * 23?"}],
+  "think": true,
+  "adapter_id": "my-lora-adapter"
+}
+```
+
+**Response** - adds `thinking` in message and `adapter` metadata:
+```json
+{
+  "id": "chatcmpl-123",
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "345",
+      "thinking": "Let me calculate step by step..."
+    }
+  }],
+  "adapter": {
+    "requested": "my-lora-adapter",
+    "actual": "my-lora-adapter",
+    "fallback": false
+  }
+}
+```
+
+The client library exposes these as keyword arguments:
+
+```python
+response = client.chat(messages, think=True, adapter="my-adapter")
+print(response.thinking)  # Reasoning content
+print(response.content)   # Final answer
+```
+
+### Multiple Backends
+
+```python
+# Anthropic
+async with factory.anthropic(model="claude-sonnet-4-20250514") as client:
+    response = await client.chat_async(messages)
+
+# OpenAI
+with factory.openai(base_url="https://api.openai.com/v1", api_key="sk-...") as client:
+    response = client.chat(messages)
+```
+
+## Engines
+
+| Engine | Description | Install |
+|--------|-------------|---------|
+| `ollama` (default) | Wraps Ollama server | [ollama.com](https://ollama.com) |
+| `vllm` | vLLM Python API | `pip install vllm` |
+| `vllm-server` | vLLM HTTP subprocess | `pip install vllm` |
+| `native` | Custom torch implementation | `pip install llm-infer[runtime]` |
 
 ```bash
-# Simple query
-llm-infer query "What is the capital of France?"
+llm-infer serve --model qwen2.5:7b                          # Ollama
+llm-infer serve --engine vllm --model-path /path/to/model   # vLLM
+llm-infer serve --engine native --model-path /path/to/model # Native
+```
 
-# With streaming
-llm-infer query --stream "Explain quantum computing"
+### Native Engine
 
-# Using curl (OpenAI-compatible)
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "default",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "max_tokens": 100
-  }'
+The native engine is a from-scratch torch implementation with PagedAttention and FlashInfer. Useful
+for learning how LLM inference works or experimenting with custom modifications.
+
+```bash
+pip install llm-infer[runtime]
+llm-infer serve --engine native --model-path /path/to/model
 ```
 
 ## Configuration
 
-Create `etc/inference.yaml`:
+```yaml
+# etc/llm-infer.yaml
+backends:
+  engine: ollama
+
+models:
+  locations:
+    - /path/to/models
+  selection:
+    generate:
+      default: qwen2.5-7b
+    embed:
+      default: bge-small-en-v1.5
+
+api:
+  host: 0.0.0.0
+  port: 8000
+```
+
+Per-model overrides in `etc/models.yaml`:
 
 ```yaml
-serve:
-  host: "0.0.0.0"
-  port: 8000
-  models_dir: /path/to/models
-  model: my-model
-  handler: bounded  # or "sequential"
+models:
+  qwen2.5-7b:
+    max_model_len: 8192
+    vllm:
+      enforce_eager: true
 
-engine:
-  max_batch_size: 32
-  num_blocks: 2048
-  block_size: 16
+  qwen2.5:7b:
+    ollama: qwen2.5:7b  # Ollama model name mapping
 ```
 
 ## API Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /v1/completions` | Text completion (OpenAI-compatible) |
 | `POST /v1/chat/completions` | Chat completion (OpenAI-compatible) |
+| `POST /v1/completions` | Text completion (OpenAI-compatible) |
 | `GET /v1/models` | List available models |
 | `GET /health` | Health check |
 | `GET /metrics` | Prometheus metrics |
 
-## Architecture
-
-```
-llm_infer/
-├── backends/          # Quantization backends (AWQ, FP8)
-│   └── linear/        # Linear layer implementations
-├── cli/               # Command-line interface
-├── pipelines/         # Model loading and execution
-│   ├── model/         # Model architecture definitions
-│   ├── engine.py      # Inference engine
-│   └── scheduler.py   # Request scheduling
-├── primitives/        # Core components
-│   ├── attention/     # Attention backends (FlashInfer, naive)
-│   ├── kv_cache/      # Paged KV cache
-│   ├── sampler/       # Token sampling
-│   └── tokenizer/     # Tokenizer wrappers
-└── serving/           # HTTP server
-    ├── api/           # FastAPI routes
-    └── dispatch/      # Request handling
-```
-
-## Development
+## Installation
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run tests
-make test
-
-# Run all checks (lint, type, test)
-make check
-
-# Format code
-make fmt
-```
-
-## CLI Commands
-
-```bash
-llm-infer serve      # Start the llm-infer server
-llm-infer query      # Send queries to a running server
-llm-infer compat     # Generate/check compatibility specs
-llm-infer metrics    # Display server metrics
+pip install llm-infer              # Client only
+pip install llm-infer[anthropic]   # With Anthropic support
+pip install llm-infer[runtime]     # With native engine (torch)
 ```
 
 ## License

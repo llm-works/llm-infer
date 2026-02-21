@@ -1,0 +1,566 @@
+"""Multi-backend router for LLMClient.
+
+LLMRouter routes requests to named LLMClient instances, enabling multi-backend
+support with runtime backend selection.
+
+Model discovery is lazy - backends are only probed when first used. This avoids
+startup errors when backends are configured but not running.
+
+Example:
+    from appinfra.log import Logger
+    from llm_infer.client import Factory
+
+    lg = Logger("my-app")
+    config = {
+        "default": "local",
+        "backends": {
+            "local": {"type": "openai_compatible", "base_url": "http://localhost:8000/v1"},
+            "openai": {"type": "openai", "base_url": "https://api.openai.com/v1"},
+        },
+    }
+    router = Factory(lg).from_config(config)
+
+    # Use default backend
+    response = router.chat(messages)
+
+    # Route to specific backend
+    response = router.chat(messages, backend="openai")
+"""
+
+from __future__ import annotations
+
+import types
+from collections.abc import AsyncIterator, Iterator, Mapping
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Self
+
+from appinfra.log import Logger
+
+from .base import ChatClient
+from .client import LLMClient
+from .types import ChatResponse
+
+if TYPE_CHECKING:
+    from .discovery import ModelDiscovery
+
+# Reserved model names that trigger special resolution logic
+RESERVED_MODEL_NAMES = frozenset({"auto", "default"})
+
+
+@dataclass(frozen=True)
+class ResolvedTarget:
+    """Resolved backend and model for a potential request.
+
+    Returned by LLMRouter.resolve() to show which backend and model
+    would be used for a request without actually making the call.
+
+    Attributes:
+        backend: Name of the backend that will handle the request.
+        model: Model that will be used, or None if no default is configured.
+    """
+
+    backend: str
+    model: str | None
+
+
+class LLMRouter(ChatClient):
+    """Multi-backend router - routes requests to named LLMClients.
+
+    The router holds multiple LLMClient instances and routes requests based on
+    the `backend` parameter. Each client can have its own configuration,
+    throttling, and connection state.
+
+    Attributes:
+        clients: Dictionary mapping backend names to LLMClient instances.
+        default: Name of the default backend.
+    """
+
+    def __init__(
+        self,
+        lg: Logger,
+        clients: dict[str, LLMClient],
+        default: str,
+        model_to_backend: dict[str, str] | None = None,
+        discovery: ModelDiscovery | None = None,
+    ) -> None:
+        """Initialize the router with named clients.
+
+        Args:
+            lg: Logger instance.
+            clients: Dictionary mapping backend names to LLMClient instances.
+            default: Name of the default backend to use when not specified.
+            model_to_backend: Optional mapping from model ID to backend name
+                for intelligent model-based routing. If discovery is provided,
+                this is ignored (discovery manages the routing table).
+            discovery: Optional ModelDiscovery for lazy model discovery.
+                If provided, backends will be probed for models on first use.
+
+        Raises:
+            ValueError: If default backend is not in clients dict.
+        """
+        self._lg = lg
+        self._clients = clients
+        self._default = default
+        self._discovery = discovery
+
+        # Use discovery's routing table if available, otherwise use provided mapping
+        if discovery is not None:
+            self._model_to_backend = discovery.models
+        else:
+            self._model_to_backend = model_to_backend or {}
+
+        if default not in clients:
+            raise ValueError(f"Default backend '{default}' not in clients")
+
+        # Validate model routing references valid backends
+        for model, backend_name in self._model_to_backend.items():
+            if backend_name not in clients:
+                raise ValueError(
+                    f"Model '{model}' routes to unknown backend '{backend_name}'"
+                )
+
+    @property
+    def clients(self) -> Mapping[str, LLMClient]:
+        """Dictionary mapping backend names to LLMClient instances (read-only)."""
+        return types.MappingProxyType(self._clients)
+
+    @property
+    def default(self) -> str:
+        """Name of the default backend."""
+        return self._default
+
+    @property
+    def models(self) -> Mapping[str, str]:
+        """Mapping from model ID to backend name (read-only).
+
+        Note: This returns the current known mappings. If lazy discovery is
+        enabled, additional models may be discovered on first use.
+        """
+        if self._discovery is not None:
+            return types.MappingProxyType(self._discovery.models)
+        return types.MappingProxyType(self._model_to_backend)
+
+    @property
+    def discovery(self) -> ModelDiscovery | None:
+        """Model discovery instance, if configured."""
+        return self._discovery
+
+    def resolve(
+        self, model: str | None = None, backend: str | None = None
+    ) -> ResolvedTarget:
+        """Resolve which backend and model will be used for a request.
+
+        Performs the same routing logic as the chat methods but does not
+        make an actual API call. Useful for:
+        - Trace logging (show where request is going)
+        - Dry-run mode (log what would be called)
+        - Debugging routing decisions
+
+        Resolution priority:
+            1. Explicit backend name
+            2. Model-based lookup (if model is in the routing table)
+            3. Default backend
+
+        Reserved model names:
+            - "auto": Probe the target backend, pick an available model
+            - "default": Use the backend's configured default_model
+              (if default_model="auto", falls back to auto logic)
+
+        These reserved names skip routing lookup and are resolved on
+        the target backend.
+
+        Args:
+            model: Model to use (for routing and as the resolved model).
+            backend: Explicit backend name (highest priority).
+
+        Returns:
+            ResolvedTarget with resolved backend name and model.
+
+        Raises:
+            ValueError: If explicit backend is not found.
+        """
+        # Resolve backend name
+        if backend is not None:
+            if backend not in self._clients:
+                available = list(self._clients.keys())
+                raise ValueError(
+                    f"Backend '{backend}' not found. Available: {available}"
+                )
+            backend_name = backend
+        elif model is not None and model not in RESERVED_MODEL_NAMES:
+            # Try routing table for non-reserved model names
+            backend_name = self._resolve_model_backend(model)
+        else:
+            # Reserved models or no model specified -> use default backend
+            backend_name = self._default
+
+        # Resolve model on target backend
+        client = self._clients[backend_name]
+        resolved_model = self._resolve_model(client, model)
+
+        return ResolvedTarget(backend=backend_name, model=resolved_model)
+
+    def _resolve_model_backend(self, model: str) -> str:
+        """Resolve backend for a model, using lazy discovery if needed.
+
+        Args:
+            model: Model ID to look up.
+
+        Returns:
+            Backend name (falls back to default if not found).
+        """
+        # Check static routing table
+        if model in self._model_to_backend:
+            return self._model_to_backend[model]
+
+        # Try lazy discovery if configured
+        if self._discovery is not None:
+            found = self._discovery.get_backend_for_model(model)
+            if found is not None:
+                # Refresh cached routing table. This is eventually consistent under
+                # concurrent access (last write wins), but always returns correct
+                # results since discovery.models is the source of truth.
+                self._model_to_backend = self._discovery.models
+                return found
+
+        # Fall back to default
+        return self._default
+
+    def _resolve_model(self, client: LLMClient, model: str | None) -> str | None:
+        """Resolve model name, handling reserved names.
+
+        Args:
+            client: Target client to resolve model for.
+            model: Model name (may be reserved like "auto" or "default").
+
+        Returns:
+            Resolved model name, or None if no model configured.
+        """
+        if model is None:
+            return client.default_model
+
+        if model == "default":
+            default = client.default_model
+            if default == "auto" or default is None:
+                return self._resolve_auto_model(client)
+            return default
+
+        if model == "auto":
+            return self._resolve_auto_model(client)
+
+        return model
+
+    def _resolve_auto_model(self, client: LLMClient) -> str | None:
+        """Resolve "auto" to an actual model by probing the backend.
+
+        Resolution order:
+            1. If only one model available, use it
+            2. If backend has configured default_model (non-auto), use it
+            3. Use first model from list_models()
+
+        Args:
+            client: Client to probe for available models.
+
+        Returns:
+            Resolved model name, or None if no models available.
+        """
+        try:
+            models = client.backend.list_models()
+        except Exception as e:
+            self._lg.warning(
+                "failed to discover models for auto resolution",
+                extra={"exception": e},
+            )
+            # Fall back to configured default (even if it's None)
+            return client.default_model if client.default_model != "auto" else None
+
+        if not models:
+            return None
+
+        if len(models) == 1:
+            return models[0]
+
+        # Multiple models: prefer configured default if valid
+        default = client.default_model
+        if default and default != "auto" and default in models:
+            return default
+
+        return models[0]
+
+    def get_client(
+        self, model: str | None = None, backend: str | None = None
+    ) -> LLMClient:
+        """Get the client for the specified backend or model.
+
+        Resolution priority:
+            1. Explicit backend name
+            2. Model-based lookup (if model is in the routing table)
+            3. Default backend
+
+        Args:
+            model: Model ID for model-based routing.
+            backend: Backend name (highest priority).
+
+        Returns:
+            The LLMClient for the resolved backend.
+
+        Raises:
+            ValueError: If explicit backend is not found.
+        """
+        resolved = self.resolve(model=model, backend=backend)
+        return self._clients[resolved.backend]
+
+    def can_call(self, model: str | None = None, backend: str | None = None) -> bool:
+        """Check if a call is allowed for the specified backend (non-blocking).
+
+        Delegates to the appropriate client's can_call() method based on
+        backend/model routing.
+
+        Args:
+            model: Model ID for model-based routing.
+            backend: Backend name (highest priority).
+
+        Returns:
+            True if a call is allowed, False if rate limited or in backoff.
+
+        Raises:
+            ValueError: If explicit backend is not found.
+        """
+        return self.get_client(model=model, backend=backend).can_call()
+
+    # =========================================================================
+    # Sync API
+    # =========================================================================
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        backend: str | None = None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        """Send a chat completion request (sync).
+
+        Args:
+            messages: List of chat messages.
+            model: Model to use (overrides default).
+            system: System prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            tools: Tool definitions for function calling.
+            tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
+            backend: Backend to route to (uses default if not specified).
+            **kwargs: Additional backend-specific parameters.
+
+        Returns:
+            ChatResponse with content, usage, thinking, tool_calls, etc.
+        """
+        return self.get_client(model=model, backend=backend).chat(
+            messages=messages,
+            model=model,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            think=think,
+            adapter=adapter,
+            **kwargs,
+        )
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        backend: str | None = None,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Stream chat completion tokens (sync).
+
+        Args:
+            messages: List of chat messages.
+            model: Model to use (overrides default).
+            system: System prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            tools: Tool definitions for function calling.
+            tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
+            backend: Backend to route to (uses default if not specified).
+            **kwargs: Additional backend-specific parameters.
+
+        Yields:
+            String tokens as they arrive.
+        """
+        yield from self.get_client(model=model, backend=backend).chat_stream(
+            messages=messages,
+            model=model,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            think=think,
+            adapter=adapter,
+            **kwargs,
+        )
+
+    # =========================================================================
+    # Async API
+    # =========================================================================
+
+    async def chat_async(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        backend: str | None = None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        """Send a chat completion request (async).
+
+        Args:
+            messages: List of chat messages.
+            model: Model to use (overrides default).
+            system: System prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            tools: Tool definitions for function calling.
+            tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
+            backend: Backend to route to (uses default if not specified).
+            **kwargs: Additional backend-specific parameters.
+
+        Returns:
+            ChatResponse with content, usage, thinking, tool_calls, etc.
+        """
+        return await self.get_client(model=model, backend=backend).chat_async(
+            messages=messages,
+            model=model,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            think=think,
+            adapter=adapter,
+            **kwargs,
+        )
+
+    async def chat_stream_async(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        backend: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream chat completion tokens (async).
+
+        Args:
+            messages: List of chat messages.
+            model: Model to use (overrides default).
+            system: System prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            tools: Tool definitions for function calling.
+            tool_choice: Control tool use.
+            think: Enable thinking mode.
+            adapter: LoRA adapter name (OpenAI-compatible only).
+            backend: Backend to route to (uses default if not specified).
+            **kwargs: Additional backend-specific parameters.
+
+        Yields:
+            String tokens as they arrive.
+        """
+        async for token in self.get_client(
+            model=model, backend=backend
+        ).chat_stream_async(
+            messages=messages,
+            model=model,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            think=think,
+            adapter=adapter,
+            **kwargs,
+        ):
+            yield token
+
+    # =========================================================================
+    # Resource management
+    # =========================================================================
+
+    def close(self) -> None:
+        """Close all clients (sync resources)."""
+        for client in self._clients.values():
+            try:
+                client.close()
+            except Exception as e:
+                self._lg.warning("Error closing client", extra={"exception": e})
+
+    async def aclose(self) -> None:
+        """Close all clients (async resources)."""
+        for client in self._clients.values():
+            try:
+                await client.aclose()
+            except Exception as e:
+                self._lg.warning("Error closing client", extra={"exception": e})
+
+    def __enter__(self) -> Self:
+        """Enter sync context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Exit sync context manager."""
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Exit async context manager."""
+        await self.aclose()

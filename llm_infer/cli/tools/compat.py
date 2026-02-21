@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+from typing import Any
 
 import yaml
 from appinfra.app.tools import Tool, ToolConfig
@@ -15,7 +17,7 @@ from ...compat import check_spec_accuracy, generate_compat_spec, get_spec_header
 class CompatTool(Tool):
     """Generate and validate engine compatibility specification."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="compat",
             aliases=["c"],
@@ -23,7 +25,15 @@ class CompatTool(Tool):
         )
         super().__init__(parent, config)
 
-    def _add_generate_args(self, subparsers) -> None:
+    def _get_template_path(self) -> Path | None:
+        """Get template path from app config (respects --etc-dir)."""
+        if not self.app.config:
+            return None
+        compat_cfg = self.app.config.get("compat", {})
+        template = compat_cfg.get("template") if compat_cfg else None
+        return Path(template) if template else None
+
+    def _add_generate_args(self, subparsers: Any) -> None:
         """Add generate subcommand arguments."""
         gen = subparsers.add_parser(
             "generate", aliases=["gen"], help="Generate compatibility spec"
@@ -42,7 +52,7 @@ class CompatTool(Tool):
             help="Output format (default: yaml)",
         )
 
-    def _add_check_args(self, subparsers) -> None:
+    def _add_check_args(self, subparsers: Any) -> None:
         """Add check subcommand arguments."""
         check = subparsers.add_parser(
             "check", help="Verify spec file matches implementation"
@@ -59,7 +69,7 @@ class CompatTool(Tool):
         self._add_generate_args(subparsers)
         self._add_check_args(subparsers)
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         if self.args.command in ("generate", "gen"):
             return self._generate()
         elif self.args.command == "check":
@@ -73,14 +83,16 @@ class CompatTool(Tool):
         """Serialize spec to JSON or YAML."""
         if self.args.format == "json":
             return json.dumps(spec, indent=2)
-        return get_spec_header() + str(
+        template_path = self._get_template_path()
+        return get_spec_header(template_path) + str(
             yaml.dump(spec, default_flow_style=False, sort_keys=False)
         )
 
     def _generate(self) -> int:
         """Generate compatibility spec."""
+        template_path = self._get_template_path()
         try:
-            spec = generate_compat_spec(self.lg)
+            spec = generate_compat_spec(self.lg, template_path)
         except FileNotFoundError:
             self.lg.error("template file not found: compat_template.yaml")
             return 1
@@ -104,7 +116,8 @@ class CompatTool(Tool):
     def _check(self) -> int:
         """Verify spec file matches implementation."""
         spec_file = getattr(self.args, "file", None)
-        is_valid, issues = check_spec_accuracy(self.lg, spec_file)
+        template_path = self._get_template_path()
+        is_valid, issues = check_spec_accuracy(self.lg, spec_file, template_path)
 
         if is_valid:
             target = spec_file or "template"

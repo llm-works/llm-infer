@@ -2,8 +2,8 @@
 
 import pytest
 
-from llm_infer.primitives.guards.protocol import GuardResult
-from llm_infer.primitives.guards.repetition import RepetitionGuard
+from llm_infer.engines.native.guards.protocol import GuardResult
+from llm_infer.engines.native.guards.repetition import RepetitionGuard
 
 pytestmark = pytest.mark.unit
 

@@ -4,6 +4,7 @@ import argparse
 import json
 import urllib.error
 import urllib.request
+from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
 
@@ -11,7 +12,7 @@ from appinfra.app.tools import Tool, ToolConfig
 class MetricsTool(Tool):
     """Query server metrics (GPU memory, KV cache, etc.)."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Any = None) -> None:
         config = ToolConfig(
             name="metrics", aliases=["m"], help_text="Get server metrics"
         )
@@ -29,7 +30,7 @@ class MetricsTool(Tool):
         )
         parser.add_argument("--json", "-j", action="store_true", help="Output raw JSON")
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         url = f"http://{self.args.host}:{self.args.port}/metrics"
         if self.args.reset_peak:
             url += "?reset_peak=true"

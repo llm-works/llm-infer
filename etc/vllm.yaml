@@ -1,0 +1,49 @@
+# Memory management
+gpu_memory_utilization: 0.9  # Fraction of GPU memory to use (0-1)
+cpu_offload_gb: 0            # Offload to CPU memory (GB)
+swap_space: 4                # CPU swap space for KV cache (GB)
+max_model_len: 16384         # Max context length (null = use model default, may OOM)
+
+# Parallelism
+tensor_parallel_size: 1      # Number of GPUs for tensor parallelism
+pipeline_parallel_size: 1    # Number of GPUs for pipeline parallelism
+
+# Scheduling
+max_num_seqs: 256            # Maximum concurrent sequences
+max_num_batched_tokens: null # Max tokens per batch (auto if null)
+scheduling_policy: fcfs      # fcfs | priority
+
+# Caching
+enable_prefix_caching: true  # Reuse KV cache for common prefixes
+kv_cache_dtype: auto         # KV cache data type
+
+# Performance tuning
+enforce_eager: false         # Disable CUDA graph (for debugging)
+disable_custom_all_reduce: false
+disable_log_stats: false     # false=stats enabled (required for get_metrics() API)
+max_cudagraph_capture_size: 16  # Limit CUDA graph batch sizes (lower = faster startup, null = vLLM default)
+
+# Quantization (auto-detected from model, override if needed)
+quantization: null           # awq | gptq | fp8 | null (auto)
+
+# Speculative decoding (advanced)
+speculative_model: null      # Draft model path for speculative decoding
+num_speculative_tokens: null # Tokens to speculate
+
+# Dtype and trust settings
+dtype: auto                  # auto | float16 | bfloat16 | float32
+# SECURITY WARNING: trust_remote_code allows execution of arbitrary Python
+# from HuggingFace model repos. Only enable for models you trust.
+# Many models (Qwen, etc.) require this to be true.
+trust_remote_code: true
+
+# Warmup: Run initial query on startup to eliminate cold-start latency
+# First vLLM inference is slow due to CUDA kernel warmup and internal caching
+warmup: true
+
+# LoRA/QLoRA adapter support
+lora:
+  enabled: true              # Enable LoRA adapter support
+  max_loras: 4               # Maximum concurrent adapters in GPU memory
+  max_lora_rank: 64          # Maximum LoRA rank supported
+  base_path: !include "../.env.yaml#paths.adapters"

@@ -1,0 +1,26 @@
+# KV cache settings
+num_blocks: 1024        # Number of KV cache blocks
+block_size: 16          # Tokens per block
+
+# Batching
+max_batch_size: 4       # Maximum sequences to batch together
+
+# Device settings
+device: cuda            # Device: cuda, cpu
+dtype: float16          # Data type: float16, bfloat16, float32
+
+# Attention backend: auto, flashinfer, naive
+# - auto: Use FlashInfer if available, else naive PyTorch (default)
+# - flashinfer: Use FlashInfer (fails if not installed)
+# - naive: Use naive PyTorch implementation (slow, for debugging)
+attention_backend: auto
+
+# torch.compile: Compile model for reduced CPU overhead
+# - First inference is slow (~30-60s) due to compilation
+# - Subsequent inferences are faster with lower CPU usage
+# - NOTE: Incompatible with FlashInfer backend (pin_memory not supported by inductor)
+torch_compile: false
+
+# Warmup: Run initial query on startup to warm up CUDA kernels
+# Useful to avoid slow first request (especially with torch_compile enabled)
+warmup: true
