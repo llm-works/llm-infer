@@ -175,8 +175,8 @@ class AdapterInfo:
     """Serializable adapter information for IPC responses."""
 
     key: str
-    description: str | None
     loaded_at: str  # ISO timestamp
+    description: str | None = None
     md5: str | None = None
     mtime: str | None = None
 

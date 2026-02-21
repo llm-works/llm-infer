@@ -555,11 +555,10 @@ class RequestHandler(ABC):
         self,
         request: Request,
         stream: Any,
-        fallback_adapter: str | None = None,
+        adapter_info: ResponseAdapterInfo | None = None,
     ) -> None:
         """Send final chunk with metadata after streaming completes."""
         assert self._response_q is not None
-        adapter_info = self._build_adapter_info(fallback_adapter, stream)
         final_chunk = StreamChunk(
             id=request.id,
             token="",
@@ -582,14 +581,15 @@ class RequestHandler(ABC):
         ctx = request.context
         if ctx:
             ctx.mark(Event.DECODED)
-        self._send_stream_final_chunk(request, stream, fallback_adapter)
+        # Build adapter info once and reuse
+        adapter_info = self._build_adapter_info(fallback_adapter, stream)
+        self._send_stream_final_chunk(request, stream, adapter_info)
         if ctx:
             ctx.mark(
                 Event.COMPLETE,
                 prompt_tokens=stream.prompt_tokens,
                 completion_tokens=stream.completion_tokens,
             )
-        adapter_info = self._build_adapter_info(fallback_adapter, stream)
         return Response(
             id=request.id,
             status=RequestStatus.COMPLETED,

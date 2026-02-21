@@ -575,12 +575,12 @@ class VLLMServerEngine:
             "adapter not loaded by vLLM, removing from available adapters",
             extra={
                 "key": adapter,
-                "path": self._adapter_paths[adapter],
+                "path": self._adapter_paths.get(adapter, "unknown"),
                 "md5": meta.get("md5"),
                 "mtime": meta.get("mtime"),
             },
         )
-        del self._adapter_paths[adapter]
+        self._adapter_paths.pop(adapter, None)
         self._adapter_metadata.pop(adapter, None)
 
     def _verify_adapters(self) -> None:

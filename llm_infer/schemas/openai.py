@@ -157,8 +157,8 @@ class ChatCompletionRequest(BaseModel):
 
     model: str = Field(
         ...,
-        description="Model to use. Use 'default' or 'auto' to use the loaded model. "
-        "Server ignores this value and uses its loaded model.",
+        description="Model to use. Reserved values 'default' and 'auto' route to the "
+        "base model. Any other value is treated as an adapter key (OpenAI compatibility).",
     )
     messages: list[ChatMessage] = Field(..., min_length=1)
 
@@ -323,8 +323,8 @@ class CompletionRequest(BaseModel):
 
     model: str = Field(
         ...,
-        description="Model to use. Use 'default' or 'auto' to use the loaded model. "
-        "Server ignores this value and uses its loaded model.",
+        description="Model to use. Reserved values 'default' and 'auto' route to the "
+        "base model. Any other value is treated as an adapter key (OpenAI compatibility).",
     )
     prompt: str | list[str] = Field(...)
 

@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from llm_infer.serving.dispatch.handlers import SequentialHandler
+
 pytestmark = pytest.mark.unit
 
 
@@ -12,23 +14,19 @@ class TestResolveEffectiveAdapter:
 
     def _create_handler_with_mock_manager(
         self, available_adapters: set[str]
-    ) -> MagicMock:
+    ) -> SequentialHandler:
         """Create a mock handler with adapter manager.
 
         Uses SequentialHandler (concrete) with mocked engine.
         """
-        from llm_infer.serving.dispatch.handlers import SequentialHandler
-
         mock_engine = MagicMock()
         handler = SequentialHandler(mock_engine)
         handler._adapter_manager = MagicMock()
         handler._adapter_manager.is_available = lambda key: key in available_adapters
         return handler
 
-    def _create_handler_without_manager(self) -> MagicMock:
+    def _create_handler_without_manager(self) -> SequentialHandler:
         """Create handler without adapter manager."""
-        from llm_infer.serving.dispatch.handlers import SequentialHandler
-
         mock_engine = MagicMock()
         handler = SequentialHandler(mock_engine)
         handler._adapter_manager = None

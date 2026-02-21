@@ -173,15 +173,21 @@ class AdapterManager:
 
         return config
 
-    def _load_adapter(self, path: Path) -> LoadedAdapter | None:
-        """Load adapter config and compute metadata from a directory."""
+    def _load_adapter(self, path: Path, key: str | None = None) -> LoadedAdapter | None:
+        """Load adapter config and compute metadata from a directory.
+
+        Args:
+            path: Path to the adapter directory (may be resolved symlink target).
+            key: Override key to use instead of path.name. Use when path is a
+                resolved symlink but you want the original symlink name as key.
+        """
         config = self._read_config(path / self.CONFIG_FILENAME)
         if config is None:
             return None
 
         metadata = compute_adapter_metadata(path)
         return LoadedAdapter(
-            key=path.name,
+            key=key if key is not None else path.name,
             path=path,
             md5=metadata.md5 if metadata.md5 != "unknown" else None,
             mtime=metadata.mtime if metadata.mtime != "unknown" else None,
@@ -210,33 +216,26 @@ class AdapterManager:
         adapter = self._adapters.get(key)
         return adapter.path if adapter else None
 
-    def refresh_one(self, key: str) -> LoadedAdapter | None:
-        """Refresh a single adapter by re-reading its config and metadata.
-
-        Args:
-            key: The adapter key (directory name) to refresh.
-
-        Returns:
-            The adapter if enabled, None if disabled or not found.
-        """
+    def _validate_refresh_path(self, key: str) -> Path | None:
+        """Validate key and return path for refresh, or None if invalid."""
         if not self._base_path:
             return None
-
-        # Validate key to prevent path traversal
         path = validate_adapter_key(key, self._base_path)
         if path is None:
             self._lg.warning(
-                "rejected adapter key with invalid characters",
-                extra={"key": key},
+                "rejected adapter key with invalid characters", extra={"key": key}
             )
-            return None
+        return path
 
-        if not path.exists() or not path.is_dir():
-            # Remove if it was previously loaded but no longer exists
+    def refresh_one(self, key: str) -> LoadedAdapter | None:
+        """Refresh a single adapter by re-reading its config and metadata."""
+        path = self._validate_refresh_path(key)
+        if path is None or not path.exists() or not path.is_dir():
             self._adapters.pop(key, None)
             return None
 
-        adapter = self._load_adapter(path)
+        # Pass original key to handle symlinked adapters correctly
+        adapter = self._load_adapter(path, key=key)
         if adapter and adapter.enabled:
             self._adapters[key] = adapter
             self._lg.debug(
@@ -244,8 +243,8 @@ class AdapterManager:
                 extra={"key": key, "md5": adapter.md5, "mtime": adapter.mtime},
             )
             return adapter
-        else:
-            # Disabled or invalid - remove from loaded set
-            self._adapters.pop(key, None)
-            self._lg.debug("adapter unloaded", extra={"key": key})
-            return None
+
+        # Disabled or invalid - remove from loaded set
+        self._adapters.pop(key, None)
+        self._lg.debug("adapter unloaded", extra={"key": key})
+        return None
