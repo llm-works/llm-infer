@@ -197,9 +197,9 @@ class ChatCompletionRequest(BaseModel):
     seed: int | None = None
 
     # llm-infer extension: LoRA adapter selection
-    adapter_id: str | None = Field(
+    adapter: str | None = Field(
         None,
-        description="Name of LoRA adapter to use for this request (llm-infer extension)",
+        description="LoRA adapter key to use for this request (llm-infer extension)",
     )
 
     # llm-infer extension: Think mode control
@@ -347,9 +347,9 @@ class CompletionRequest(BaseModel):
     user: str | None = None
 
     # llm-infer extension: LoRA adapter selection
-    adapter_id: str | None = Field(
+    adapter: str | None = Field(
         None,
-        description="Name of LoRA adapter to use for this request (llm-infer extension)",
+        description="LoRA adapter key to use for this request (llm-infer extension)",
     )
 
     @model_validator(mode="after")

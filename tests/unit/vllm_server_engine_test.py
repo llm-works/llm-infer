@@ -90,7 +90,7 @@ class TestVLLMServerEngineVerifyAdapters:
         # First warning: specific adapter not loaded
         first_call = engine._lg.warning.call_args_list[0]
         assert "adapter not loaded by vLLM" in first_call[0][0]
-        assert first_call[1]["extra"]["adapter_id"] == "adapter-b"
+        assert first_call[1]["extra"]["key"] == "adapter-b"
 
         # Second warning: verification complete summary
         second_call = engine._lg.warning.call_args_list[1]
