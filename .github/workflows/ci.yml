@@ -128,6 +128,11 @@ jobs:
             echo "Waiting for server... ($i/30)"
             sleep 2
           done
+          # Fail explicitly if server never became healthy
+          if ! curl -s http://localhost:8000/health | grep -q healthy; then
+            echo "ERROR: Server failed to start within 60 seconds"
+            exit 1
+          fi
 
       - name: Run smoke test
         run: |
