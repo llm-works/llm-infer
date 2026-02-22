@@ -198,6 +198,18 @@ class TestGetModelMetadataUnquantized:
             meta = get_model_metadata(path=path)
             assert meta.torch_dtype is None
 
+    def test_null_quantization_config(self) -> None:
+        """Test model with null quantization_config (non-dict value)."""
+        config = {
+            "torch_dtype": "bfloat16",
+            "quantization_config": None,
+        }
+        with TempModelDir(config) as path:
+            meta = get_model_metadata(path=path)
+            assert meta.quantization is None
+            assert meta.quantization_bits is None
+            assert meta.is_quantized is False
+
 
 class TestGetModelMetadataErrors:
     """Test get_model_metadata error cases."""

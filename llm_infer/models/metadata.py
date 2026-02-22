@@ -101,7 +101,9 @@ def get_model_metadata(
 
 def _parse_config(config: dict) -> ModelMetadata:
     """Parse HuggingFace config.json into ModelMetadata."""
-    quant_config = config.get("quantization_config", {})
+    quant_config = config.get("quantization_config") or {}
+    if not isinstance(quant_config, dict):
+        quant_config = {}
     quant_method = quant_config.get("quant_method")
 
     bits = _extract_bits(quant_method, quant_config)
