@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Model metadata extraction: `get_model_metadata()` detects quantization (BNB, GPTQ, AWQ, FP8) and
+  precision from HuggingFace config.json for training parameter inference
 - OpenAI compatibility: `model` field can select adapters (external clients can use standard
   `{"model": "my-adapter"}` pattern)
 - Reserved model names (`auto`, `default`) always use base model, not adapter lookup
