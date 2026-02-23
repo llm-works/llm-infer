@@ -18,7 +18,8 @@ from ..dispatch.types import AdapterListRequest, AdapterRefreshRequest
 class AdapterInfo(BaseModel):
     """Information about a loaded adapter."""
 
-    key: str = Field(..., description="Adapter lookup key")
+    key: str = Field(..., description="Full adapter key (including version suffix)")
+    name: str = Field(..., description="Logical adapter name without version suffix")
     description: str | None = Field(None, description="Optional description")
     loaded_at: str = Field(..., description="ISO timestamp when adapter was loaded")
     md5: str | None = Field(
@@ -71,6 +72,7 @@ async def _list_adapters(request: Request) -> AdapterListResponse:
         adapters=[
             AdapterInfo(
                 key=a.key,
+                name=a.name,
                 description=a.description,
                 loaded_at=a.loaded_at,
                 md5=a.md5,

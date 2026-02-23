@@ -2,10 +2,16 @@
 
 Scans a directory for adapters, reads their config.yaml, and tracks enabled ones.
 No database - purely file-based discovery.
+
+Versioned Adapter Resolution:
+    Supports versioned adapter symlinks in the format `{base_key}-{md5}` where md5 is
+    12 hex characters. Multiple versions of the same adapter can coexist, and requests
+    for a base_key resolve to the latest version (by mtime).
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +20,35 @@ import yaml
 from appinfra.log import Logger
 
 from ..adapter_meta import compute_adapter_metadata
+
+# Pattern for versioned adapter keys: base_key-md5 where md5 is 12 hex chars
+_VERSIONED_KEY_PATTERN = re.compile(r"^(.+)-([0-9a-f]{12})$")
+
+
+def parse_adapter_key(key: str) -> tuple[str, str | None]:
+    """Parse adapter key to extract name and optional md5 suffix.
+
+    Versioned keys have the format: {name}-{md5} where md5 is 12 hex characters.
+    If the key doesn't match this pattern, it's treated as a name with no version.
+
+    Args:
+        key: The full adapter key (directory/symlink name).
+
+    Returns:
+        Tuple of (name, md5). md5 is None if no valid version suffix found.
+
+    Examples:
+        >>> parse_adapter_key("jokester-p-sft-abc123def456")
+        ("jokester-p-sft", "abc123def456")
+        >>> parse_adapter_key("jokester-p-sft")
+        ("jokester-p-sft", None)
+        >>> parse_adapter_key("simple")
+        ("simple", None)
+    """
+    match = _VERSIONED_KEY_PATTERN.match(key)
+    if match:
+        return match.group(1), match.group(2)
+    return key, None
 
 
 def validate_adapter_key(adapter_key: str, base_path: Path) -> Path | None:
@@ -56,7 +91,10 @@ class LoadedAdapter:
     """An adapter that has been discovered and is enabled.
 
     Attributes:
-        key: Lookup identifier (directory name, or structured id in future).
+        key: Full lookup identifier (directory name with version suffix).
+        name: Logical adapter name without version suffix.
+            For versioned adapters like "jokester-p-sft-abc123def456", name is
+            "jokester-p-sft". For unversioned adapters, name equals key.
         path: Filesystem path to the adapter directory.
         md5: First 12 chars of MD5 hash of weights file (for verification).
         mtime: ISO-8601 modification time of weights file.
@@ -66,6 +104,7 @@ class LoadedAdapter:
     """
 
     key: str
+    name: str
     path: Path
     md5: str | None = None
     mtime: str | None = None
@@ -91,7 +130,7 @@ class AdapterManager:
             ...
 
     Config format (config.yaml):
-        enabled: true
+        enabled: false  # Optional, defaults to true (auto-enabled)
         description: "Optional description"
     """
 
@@ -100,7 +139,8 @@ class AdapterManager:
     def __init__(self, lg: Logger, base_path: Path | str | None) -> None:
         self._lg = lg
         self._base_path = Path(base_path).expanduser() if base_path else None
-        self._adapters: dict[str, LoadedAdapter] = {}
+        self._adapters: dict[str, LoadedAdapter] = {}  # full_key → adapter
+        self._versions: dict[str, list[str]] = {}  # name → [full_keys by mtime desc]
 
     @property
     def base_path(self) -> Path | None:
@@ -121,33 +161,72 @@ class AdapterManager:
     def scan(self) -> int:
         """Scan base_path for adapters and load enabled ones.
 
+        Builds both the primary index (full_key → adapter) and the versions
+        index (name → [full_keys sorted by mtime desc]). The versions index
+        enables name-based resolution to the latest version.
+
         Returns:
             Number of enabled adapters found.
         """
         self._adapters.clear()
+        self._versions.clear()
         if not self._is_scannable():
             return 0
 
-        count = 0
+        adapters_list = self._scan_and_load_adapters()
+        self._populate_indexes(adapters_list)
+
+        self._lg.info(
+            "adapter scan complete",
+            extra={
+                "enabled_count": len(adapters_list),
+                "unique_names": len(self._versions),
+            },
+        )
+        return len(adapters_list)
+
+    def _scan_and_load_adapters(self) -> list[LoadedAdapter]:
+        """Scan directory and load enabled adapters."""
+        adapters: list[LoadedAdapter] = []
         for entry in self._base_path.iterdir():  # type: ignore[union-attr]
             if not entry.is_dir():
                 continue
             adapter = self._load_adapter(entry)
             if adapter and adapter.enabled:
-                self._adapters[adapter.key] = adapter
-                count += 1
+                adapters.append(adapter)
                 self._lg.debug(
                     "adapter loaded",
                     extra={
                         "key": adapter.key,
+                        "adapter_name": adapter.name,
                         "path": str(adapter.path),
                         "md5": adapter.md5,
                         "mtime": adapter.mtime,
                     },
                 )
+        return adapters
 
-        self._lg.info("adapter scan complete", extra={"enabled_count": count})
-        return count
+    def _populate_indexes(self, adapters: list[LoadedAdapter]) -> None:
+        """Populate primary and versions indexes from adapter list."""
+        for adapter in adapters:
+            self._adapters[adapter.key] = adapter
+        self._build_versions_index(adapters)
+
+    def _build_versions_index(self, adapters: list[LoadedAdapter]) -> None:
+        """Build the versions index mapping name to sorted full_keys."""
+        # Group by name
+        by_name: dict[str, list[LoadedAdapter]] = {}
+        for adapter in adapters:
+            by_name.setdefault(adapter.name, []).append(adapter)
+
+        # Sort each group by mtime descending (newest first), None values last
+        for name, group in by_name.items():
+            sorted_group = sorted(
+                group,
+                key=lambda a: a.mtime or "",  # None sorts before any string
+                reverse=True,
+            )
+            self._versions[name] = [a.key for a in sorted_group]
 
     def _read_config(self, config_path: Path) -> dict | None:
         """Read and validate adapter config.yaml file."""
@@ -185,13 +264,16 @@ class AdapterManager:
         if config is None:
             return None
 
+        full_key = key if key is not None else path.name
+        name, _ = parse_adapter_key(full_key)
         metadata = compute_adapter_metadata(path)
         return LoadedAdapter(
-            key=key if key is not None else path.name,
+            key=full_key,
+            name=name,
             path=path,
             md5=metadata.md5 if metadata.md5 != "unknown" else None,
             mtime=metadata.mtime if metadata.mtime != "unknown" else None,
-            enabled=config.get("enabled", False),
+            enabled=config.get("enabled", True),
             description=config.get("description"),
         )
 
@@ -200,20 +282,58 @@ class AdapterManager:
         return list(self._adapters.values())
 
     def get(self, key: str) -> LoadedAdapter | None:
-        """Get an adapter by key."""
+        """Get an adapter by exact full key."""
         return self._adapters.get(key)
 
+    def resolve(self, key: str) -> LoadedAdapter | None:
+        """Resolve adapter key to LoadedAdapter with version fallback.
+
+        Resolution order:
+        1. Exact match: If key matches a full adapter key, return it.
+        2. Name match: If key matches an adapter name, return the latest version
+           (highest mtime).
+
+        Args:
+            key: Adapter key to resolve. Can be either a full versioned key
+                (e.g., "jokester-p-sft-abc123def456") or a name
+                (e.g., "jokester-p-sft").
+
+        Returns:
+            LoadedAdapter if found, None otherwise.
+
+        Examples:
+            >>> mgr.resolve("jokester-p-sft-abc123def456")  # Exact match
+            LoadedAdapter(key="jokester-p-sft-abc123def456", ...)
+            >>> mgr.resolve("jokester-p-sft")  # Name → latest version
+            LoadedAdapter(key="jokester-p-sft-abc123def456", ...)
+        """
+        # 1. Exact match (full key including version suffix)
+        if key in self._adapters:
+            return self._adapters[key]
+
+        # 2. Name match (resolve to latest version by mtime)
+        if key in self._versions:
+            latest_key = self._versions[key][0]  # First = highest mtime
+            return self._adapters[latest_key]
+
+        return None
+
     def is_available(self, key: str) -> bool:
-        """Check if an adapter is available for use."""
-        return key in self._adapters
+        """Check if an adapter is available for use.
+
+        Supports both full keys and names (resolves to latest version).
+        """
+        return self.resolve(key) is not None
 
     def resolve_path(self, key: str) -> Path | None:
         """Resolve adapter key to its full path.
 
+        Supports both full keys and names (resolves to latest version).
+
         Returns None if adapter is not registered (but inference may still
         work if the path exists - this is just for validation).
         """
-        adapter = self._adapters.get(key)
+        adapter = self.resolve(key)
         return adapter.path if adapter else None
 
     def _validate_refresh_path(self, key: str) -> Path | None:
@@ -228,16 +348,21 @@ class AdapterManager:
         return path
 
     def refresh_one(self, key: str) -> LoadedAdapter | None:
-        """Refresh a single adapter by re-reading its config and metadata."""
+        """Refresh a single adapter by re-reading its config and metadata.
+
+        After refreshing, rebuilds the versions index to maintain consistency.
+        """
         path = self._validate_refresh_path(key)
         if path is None or not path.exists() or not path.is_dir():
             self._adapters.pop(key, None)
+            self._rebuild_versions_index()
             return None
 
         # Pass original key to handle symlinked adapters correctly
         adapter = self._load_adapter(path, key=key)
         if adapter and adapter.enabled:
             self._adapters[key] = adapter
+            self._rebuild_versions_index()
             self._lg.debug(
                 "adapter refreshed",
                 extra={"key": key, "md5": adapter.md5, "mtime": adapter.mtime},
@@ -246,5 +371,10 @@ class AdapterManager:
 
         # Disabled or invalid - remove from loaded set
         self._adapters.pop(key, None)
+        self._rebuild_versions_index()
         self._lg.debug("adapter unloaded", extra={"key": key})
         return None
+
+    def _rebuild_versions_index(self) -> None:
+        """Rebuild versions index from current adapters."""
+        self._build_versions_index(list(self._adapters.values()))

@@ -226,6 +226,9 @@ class RequestHandler(ABC):
         Otherwise falls back to reading config.yaml from disk (useful for
         testing or when manager is not configured).
 
+        Supports versioned adapter resolution: both full keys and base keys
+        are accepted when using the adapter manager.
+
         To hot-reload adapters, use the /v1/adapters/refresh endpoint.
 
         Raises:
@@ -233,7 +236,8 @@ class RequestHandler(ABC):
         """
         # Use manager if available (preferred - avoids per-request disk I/O)
         if self._adapter_manager is not None:
-            if not self._adapter_manager.is_available(adapter):
+            # resolve() handles both full keys and base keys
+            if self._adapter_manager.resolve(adapter) is None:
                 raise AdapterError(
                     f"adapter '{adapter}' is not enabled. "
                     "Enable it in the adapter's config.yaml and call /v1/adapters/refresh."
@@ -293,10 +297,16 @@ class RequestHandler(ABC):
         if self._lg:
             # Build extra dict - use "key" when we have full metadata, "adapter" otherwise
             extra: dict[str, Any] = {}
-            if self._adapter_manager and (loaded := self._adapter_manager.get(adapter)):
-                extra["key"] = adapter
-                extra["md5"] = loaded.md5
-                extra["mtime"] = loaded.mtime
+            if self._adapter_manager:
+                # Use resolve() to handle both full keys and base keys
+                loaded = self._adapter_manager.resolve(adapter)
+                if loaded:
+                    extra["key"] = loaded.key
+                    extra["adapter_name"] = loaded.name
+                    extra["md5"] = loaded.md5
+                    extra["mtime"] = loaded.mtime
+                else:
+                    extra["adapter"] = adapter
             else:
                 extra["adapter"] = adapter
             if is_first_load:
@@ -357,20 +367,30 @@ class RequestHandler(ABC):
         1. Explicit `adapter` field (our extension)
         2. `model` field if it matches a known adapter (OpenAI compatibility)
 
+        Adapter resolution supports versioned keys:
+        - Full key (e.g., "jokester-p-sft-abc123def456") returns exact match
+        - Base key (e.g., "jokester-p-sft") resolves to latest version by mtime
+
         Reserved model names (auto, default) use the base model, not adapters.
 
-        This allows external clients using standard OpenAI protocol to select
-        adapters via the model field, while our clients can use the explicit
-        adapter field.
+        Returns:
+            The full (versioned) adapter key to use, or None for base model.
         """
         if request.adapter:
-            return request.adapter
+            # Resolve to full key if base key was provided
+            if self._adapter_manager:
+                resolved = self._adapter_manager.resolve(request.adapter)
+                if resolved:
+                    return resolved.key
+            return request.adapter  # Fall through to validation later
+
         # Fallback: check if model field matches a known adapter
         # Skip reserved names like "auto" and "default"
         if request.model and self._adapter_manager:
             if request.model not in self._RESERVED_MODEL_NAMES:
-                if self._adapter_manager.is_available(request.model):
-                    return request.model
+                resolved = self._adapter_manager.resolve(request.model)
+                if resolved:
+                    return resolved.key
         return None
 
     def _build_engine_params(
