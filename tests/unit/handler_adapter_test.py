@@ -18,11 +18,20 @@ class TestResolveEffectiveAdapter:
         """Create a mock handler with adapter manager.
 
         Uses SequentialHandler (concrete) with mocked engine.
+        Mocks resolve() to return LoadedAdapter-like objects for available adapters.
         """
         mock_engine = MagicMock()
         handler = SequentialHandler(mock_engine)
         handler._adapter_manager = MagicMock()
-        handler._adapter_manager.is_available = lambda key: key in available_adapters
+
+        def mock_resolve(key: str) -> MagicMock | None:
+            if key in available_adapters:
+                adapter = MagicMock()
+                adapter.key = key  # Return the same key (no version resolution in test)
+                return adapter
+            return None
+
+        handler._adapter_manager.resolve = mock_resolve
         return handler
 
     def _create_handler_without_manager(self) -> SequentialHandler:
@@ -112,3 +121,13 @@ class TestResolveEffectiveAdapter:
         result = handler._resolve_effective_adapter(request)
 
         assert result == "my-adapter"
+
+    def test_explicit_adapter_not_found_in_manager(self) -> None:
+        """Explicit adapter that fails resolution returns raw key for later validation."""
+        handler = self._create_handler_with_mock_manager({"other-adapter"})
+        request = self._create_request(model=None, adapter="missing-adapter")
+
+        result = handler._resolve_effective_adapter(request)
+
+        # When manager can't resolve, returns raw key (validation happens later)
+        assert result == "missing-adapter"

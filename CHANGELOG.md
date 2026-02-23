@@ -10,9 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking Changes
 
 - Wire protocol: `adapter_id` field renamed to `adapter` in request body
+- Adapters now default to enabled (`enabled: true`) when config.yaml omits the field; previously
+  required explicit `enabled: true`
 
 ### Added
 
+- Versioned adapter resolution: multiple versions of an adapter can coexist using symlinks in
+  format `{name}-{md5}` (12 hex chars); requests for base name resolve to latest version by mtime
 - Model metadata extraction: `get_model_metadata()` detects quantization (BNB, GPTQ, AWQ, FP8) and
   precision from HuggingFace config.json for training parameter inference
 - OpenAI compatibility: `model` field can select adapters (external clients can use standard
@@ -59,7 +63,7 @@ Initial public release.
 
 ### Documentation
 
-- Engine comparison guide (`docs/ENGINES.md`)
-- Configuration reference (`docs/CONFIG.md`)
-- Client library guide (`docs/CLIENT.md`)
+- Engine comparison guide (`docs/engines.md`)
+- Configuration reference (`docs/config.md`)
+- Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)

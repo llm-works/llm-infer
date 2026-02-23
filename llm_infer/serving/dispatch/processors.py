@@ -132,6 +132,7 @@ class AdapterProcessor(RequestProcessor):
         adapters = [
             AdapterInfo(
                 key=a.key,
+                name=a.name,
                 description=a.description,
                 loaded_at=a.loaded_at.isoformat(),
                 md5=a.md5,
