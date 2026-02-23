@@ -38,10 +38,10 @@ def parse_adapter_key(key: str) -> tuple[str, str | None]:
         Tuple of (name, md5). md5 is None if no valid version suffix found.
 
     Examples:
-        >>> parse_adapter_key("jokester-p-sft-abc123def456")
-        ("jokester-p-sft", "abc123def456")
-        >>> parse_adapter_key("jokester-p-sft")
-        ("jokester-p-sft", None)
+        >>> parse_adapter_key("my-adapter-a1b2c3d4e5f6")
+        ("my-adapter", "a1b2c3d4e5f6")
+        >>> parse_adapter_key("my-adapter")
+        ("my-adapter", None)
         >>> parse_adapter_key("simple")
         ("simple", None)
     """
@@ -93,8 +93,8 @@ class LoadedAdapter:
     Attributes:
         key: Full lookup identifier (directory name with version suffix).
         name: Logical adapter name without version suffix.
-            For versioned adapters like "jokester-p-sft-abc123def456", name is
-            "jokester-p-sft". For unversioned adapters, name equals key.
+            For versioned adapters like "my-adapter-a1b2c3d4e5f6", name is
+            "my-adapter". For unversioned adapters, name equals key.
         path: Filesystem path to the adapter directory.
         md5: First 12 chars of MD5 hash of weights file (for verification).
         mtime: ISO-8601 modification time of weights file.
@@ -295,17 +295,17 @@ class AdapterManager:
 
         Args:
             key: Adapter key to resolve. Can be either a full versioned key
-                (e.g., "jokester-p-sft-abc123def456") or a name
-                (e.g., "jokester-p-sft").
+                (e.g., "my-adapter-a1b2c3d4e5f6") or a name
+                (e.g., "my-adapter").
 
         Returns:
             LoadedAdapter if found, None otherwise.
 
         Examples:
-            >>> mgr.resolve("jokester-p-sft-abc123def456")  # Exact match
-            LoadedAdapter(key="jokester-p-sft-abc123def456", ...)
-            >>> mgr.resolve("jokester-p-sft")  # Name → latest version
-            LoadedAdapter(key="jokester-p-sft-abc123def456", ...)
+            >>> mgr.resolve("my-adapter-a1b2c3d4e5f6")  # Exact match
+            LoadedAdapter(key="my-adapter-a1b2c3d4e5f6", ...)
+            >>> mgr.resolve("my-adapter")  # Name → latest version
+            LoadedAdapter(key="my-adapter-a1b2c3d4e5f6", ...)
         """
         # 1. Exact match (full key including version suffix)
         if key in self._adapters:

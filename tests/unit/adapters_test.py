@@ -15,9 +15,9 @@ class TestParseAdapterKey:
 
     def test_versioned_key(self) -> None:
         """Parse key with 12-char hex md5 suffix."""
-        name, md5 = parse_adapter_key("jokester-p-sft-abc123def456")
-        assert name == "jokester-p-sft"
-        assert md5 == "abc123def456"
+        name, md5 = parse_adapter_key("my-adapter-a1b2c3d4e5f6")  # gitleaks:allow
+        assert name == "my-adapter"
+        assert md5 == "a1b2c3d4e5f6"
 
     def test_versioned_key_lowercase_hex(self) -> None:
         """MD5 suffix must be lowercase hex."""
@@ -33,8 +33,8 @@ class TestParseAdapterKey:
 
     def test_unversioned_key_with_dashes(self) -> None:
         """Name with dashes but no md5 suffix."""
-        name, md5 = parse_adapter_key("jokester-p-sft")
-        assert name == "jokester-p-sft"
+        name, md5 = parse_adapter_key("my-fine-tuned-adapter")
+        assert name == "my-fine-tuned-adapter"
         assert md5 is None
 
     def test_suffix_too_short(self) -> None:
@@ -68,17 +68,17 @@ class TestLoadedAdapter:
     def test_create_with_all_fields(self) -> None:
         """Create adapter with all fields."""
         adapter = LoadedAdapter(
-            key="jokester-p-sft-abc123def456",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-abc123def456"),
-            md5="abc123def456",
+            key="my-adapter-a1b2c3d4e5f6",  # gitleaks:allow
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-a1b2c3d4e5f6"),
+            md5="a1b2c3d4e5f6",
             mtime="2025-01-15T10:30:00+00:00",
             enabled=True,
             description="Test adapter",
         )
-        assert adapter.key == "jokester-p-sft-abc123def456"
-        assert adapter.name == "jokester-p-sft"
-        assert adapter.md5 == "abc123def456"
+        assert adapter.key == "my-adapter-a1b2c3d4e5f6"
+        assert adapter.name == "my-adapter"
+        assert adapter.md5 == "a1b2c3d4e5f6"
 
     def test_name_equals_key_for_unversioned(self) -> None:
         """For unversioned adapters, name equals key."""
@@ -105,48 +105,48 @@ class TestAdapterManagerVersions:
     def test_resolve_exact_match(self) -> None:
         """Exact key match returns that adapter."""
         adapter = LoadedAdapter(
-            key="jokester-p-sft-abc123def456",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-abc123def456"),
+            key="my-adapter-a1b2c3d4e5f6",  # gitleaks:allow
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-a1b2c3d4e5f6"),
             mtime="2025-01-15T10:30:00+00:00",
         )
         manager = self._create_manager([adapter])
 
-        result = manager.resolve("jokester-p-sft-abc123def456")
+        result = manager.resolve("my-adapter-a1b2c3d4e5f6")
 
         assert result is adapter
 
     def test_resolve_by_name_single_version(self) -> None:
         """Name lookup returns only version."""
         adapter = LoadedAdapter(
-            key="jokester-p-sft-abc123def456",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-abc123def456"),
+            key="my-adapter-a1b2c3d4e5f6",  # gitleaks:allow
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-a1b2c3d4e5f6"),
             mtime="2025-01-15T10:30:00+00:00",
         )
         manager = self._create_manager([adapter])
 
-        result = manager.resolve("jokester-p-sft")
+        result = manager.resolve("my-adapter")
 
         assert result is adapter
 
     def test_resolve_by_name_multiple_versions_returns_latest(self) -> None:
         """Name lookup with multiple versions returns highest mtime."""
         older = LoadedAdapter(
-            key="jokester-p-sft-111111111111",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-111111111111"),
+            key="my-adapter-111111111111",
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-111111111111"),
             mtime="2025-01-10T10:00:00+00:00",
         )
         newer = LoadedAdapter(
-            key="jokester-p-sft-222222222222",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-222222222222"),
+            key="my-adapter-222222222222",
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-222222222222"),
             mtime="2025-01-15T10:00:00+00:00",
         )
         manager = self._create_manager([older, newer])
 
-        result = manager.resolve("jokester-p-sft")
+        result = manager.resolve("my-adapter")
 
         assert result is newer
 
@@ -166,38 +166,38 @@ class TestAdapterManagerVersions:
     def test_is_available_full_key(self) -> None:
         """is_available works with full key."""
         adapter = LoadedAdapter(
-            key="jokester-p-sft-abc123def456",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-abc123def456"),
+            key="my-adapter-a1b2c3d4e5f6",  # gitleaks:allow
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-a1b2c3d4e5f6"),
         )
         manager = self._create_manager([adapter])
 
-        assert manager.is_available("jokester-p-sft-abc123def456") is True
+        assert manager.is_available("my-adapter-a1b2c3d4e5f6") is True
         assert manager.is_available("unknown") is False
 
     def test_is_available_by_name(self) -> None:
         """is_available works with name (base key)."""
         adapter = LoadedAdapter(
-            key="jokester-p-sft-abc123def456",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-abc123def456"),
+            key="my-adapter-a1b2c3d4e5f6",  # gitleaks:allow
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-a1b2c3d4e5f6"),
         )
         manager = self._create_manager([adapter])
 
-        assert manager.is_available("jokester-p-sft") is True
+        assert manager.is_available("my-adapter") is True
 
     def test_resolve_path_by_name(self) -> None:
         """resolve_path works with name."""
         adapter = LoadedAdapter(
-            key="jokester-p-sft-abc123def456",
-            name="jokester-p-sft",
-            path=Path("/adapters/jokester-p-sft-abc123def456"),
+            key="my-adapter-a1b2c3d4e5f6",  # gitleaks:allow
+            name="my-adapter",
+            path=Path("/adapters/my-adapter-a1b2c3d4e5f6"),
         )
         manager = self._create_manager([adapter])
 
-        result = manager.resolve_path("jokester-p-sft")
+        result = manager.resolve_path("my-adapter")
 
-        assert result == Path("/adapters/jokester-p-sft-abc123def456")
+        assert result == Path("/adapters/my-adapter-a1b2c3d4e5f6")
 
     def test_list_returns_all_versions(self) -> None:
         """list() returns all versions, not just latest."""

@@ -368,8 +368,8 @@ class RequestHandler(ABC):
         2. `model` field if it matches a known adapter (OpenAI compatibility)
 
         Adapter resolution supports versioned keys:
-        - Full key (e.g., "jokester-p-sft-abc123def456") returns exact match
-        - Base key (e.g., "jokester-p-sft") resolves to latest version by mtime
+        - Full key (e.g., "my-adapter-a1b2c3d4e5f6") returns exact match
+        - Base key (e.g., "my-adapter") resolves to latest version by mtime
 
         Reserved model names (auto, default) use the base model, not adapters.
 

@@ -12,7 +12,7 @@ restarting the server.
 
 Adapters are organized in a base directory configured via `lora.base_path`:
 
-```
+```text
 /path/to/adapters/
 ├── my-adapter/
 │   ├── config.yaml          # Adapter configuration
@@ -46,11 +46,11 @@ A/B testing or gradual rollouts.
 Versioned adapters use the format `{name}-{md5}` where `md5` is the first 12 characters of the
 weights file's MD5 hash:
 
-```
+```text
 /path/to/adapters/
-├── my-adapter-abc123def456/   # Version 1 (older)
+├── my-adapter-a1b2c3d4e5f6/   # Version 1 (older)
 │   └── ...
-├── my-adapter-789xyz012345/   # Version 2 (newer)
+├── my-adapter-f6e5d4c3b2a1/   # Version 2 (newer)
 │   └── ...
 ```
 
@@ -58,7 +58,7 @@ weights file's MD5 hash:
 
 When requesting an adapter:
 
-1. **Exact match**: `my-adapter-abc123def456` returns that specific version
+1. **Exact match**: `my-adapter-a1b2c3d4e5f6` returns that specific version
 2. **Name match**: `my-adapter` resolves to the latest version (by weights file mtime)
 
 This allows clients to request either:
@@ -72,7 +72,7 @@ This allows clients to request either:
 client.chat(messages, adapter="my-adapter")
 
 # Pin to specific version
-client.chat(messages, adapter="my-adapter-abc123def456")
+client.chat(messages, adapter="my-adapter-a1b2c3d4e5f6")
 ```
 
 ## Using Adapters
@@ -111,7 +111,7 @@ Reserved model names (`auto`, `default`) always use the base model.
 
 ### List Adapters
 
-```
+```text
 GET /v1/adapters
 ```
 
@@ -121,11 +121,11 @@ Returns all loaded adapters:
 {
   "adapters": [
     {
-      "key": "my-adapter-abc123def456",
+      "key": "my-adapter-a1b2c3d4e5f6",
       "name": "my-adapter",
       "description": "My fine-tuned adapter",
       "loaded_at": "2025-01-15T10:30:00+00:00",
-      "md5": "abc123def456",
+      "md5": "a1b2c3d4e5f6",
       "mtime": "2025-01-14T08:00:00+00:00"
     }
   ],
@@ -135,7 +135,7 @@ Returns all loaded adapters:
 
 ### Refresh Adapters
 
-```
+```text
 POST /v1/adapters/refresh
 POST /v1/adapters/refresh?key=my-adapter
 ```

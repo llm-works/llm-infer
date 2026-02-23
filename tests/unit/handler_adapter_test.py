@@ -121,3 +121,13 @@ class TestResolveEffectiveAdapter:
         result = handler._resolve_effective_adapter(request)
 
         assert result == "my-adapter"
+
+    def test_explicit_adapter_not_found_in_manager(self) -> None:
+        """Explicit adapter that fails resolution returns raw key for later validation."""
+        handler = self._create_handler_with_mock_manager({"other-adapter"})
+        request = self._create_request(model=None, adapter="missing-adapter")
+
+        result = handler._resolve_effective_adapter(request)
+
+        # When manager can't resolve, returns raw key (validation happens later)
+        assert result == "missing-adapter"
