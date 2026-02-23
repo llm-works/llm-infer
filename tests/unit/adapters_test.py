@@ -297,3 +297,37 @@ class TestAdapterManagerVersions:
         # One with mtime should be first (newer)
         assert manager._versions["adapter"][0] == "adapter-111111111111"
         assert manager._versions["adapter"][1] == "adapter-222222222222"
+
+
+class TestEnabledDefault:
+    """Test that adapters default to enabled when config omits the field."""
+
+    def test_enabled_defaults_to_true(self) -> None:
+        """Adapter without explicit enabled field is enabled by default."""
+        adapter = LoadedAdapter(
+            key="test-adapter",
+            name="test-adapter",
+            path=Path("/adapters/test-adapter"),
+            # enabled not specified - should default to True
+        )
+        assert adapter.enabled is True
+
+    def test_enabled_explicit_false(self) -> None:
+        """Adapter with enabled=False is disabled."""
+        adapter = LoadedAdapter(
+            key="test-adapter",
+            name="test-adapter",
+            path=Path("/adapters/test-adapter"),
+            enabled=False,
+        )
+        assert adapter.enabled is False
+
+    def test_enabled_explicit_true(self) -> None:
+        """Adapter with enabled=True is enabled."""
+        adapter = LoadedAdapter(
+            key="test-adapter",
+            name="test-adapter",
+            path=Path("/adapters/test-adapter"),
+            enabled=True,
+        )
+        assert adapter.enabled is True

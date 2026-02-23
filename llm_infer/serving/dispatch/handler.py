@@ -268,10 +268,10 @@ class RequestHandler(ABC):
                 f"got {type(config).__name__}"
             )
 
-        if not config.get("enabled", False):
+        if not config.get("enabled", True):
             raise AdapterError(
-                f"adapter '{adapter}' is not enabled. "
-                "Set 'enabled: true' in the adapter's config.yaml."
+                f"adapter '{adapter}' is disabled. "
+                "Remove 'enabled: false' from the adapter's config.yaml to enable it."
             )
 
     def _import_lora_request_class(self, adapter: str) -> type[Any]:
