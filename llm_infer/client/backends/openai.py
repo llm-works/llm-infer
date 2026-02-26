@@ -477,7 +477,7 @@ class OpenAICompatibleBackend(Backend):
         extra_body = kwargs.pop("extra_body", None)
         if extra_body:
             for key, value in extra_body.items():
-                if key not in self._RESERVED_KEYS:
+                if value is not None and key not in self._RESERVED_KEYS:
                     payload[key] = value
         # Add remaining kwargs, filtering out reserved keys to prevent override
         for key, value in kwargs.items():

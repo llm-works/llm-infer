@@ -205,6 +205,32 @@ class TestOpenAICompatibleBackendHelpers:
         assert payload["response_format"] == {"type": "json_object"}
         backend.close()
 
+    def test_build_payload_extra_body_filters_none_values(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test extra_body filters out None values (consistent with kwargs behavior)."""
+        backend = OpenAICompatibleBackend(mock_lg)
+        payload = backend._build_payload(
+            messages=[{"role": "user", "content": "Hi"}],
+            model="test",
+            temperature=1.0,
+            max_tokens=None,
+            stream=False,
+            adapter=None,
+            think=None,
+            tools=None,
+            tool_choice=None,
+            extra_body={
+                "response_format": {"type": "json_object"},
+                "custom_param": None,  # Should be filtered out
+            },
+        )
+        # Non-None value should be added
+        assert payload["response_format"] == {"type": "json_object"}
+        # None value should be filtered out
+        assert "custom_param" not in payload
+        backend.close()
+
 
 class TestParseHelpers:
     """Test parsing helper functions."""
