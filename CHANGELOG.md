@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-02-25
+
 ### Breaking Changes
 
 - Wire protocol: `adapter_id` field renamed to `adapter` in request body
@@ -23,12 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{"model": "my-adapter"}` pattern)
 - Reserved model names (`auto`, `default`) always use base model, not adapter lookup
 - Adapter metadata (md5, mtime) included in log messages and API responses
+- Optional dependency `saia` for llm-saia integration (now available on PyPI)
 
 ### Changed
 
 - Internal adapter representation uses `key` instead of `adapter_id`
 - vllm-server engine: single source of truth for adapter scanning via AdapterManager (removed
   duplicate scanning)
+- CI/CD: llm-saia installed via `[saia]` extra (single source of truth in pyproject.toml)
 
 ### Fixed
 
@@ -69,3 +73,7 @@ Initial public release.
 - Configuration reference (`docs/config.md`)
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
+
+[Unreleased]: https://github.com/serendip-ml/llm-infer/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/serendip-ml/llm-infer/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/serendip-ml/llm-infer/releases/tag/v0.1.0
