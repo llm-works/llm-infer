@@ -152,10 +152,83 @@ class TestOpenAICompatibleBackendHelpers:
             tool_choice="auto",
         )
         assert payload["max_tokens"] == 100
-        assert payload["adapter_id"] == "my-lora"
+        assert payload["adapter"] == "my-lora"
         assert payload["think"] is True
         assert payload["tools"] is not None
         assert payload["tool_choice"] == "auto"
+        backend.close()
+
+    def test_build_payload_extracts_extra_body_contents(self, mock_lg: Logger) -> None:
+        """Test extra_body contents are merged as top-level keys."""
+        backend = OpenAICompatibleBackend(mock_lg)
+        payload = backend._build_payload(
+            messages=[{"role": "user", "content": "Hi"}],
+            model="test",
+            temperature=1.0,
+            max_tokens=None,
+            stream=False,
+            adapter=None,
+            think=None,
+            tools=None,
+            tool_choice=None,
+            extra_body={"response_format": {"type": "json_object"}, "custom_param": 42},
+        )
+        # extra_body contents should be top-level, not nested
+        assert "extra_body" not in payload
+        assert payload["response_format"] == {"type": "json_object"}
+        assert payload["custom_param"] == 42
+        backend.close()
+
+    def test_build_payload_extra_body_respects_reserved_keys(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test extra_body cannot override reserved keys like model."""
+        backend = OpenAICompatibleBackend(mock_lg)
+        payload = backend._build_payload(
+            messages=[{"role": "user", "content": "Hi"}],
+            model="original-model",
+            temperature=1.0,
+            max_tokens=None,
+            stream=False,
+            adapter=None,
+            think=None,
+            tools=None,
+            tool_choice=None,
+            extra_body={
+                "model": "evil-override",
+                "response_format": {"type": "json_object"},
+            },
+        )
+        # Reserved key should not be overridden
+        assert payload["model"] == "original-model"
+        # Non-reserved key should be added
+        assert payload["response_format"] == {"type": "json_object"}
+        backend.close()
+
+    def test_build_payload_extra_body_filters_none_values(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test extra_body filters out None values (consistent with kwargs behavior)."""
+        backend = OpenAICompatibleBackend(mock_lg)
+        payload = backend._build_payload(
+            messages=[{"role": "user", "content": "Hi"}],
+            model="test",
+            temperature=1.0,
+            max_tokens=None,
+            stream=False,
+            adapter=None,
+            think=None,
+            tools=None,
+            tool_choice=None,
+            extra_body={
+                "response_format": {"type": "json_object"},
+                "custom_param": None,  # Should be filtered out
+            },
+        )
+        # Non-None value should be added
+        assert payload["response_format"] == {"type": "json_object"}
+        # None value should be filtered out
+        assert "custom_param" not in payload
         backend.close()
 
 

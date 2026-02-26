@@ -18,9 +18,16 @@ from ..dispatch.types import AdapterListRequest, AdapterRefreshRequest
 class AdapterInfo(BaseModel):
     """Information about a loaded adapter."""
 
-    adapter_id: str = Field(..., description="Unique identifier")
+    key: str = Field(..., description="Full adapter key (including version suffix)")
+    name: str = Field(..., description="Logical adapter name without version suffix")
     description: str | None = Field(None, description="Optional description")
     loaded_at: str = Field(..., description="ISO timestamp when adapter was loaded")
+    md5: str | None = Field(
+        None, description="MD5 hash of weights file (first 12 chars)"
+    )
+    mtime: str | None = Field(
+        None, description="ISO timestamp of weights file modification"
+    )
 
 
 class AdapterListResponse(BaseModel):
@@ -33,7 +40,7 @@ class AdapterListResponse(BaseModel):
 class RefreshResponse(BaseModel):
     """Response from refresh operation."""
 
-    adapter_id: str | None = Field(None, description="Adapter ID if single refresh")
+    key: str | None = Field(None, description="Adapter key if single refresh")
     adapters_loaded: int = Field(
         ..., description="Number of enabled adapters after refresh"
     )
@@ -64,9 +71,12 @@ async def _list_adapters(request: Request) -> AdapterListResponse:
     return AdapterListResponse(
         adapters=[
             AdapterInfo(
-                adapter_id=a.adapter_id,
+                key=a.key,
+                name=a.name,
                 description=a.description,
                 loaded_at=a.loaded_at,
+                md5=a.md5,
+                mtime=a.mtime,
             )
             for a in response.adapters
         ],
@@ -76,13 +86,13 @@ async def _list_adapters(request: Request) -> AdapterListResponse:
 
 async def _refresh_adapters(
     request: Request,
-    adapter_id: str | None = Query(
-        default=None, description="Specific adapter to refresh"
+    key: str | None = Query(
+        default=None, description="Specific adapter key to refresh"
     ),
 ) -> RefreshResponse:
     """Rescan adapter directory and reload enabled adapters.
 
-    If adapter_id is provided, only refresh that specific adapter.
+    If key is provided, only refresh that specific adapter.
     Otherwise, rescan the entire directory.
 
     This operation is performed in the main process, ensuring the
@@ -90,7 +100,7 @@ async def _refresh_adapters(
     """
     ipc = _get_ipc(request)
     request_id = f"adapter-refresh-{uuid.uuid4().hex[:16]}"
-    internal_request = AdapterRefreshRequest(id=request_id, adapter_id=adapter_id)
+    internal_request = AdapterRefreshRequest(id=request_id, key=key)
 
     try:
         response = await ipc.submit(request_id, internal_request)
@@ -100,7 +110,7 @@ async def _refresh_adapters(
         ) from e
 
     return RefreshResponse(
-        adapter_id=response.adapter_id,
+        key=response.key,
         adapters_loaded=response.adapters_loaded,
         status=response.status,
     )

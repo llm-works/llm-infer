@@ -131,9 +131,12 @@ class AdapterProcessor(RequestProcessor):
 
         adapters = [
             AdapterInfo(
-                adapter_id=a.adapter_id,
+                key=a.key,
+                name=a.name,
                 description=a.description,
                 loaded_at=a.loaded_at.isoformat(),
+                md5=a.md5,
+                mtime=a.mtime,
             )
             for a in manager.list()
         ]
@@ -151,8 +154,8 @@ class AdapterProcessor(RequestProcessor):
             response_q.put(self._make_refresh_response(request, 0, "disabled"))
             return
 
-        if request.adapter_id:
-            adapter = manager.refresh_one(request.adapter_id)
+        if request.key:
+            adapter = manager.refresh_one(request.key)
             status = "loaded" if adapter else "unloaded"
             response_q.put(
                 self._make_refresh_response(request, len(manager.list()), status)
@@ -167,7 +170,7 @@ class AdapterProcessor(RequestProcessor):
         """Create an adapter refresh response."""
         return AdapterRefreshResponse(
             id=request.id,
-            adapter_id=request.adapter_id,
+            key=request.key,
             adapters_loaded=adapters_loaded,
             status=status,
         )

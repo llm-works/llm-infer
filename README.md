@@ -72,13 +72,13 @@ async with factory.openai(base_url="http://localhost:8000/v1") as client:
 
 The server extends the OpenAI chat completions API:
 
-**Request** - adds `think` and `adapter_id` fields:
+**Request** - adds `think` and `adapter` fields:
 ```json
 {
   "model": "default",
   "messages": [{"role": "user", "content": "What is 15 * 23?"}],
   "think": true,
-  "adapter_id": "my-lora-adapter"
+  "adapter": "my-lora-adapter"
 }
 ```
 
@@ -195,6 +195,7 @@ models:
 ```bash
 pip install llm-infer              # Client only
 pip install llm-infer[anthropic]   # With Anthropic support
+pip install llm-infer[saia]        # With llm-saia integration
 pip install llm-infer[runtime]     # With native engine (torch)
 ```
 

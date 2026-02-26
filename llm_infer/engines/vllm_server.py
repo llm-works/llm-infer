@@ -32,10 +32,9 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from appinfra.log import Logger
 
-from ..adapter_meta import compute_adapter_metadata
-
 if TYPE_CHECKING:
     from ..context import RequestContext
+    from ..serving.adapters import LoadedAdapter
     from ..serving.dispatch.config import VLLMServerConfig
 
 
@@ -215,7 +214,7 @@ class VLLMServerStreamingIterator:
             self._lg.debug(
                 "verified LoRA adapter",
                 extra={
-                    "adapter": requested,
+                    "key": requested,
                     "mtime": meta.get("mtime", ""),
                     "md5": meta.get("md5", ""),
                 },
@@ -303,20 +302,33 @@ class VLLMServerEngine:
     Connects to a `vllm serve` process via its OpenAI-compatible HTTP API.
     If auto_start is enabled, the engine starts `vllm serve` as a subprocess
     with the configured model and settings, and stops it on shutdown.
+
+    Args:
+        lg: Logger instance.
+        config: vLLM server configuration.
+        adapters: Optional list of pre-scanned adapters. If provided, the engine
+            uses these instead of scanning. This enables single-source-of-truth
+            adapter management via AdapterManager.
     """
 
-    def __init__(self, lg: Logger, config: VLLMServerConfig):
+    def __init__(
+        self,
+        lg: Logger,
+        config: VLLMServerConfig,
+        adapters: list[LoadedAdapter] | None = None,
+    ):
         self._lg = lg
         self._config = config
         self._process: subprocess.Popen[bytes] | None = None
         self._owns_process = False
         self._base_url = self._parse_base_url(config)
         self._model_name = config.served_model_name or Path(config.model_path).name
+
+        # Build adapter maps from pre-scanned adapters
         self._adapter_paths: dict[str, str] = {}
         self._adapter_metadata: dict[str, dict[str, str]] = {}
-
-        if config.lora.enabled and config.lora.base_path:
-            self._scan_adapters(Path(config.lora.base_path))
+        if adapters:
+            self._init_adapters(adapters)
 
         self._client = httpx.Client(
             base_url=self._base_url,
@@ -355,99 +367,40 @@ class VLLMServerEngine:
             raise
 
     # -------------------------------------------------------------------------
-    # LoRA adapter scanning
+    # LoRA adapter initialization
     # -------------------------------------------------------------------------
 
-    def _load_adapter_config(self, config_path: Path) -> dict[str, Any] | None:
-        """Load and parse adapter config.yaml file.
+    def _init_adapters(self, adapters: list[LoadedAdapter]) -> None:
+        """Initialize adapter maps from pre-scanned LoadedAdapter list.
 
-        Returns config dict if successful, None if failed.
+        Builds _adapter_paths and _adapter_metadata from adapters provided
+        by AdapterManager (single source of truth).
         """
-        try:
-            import yaml
-
-            with open(config_path) as f:
-                return yaml.safe_load(f) or {}
-        except Exception as e:
-            self._lg.warning(
-                "failed to load adapter config",
-                extra={"path": str(config_path), "exception": e},
+        for adapter in adapters:
+            self._adapter_paths[adapter.key] = str(adapter.path)
+            self._adapter_metadata[adapter.key] = {
+                "md5": adapter.md5 or "unknown",
+                "mtime": adapter.mtime or "unknown",
+            }
+            self._lg.debug(
+                "registered adapter",
+                extra={
+                    "key": adapter.key,
+                    "mtime": adapter.mtime,
+                    "md5": adapter.md5,
+                },
             )
-            return None
+        if adapters:
+            self._lg.info(
+                "adapters initialized from manager",
+                extra={"count": len(adapters)},
+            )
 
     def _get_adapter_metadata(self, lora_request: Any | None) -> dict[str, str] | None:
         """Get cached adapter metadata for a LoRA request."""
         if lora_request and hasattr(lora_request, "lora_name"):
             return self._adapter_metadata.get(lora_request.lora_name)
         return None
-
-    def _validate_adapter_base_path(self, base_path: Path) -> bool:
-        """Validate adapter base path exists and is a directory.
-
-        Returns True if valid, False otherwise (logs warnings).
-        """
-        if not base_path.exists():
-            self._lg.warning(
-                "LoRA adapter base_path does not exist",
-                extra={"base_path": str(base_path)},
-            )
-            return False
-        if not base_path.is_dir():
-            self._lg.warning(
-                "LoRA adapter base_path is not a directory",
-                extra={"base_path": str(base_path)},
-            )
-            return False
-        return True
-
-    def _process_adapter_dir(self, entry: Path) -> None:
-        """Process a single adapter directory and register if enabled."""
-        config_path = entry / "config.yaml"
-        if not config_path.exists():
-            return
-
-        config = self._load_adapter_config(config_path)
-        if config is None:
-            return
-
-        enabled = config.get("enabled", False)
-        self._lg.debug(
-            "checked adapter config",
-            extra={"adapter": entry.name, "enabled": enabled, "path": str(entry)},
-        )
-        if enabled:
-            self._adapter_paths[entry.name] = str(entry)
-            metadata = compute_adapter_metadata(entry).to_dict()
-            self._adapter_metadata[entry.name] = metadata
-            self._lg.info(
-                "found LoRA adapter",
-                extra={
-                    "adapter": entry.name,
-                    "mtime": metadata["mtime"],
-                    "md5": metadata["md5"],
-                },
-            )
-
-    def _scan_adapters(self, base_path: Path) -> None:
-        """Scan for available LoRA adapters in base_path.
-
-        Looks for subdirectories with config.yaml that have enabled: true.
-        Stores adapter names and paths for use in --lora-modules flag.
-        """
-        self._lg.debug(
-            "scanning for LoRA adapters", extra={"base_path": str(base_path)}
-        )
-        if not self._validate_adapter_base_path(base_path):
-            return
-
-        for entry in base_path.iterdir():
-            if entry.is_dir():
-                self._process_adapter_dir(entry)
-
-        self._lg.info(
-            "adapter scan complete (vllm-server engine)",
-            extra={"count": len(self._adapter_paths)},
-        )
 
     # -------------------------------------------------------------------------
     # Server lifecycle
@@ -615,14 +568,20 @@ class VLLMServerEngine:
                 f"Failed to connect to vLLM server at {self._base_url}. Error: {e}"
             ) from e
 
-    def _remove_failed_adapter(self, adapter_id: str) -> None:
+    def _remove_failed_adapter(self, adapter: str) -> None:
         """Remove an adapter that vLLM failed to load."""
+        meta = self._adapter_metadata.get(adapter, {})
         self._lg.warning(
             "adapter not loaded by vLLM, removing from available adapters",
-            extra={"adapter_id": adapter_id, "path": self._adapter_paths[adapter_id]},
+            extra={
+                "key": adapter,
+                "path": self._adapter_paths.get(adapter, "unknown"),
+                "md5": meta.get("md5"),
+                "mtime": meta.get("mtime"),
+            },
         )
-        del self._adapter_paths[adapter_id]
-        self._adapter_metadata.pop(adapter_id, None)
+        self._adapter_paths.pop(adapter, None)
+        self._adapter_metadata.pop(adapter, None)
 
     def _verify_adapters(self) -> None:
         """Verify adapters were loaded by vLLM, remove any that failed."""
@@ -636,8 +595,8 @@ class VLLMServerEngine:
 
         # Find and remove adapters that vLLM didn't load
         failed = [a for a in self._adapter_paths if a not in loaded_models]
-        for adapter_id in failed:
-            self._remove_failed_adapter(adapter_id)
+        for adapter in failed:
+            self._remove_failed_adapter(adapter)
 
         if failed:
             self._lg.warning(
@@ -798,7 +757,7 @@ class VLLMServerEngine:
             self._lg.debug(
                 "verified LoRA adapter",
                 extra={
-                    "adapter": requested,
+                    "key": requested,
                     "mtime": meta.get("mtime", ""),
                     "md5": meta.get("md5", ""),
                 },
