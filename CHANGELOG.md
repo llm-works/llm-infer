@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal adapter representation uses `key` instead of `adapter_id`
 - vllm-server engine: single source of truth for adapter scanning via AdapterManager (removed
   duplicate scanning)
-- CI/CD: llm-saia now installed from PyPI instead of GitHub
+- CI/CD: llm-saia installed via `[saia]` extra (single source of truth in pyproject.toml)
 
 ### Fixed
 
