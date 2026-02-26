@@ -472,7 +472,14 @@ class OpenAICompatibleBackend(Backend):
         self._add_optional_params(
             payload, max_tokens, tools, tool_choice, think, adapter
         )
-        # Add extra kwargs, filtering out reserved keys to prevent override
+        # Extract and merge extra_body contents as top-level keys
+        # This matches OpenAI SDK behavior where extra_body contents are merged into the request
+        extra_body = kwargs.pop("extra_body", None)
+        if extra_body:
+            for key, value in extra_body.items():
+                if value is not None and key not in self._RESERVED_KEYS:
+                    payload[key] = value
+        # Add remaining kwargs, filtering out reserved keys to prevent override
         for key, value in kwargs.items():
             if value is not None and key not in self._RESERVED_KEYS:
                 payload[key] = value
