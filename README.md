@@ -195,6 +195,7 @@ models:
 ```bash
 pip install llm-infer              # Client only
 pip install llm-infer[anthropic]   # With Anthropic support
+pip install llm-infer[saia]        # With llm-saia integration
 pip install llm-infer[runtime]     # With native engine (torch)
 ```
 

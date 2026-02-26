@@ -68,8 +68,8 @@ jobs:
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
           # Install appinfra from PyPI
           python -m pip install "appinfra>=0.4.0,<0.5.0"
-          # Install llm-saia from GitHub (not yet on PyPI, intentionally unpinned during development)
-          python -m pip install git+https://github.com/serendip-ml/llm-saia.git@develop
+          # Install llm-saia from PyPI
+          python -m pip install "llm-saia>=0.1.0,<0.2.0"
           # Install package with dev and runtime dependencies
           python -m pip install -e ".[dev,runtime]"
 
@@ -193,8 +193,8 @@ jobs:
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
           # Install appinfra from PyPI
           python -m pip install "appinfra>=0.4.0,<0.5.0"
-          # Install llm-saia from GitHub (not yet on PyPI, intentionally unpinned during development)
-          python -m pip install git+https://github.com/serendip-ml/llm-saia.git@develop
+          # Install llm-saia from PyPI
+          python -m pip install "llm-saia>=0.1.0,<0.2.0"
           # Install package with dev and runtime dependencies
           python -m pip install -e ".[dev,runtime]"
 
