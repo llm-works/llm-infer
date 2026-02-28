@@ -190,7 +190,7 @@ class MarlinAWQBackend:
 
     def _call_marlin_gemm(self, x: Tensor, mw: Any) -> Tensor:
         """Call Marlin GEMM kernel with prepared weights."""
-        return ops.gptq_marlin_gemm(
+        result: Tensor = ops.gptq_marlin_gemm(
             x,
             None,
             mw.qweight,
@@ -211,6 +211,7 @@ class MarlinAWQBackend:
             use_fp32_reduce=False,
             is_zp_float=False,
         )
+        return result
 
     def forward(self, x: Tensor, weights: AWQWeights) -> Tensor:
         """Perform AWQ quantized matrix multiplication using Marlin kernel."""
