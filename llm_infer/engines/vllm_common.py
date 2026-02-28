@@ -38,6 +38,9 @@ def resolve_gpu_memory_utilization(
     if gpu_memory_gb is None:
         return gpu_memory_utilization
 
+    if gpu_memory_gb <= 0:
+        raise ValueError(f"gpu_memory_gb must be positive, got {gpu_memory_gb}")
+
     total_gb = get_gpu_total_memory_gb()
     if total_gb is None:
         lg.warning("gpu_memory_gb set but GPU detection failed, using utilization")
