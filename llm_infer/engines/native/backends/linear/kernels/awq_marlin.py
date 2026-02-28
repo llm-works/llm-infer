@@ -190,7 +190,7 @@ class MarlinAWQBackend:
 
     def _call_marlin_gemm(self, x: Tensor, mw: Any) -> Tensor:
         """Call Marlin GEMM kernel with prepared weights."""
-        result: Tensor = ops.gptq_marlin_gemm(
+        result: Tensor = ops.gptq_marlin_gemm(  # type: ignore[attr-defined]
             x,
             None,
             mw.qweight,

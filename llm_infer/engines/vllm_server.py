@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from appinfra.log import Logger
 
+from .vllm_common import resolve_gpu_memory_utilization
+
 if TYPE_CHECKING:
     from ..context import RequestContext
     from ..serving.adapters import LoadedAdapter
@@ -418,7 +420,10 @@ class VLLMServerEngine:
     def _add_engine_flags(self, cmd: list[str]) -> None:
         """Add vLLM engine configuration flags to command."""
         cfg = self._config
-        cmd.extend(["--gpu-memory-utilization", str(cfg.gpu_memory_utilization)])
+        utilization = resolve_gpu_memory_utilization(
+            self._lg, cfg.gpu_memory_gb, cfg.gpu_memory_utilization
+        )
+        cmd.extend(["--gpu-memory-utilization", str(utilization)])
         cmd.extend(["--max-num-seqs", str(cfg.max_num_seqs)])
         cmd.extend(["--tensor-parallel-size", str(cfg.tensor_parallel_size)])
         cmd.extend(["--dtype", cfg.dtype])

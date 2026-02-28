@@ -2,6 +2,7 @@ infra := $(shell appinfra scripts-path)
 
 # Configuration
 INFRA_DEV_PKG_NAME := llm_infer
+INFRA_DEV_INSTALL_EXTRAS := dev,runtime,cuda
 
 # Code quality strictness
 # - true: Fail on any code quality violations (CI mode)

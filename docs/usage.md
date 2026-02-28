@@ -67,7 +67,8 @@ engines:
     warmup: true
 
   vllm:
-    gpu_memory_utilization: 0.9
+    gpu_memory_gb: null          # or e.g., 8.0 for 8GB absolute limit
+    gpu_memory_utilization: 0.9  # used if gpu_memory_gb is null
     max_model_len: 16384
     tensor_parallel_size: 1
     max_num_seqs: 256
