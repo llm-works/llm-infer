@@ -32,8 +32,9 @@ saia = [
     "llm-saia>=0.1.0,<0.2.0",
 ]
 cuda = [
+    "vllm>=0.7.0,<1.0.0",
     "flashinfer-python>=0.2.0,<1.0.0",
-    "pynvml>=11.0.0,<13.0.0",  # Device-level GPU stats for vLLM backend
+    "pynvml>=11.0.0,<13.0.0",
 ]
 dev = [
     "coverage>=7.0.0,<8.0.0",

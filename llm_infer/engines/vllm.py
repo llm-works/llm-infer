@@ -20,6 +20,7 @@ from appinfra.log import Logger
 from appinfra.size import size_str
 
 from ..serving.dispatch.config import VLLMConfig
+from .vllm_common import resolve_gpu_memory_utilization
 
 # Check for vLLM availability
 _VLLM_AVAILABLE = False
@@ -234,7 +235,9 @@ class VLLMEngine:
         mem_before = self._get_device_memory_used()
 
         # Create the sync LLM engine
-        self._engine = LLM(**config.to_llm_kwargs())
+        llm_kwargs = config.to_llm_kwargs()
+        self._apply_gpu_memory_gb(llm_kwargs, config.gpu_memory_gb)
+        self._engine = LLM(**llm_kwargs)
 
         # Estimate model and KV cache memory
         self._init_memory_estimation(mem_before)
@@ -246,6 +249,20 @@ class VLLMEngine:
         self._eos_token_id: int | None = None
         if hasattr(self._tokenizer, "eos_token_id"):
             self._eos_token_id = self._tokenizer.eos_token_id
+
+    def _apply_gpu_memory_gb(
+        self, kwargs: dict[str, Any], gpu_memory_gb: float | None
+    ) -> None:
+        """Convert gpu_memory_gb to utilization fraction if set.
+
+        Modifies kwargs in-place, overriding gpu_memory_utilization if
+        gpu_memory_gb is specified and GPU memory can be detected.
+        """
+        kwargs["gpu_memory_utilization"] = resolve_gpu_memory_utilization(
+            self._lg,
+            gpu_memory_gb,
+            kwargs["gpu_memory_utilization"],
+        )
 
     def _get_physical_device_index(self) -> int:
         """Map torch logical device to pynvml physical device index.

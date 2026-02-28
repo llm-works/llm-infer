@@ -139,6 +139,10 @@ class VLLMConfig:
     task: str = "generate"
 
     # Memory management
+    # Use gpu_memory_gb for absolute limit (e.g., 8.0 for 8GB)
+    # Use gpu_memory_utilization for fraction of total VRAM (e.g., 0.9 for 90%)
+    # If both set, gpu_memory_gb takes precedence
+    gpu_memory_gb: float | None = None
     gpu_memory_utilization: float = 0.9
     cpu_offload_gb: float = 0.0
     swap_space: int = 4  # GB
@@ -287,6 +291,7 @@ class VLLMServerConfig:
     served_model_name: str | None = None
 
     # vLLM engine settings (passed as CLI flags to `vllm serve`)
+    gpu_memory_gb: float | None = None  # Absolute GB limit (converted to utilization)
     gpu_memory_utilization: float = 0.95
     max_model_len: int | None = None
     max_num_seqs: int = 16
@@ -452,6 +457,7 @@ class InferenceConfig:
         """Parse vLLM engine configuration."""
         return VLLMConfig(
             task=data.get("task", "generate"),
+            gpu_memory_gb=data.get("gpu_memory_gb"),
             gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),
             cpu_offload_gb=data.get("cpu_offload_gb", 0.0),
             swap_space=data.get("swap_space", 4),

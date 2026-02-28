@@ -138,8 +138,9 @@ auto_start: true               # Start vllm serve subprocess
 startup_timeout: 300           # Seconds to wait for vLLM to start
 timeout: 120                   # Request timeout
 
-# Engine options
-gpu_memory_utilization: 0.9
+# Engine options (use gpu_memory_gb OR gpu_memory_utilization)
+gpu_memory_gb: null            # Absolute limit, e.g., 8.0 for 8GB
+gpu_memory_utilization: 0.9    # Fraction of VRAM (used if gpu_memory_gb is null)
 max_model_len: 16384
 tensor_parallel_size: 1
 max_num_seqs: 256
@@ -236,7 +237,8 @@ llm-infer serve --engine vllm --model-path /path/to/model
 
 ```yaml
 # etc/vllm.yaml
-gpu_memory_utilization: 0.9
+gpu_memory_gb: null            # Absolute limit, e.g., 8.0 for 8GB
+gpu_memory_utilization: 0.9    # Fraction of VRAM (used if gpu_memory_gb is null)
 max_model_len: 16384
 tensor_parallel_size: 1
 max_num_seqs: 256

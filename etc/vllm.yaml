@@ -1,4 +1,7 @@
 # Memory management
+# Option 1: Absolute GB limit (recommended for dev/testing)
+gpu_memory_gb: null          # e.g., 8.0 for 8GB limit (null = use utilization)
+# Option 2: Fraction of total VRAM (vLLM's native setting)
 gpu_memory_utilization: 0.9  # Fraction of GPU memory to use (0-1)
 cpu_offload_gb: 0            # Offload to CPU memory (GB)
 swap_space: 4                # CPU swap space for KV cache (GB)

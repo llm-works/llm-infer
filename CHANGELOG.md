@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `gpu_memory_gb` config option for vLLM engines: specify absolute GPU memory limit in GB instead
+  of vLLM's fraction-based `gpu_memory_utilization` (e.g., `gpu_memory_gb: 8.0` for 8GB limit)
+- vLLM added to `cuda` optional dependencies: `pip install llm-infer[cuda]` now includes vLLM
+- `make setup` now installs `dev,runtime,cuda` extras by default
+
+### Changed
+
+- Refactored vLLM GPU memory resolution into shared `vllm_common.py` module
+
 ## [0.1.1] - 2026-02-25
 
 ### Breaking Changes

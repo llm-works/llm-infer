@@ -88,7 +88,8 @@ models:
     max_model_len: 4096  # Don't need 16K for a tiny test model
     vllm:
       enforce_eager: true  # Must repeat - local vllm block replaces merged one
-      gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
+      gpu_memory_gb: 4.0  # Absolute limit (clearer than utilization fraction)
+      max_num_seqs: 2  # E2E tests run sequentially
 
   qwen2.5-coder-3b-instruct-bnb-4bit:
     <<: *qwen_think
