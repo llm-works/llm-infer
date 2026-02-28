@@ -14,8 +14,8 @@ def get_gpu_total_memory_gb() -> float | None:
         if not torch.cuda.is_available():
             return None
         device = torch.cuda.current_device()
-        total_bytes = torch.cuda.get_device_properties(device).total_memory
-        return total_bytes / (1024**3)
+        total_bytes: int = torch.cuda.get_device_properties(device).total_memory
+        return float(total_bytes) / (1024**3)
     except Exception:
         return None
 
