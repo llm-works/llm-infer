@@ -17,14 +17,18 @@ class TestGetGpuTotalMemoryGb:
 
     def test_returns_none_when_torch_unavailable(self) -> None:
         """Test returns None when torch import fails."""
-        with patch.dict("sys.modules", {"torch": None}):
-            # Force re-import behavior by patching at import time
-            with patch(
-                "llm_infer.engines.vllm_common.get_gpu_total_memory_gb"
-            ) as mock_fn:
-                mock_fn.return_value = None
-                result = mock_fn()
-                assert result is None
+        import builtins
+
+        original_import = builtins.__import__
+
+        def raise_on_torch(name: str, *args: object, **kwargs: object) -> object:
+            if name == "torch":
+                raise ImportError("No module named 'torch'")
+            return original_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", side_effect=raise_on_torch):
+            result = get_gpu_total_memory_gb()
+            assert result is None
 
     def test_returns_none_when_cuda_not_available(self) -> None:
         """Test returns None when CUDA is not available."""
