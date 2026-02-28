@@ -120,4 +120,5 @@ class CutlassFP8Backend:
         )
 
         # Restore batch dimensions
-        return out.view(*orig_shape[:-1], weights.out_features)
+        result: Tensor = out.view(*orig_shape[:-1], weights.out_features)
+        return result
