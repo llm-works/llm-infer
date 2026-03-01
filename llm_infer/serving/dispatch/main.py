@@ -17,6 +17,7 @@ from ..api.adapters import create_adapter_router
 from ..api.openai.router import create_openai_router
 from ..api.routes import create_health_handler, create_routes
 from .config import InferenceConfig
+from .errors import ExceptionHandler
 from .factories import get_engine_factory, get_handler_factory
 from .handler import RequestHandler
 from .loop import run_engine_loop
@@ -365,7 +366,7 @@ class BootSequence:
         """Build initial ServerBuilder with host/port/metadata."""
         cfg = self._config.api
         return (
-            ServerBuilder("inference")
+            ServerBuilder(self._lg, "inference")
             .with_host(cfg.host)
             .with_port(cfg.port)
             .with_title(cfg.title)
@@ -386,6 +387,7 @@ class BootSequence:
             .routes.with_route("/health", health_handler)
             .with_router(create_routes(model_name))
             .with_router(create_openai_router(model_name, model_config), prefix="/v1")
+            .with_exception_handler(Exception, ExceptionHandler(self._lg))
         )
         routes_builder = self._add_lora_routes(routes_builder)
 

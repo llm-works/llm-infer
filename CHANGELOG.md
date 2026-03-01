@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Clean timeout error handling: request timeouts now log a single error line without stack traces
+  and return proper 504 JSON response to clients
 - `gpu_memory_gb` config option for vLLM engines: specify absolute GPU memory limit in GB instead
   of vLLM's fraction-based `gpu_memory_utilization` (e.g., `gpu_memory_gb: 8.0` for 8GB limit)
 - vLLM added to `cuda` optional dependencies: `pip install llm-infer[cuda]` now includes vLLM

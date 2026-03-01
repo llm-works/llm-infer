@@ -343,10 +343,10 @@ def _handle_chat_streaming(
     )
 
 
-def _register_completion_routes(
+def _register_chat_completion_routes(
     router: APIRouter, model_name: str, model_config: ModelConfig | None = None
 ) -> None:
-    """Register completion endpoints."""
+    """Register chat completion endpoint."""
 
     @router.post("/chat/completions", response_model=None)
     async def chat_completions(
@@ -361,6 +361,10 @@ def _register_completion_routes(
         return await _handle_chat_non_streaming(
             request_id, body, model_name, ipc, model_config
         )
+
+
+def _register_legacy_completion_routes(router: APIRouter, model_name: str) -> None:
+    """Register legacy completion endpoint."""
 
     @router.post("/completions", response_model=None)
     async def completions(
@@ -432,6 +436,7 @@ def create_openai_router(
     """
     router = APIRouter(tags=["OpenAI"])
     _register_model_routes(router, model_name)
-    _register_completion_routes(router, model_name, model_config)
+    _register_chat_completion_routes(router, model_name, model_config)
+    _register_legacy_completion_routes(router, model_name)
     _register_embedding_routes(router, model_name)
     return router
