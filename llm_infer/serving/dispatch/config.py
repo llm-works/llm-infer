@@ -15,7 +15,7 @@ class LoRAConfig:
 
     enabled: bool = False  # Enable LoRA/QLoRA adapter support
     max_loras: int = 4  # Maximum concurrent adapters in GPU memory
-    max_lora_rank: int = 64  # Maximum LoRA rank supported
+    max_lora_rank: int = 128  # Maximum LoRA rank supported
     base_path: str | None = None  # Base directory for adapter weights
 
 
