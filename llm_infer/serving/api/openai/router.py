@@ -46,20 +46,6 @@ if TYPE_CHECKING:
     from ....models.config import ModelConfig
 
 
-def _timeout_error_response(error_msg: str) -> JSONResponse:
-    """Create a 504 timeout error response."""
-    return JSONResponse(
-        status_code=504,
-        content={
-            "error": {
-                "message": error_msg,
-                "type": "server_error",
-                "code": "timeout",
-            }
-        },
-    )
-
-
 def _build_completion_usage(response: Any) -> ChatCompletionUsage:
     """Build usage stats from response."""
     return ChatCompletionUsage(
@@ -368,17 +354,13 @@ def _register_chat_completion_routes(
     ) -> ChatCompletionResponse | StreamingResponse | JSONResponse:
         ipc = request.app.state.ipc_channel
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-        try:
-            if body.stream:
-                return _handle_chat_streaming(
-                    request_id, body, model_name, ipc, model_config
-                )
-            return await _handle_chat_non_streaming(
+        if body.stream:
+            return _handle_chat_streaming(
                 request_id, body, model_name, ipc, model_config
             )
-        except TimeoutError as e:
-            request.state.lg.error("request timeout", extra={"error": str(e)})
-            return _timeout_error_response(str(e))
+        return await _handle_chat_non_streaming(
+            request_id, body, model_name, ipc, model_config
+        )
 
 
 def _register_legacy_completion_routes(router: APIRouter, model_name: str) -> None:
@@ -390,20 +372,14 @@ def _register_legacy_completion_routes(router: APIRouter, model_name: str) -> No
     ) -> CompletionResponse | StreamingResponse | JSONResponse:
         ipc = request.app.state.ipc_channel
         request_id = f"cmpl-{uuid.uuid4().hex[:24]}"
-        try:
-            if body.stream:
-                internal_request = completion_request_to_internal(body, request_id)
-                generator = CompletionStreamingGenerator(request_id, model_name, ipc)
-                return StreamingResponse(
-                    generator.stream(internal_request),
-                    media_type="text/event-stream",
-                )
-            return await _handle_completion_non_streaming(
-                request_id, body, model_name, ipc
+        if body.stream:
+            internal_request = completion_request_to_internal(body, request_id)
+            generator = CompletionStreamingGenerator(request_id, model_name, ipc)
+            return StreamingResponse(
+                generator.stream(internal_request),
+                media_type="text/event-stream",
             )
-        except TimeoutError as e:
-            request.state.lg.error("request timeout", extra={"error": str(e)})
-            return _timeout_error_response(str(e))
+        return await _handle_completion_non_streaming(request_id, body, model_name, ipc)
 
 
 def _build_embedding_response(response: Any, model_name: str) -> EmbeddingResponse:
@@ -442,16 +418,10 @@ def _register_embedding_routes(router: APIRouter, model_name: str) -> None:
     """Register embedding endpoints."""
 
     @router.post("/embeddings", response_model=EmbeddingResponse)
-    async def embeddings(
-        body: EmbeddingRequest, request: Request
-    ) -> EmbeddingResponse | JSONResponse:
+    async def embeddings(body: EmbeddingRequest, request: Request) -> EmbeddingResponse:
         """Generate embeddings for input text(s)."""
         ipc = request.app.state.ipc_channel
-        try:
-            return await _handle_embedding_request(body, ipc, model_name)
-        except TimeoutError as e:
-            request.state.lg.error("request timeout", extra={"error": str(e)})
-            return _timeout_error_response(str(e))
+        return await _handle_embedding_request(body, ipc, model_name)
 
 
 def create_openai_router(
