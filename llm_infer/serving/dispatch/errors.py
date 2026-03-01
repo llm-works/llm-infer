@@ -3,19 +3,18 @@
 Provides clean logging for known exceptions without full stack traces.
 """
 
-from appinfra.log import Logger
+from appinfra.app.fastapi import ExceptionHandler as BaseExceptionHandler
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 
-class ExceptionHandler:
-    """Handles exceptions with clean logging for known types."""
+class ExceptionHandler(BaseExceptionHandler):
+    """Handles all exceptions - intercepts known types, re-raises others."""
 
-    def __init__(self, lg: Logger) -> None:
-        self._lg = lg
-
-    async def __call__(self, request: Request, exc: Exception) -> JSONResponse:
+    async def handle(self, request: Request, exc: Exception) -> JSONResponse:
         """Handle exception - intercept known types, re-raise others."""
+        assert self._lg is not None  # Injected after unpickling
+
         # Trace-level exception details for debugging
         self._lg.trace(
             "exception handler invoked",
@@ -35,6 +34,7 @@ class ExceptionHandler:
 
     def _handle_timeout(self, exc: TimeoutError) -> JSONResponse:
         """Handle request timeout with clean logging."""
+        assert self._lg is not None
         self._lg.error("request timeout", extra={"error": str(exc)})
         return JSONResponse(
             status_code=504,
