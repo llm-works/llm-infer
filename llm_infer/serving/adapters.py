@@ -11,6 +11,7 @@ Versioned Adapter Resolution:
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -135,10 +136,17 @@ class AdapterManager:
     """
 
     CONFIG_FILENAME = "config.yaml"
+    ADAPTER_CONFIG_FILENAME = "adapter_config.json"
 
-    def __init__(self, lg: Logger, base_path: Path | str | None) -> None:
+    def __init__(
+        self,
+        lg: Logger,
+        base_path: Path | str | None,
+        base_model_path: Path | str | None = None,
+    ) -> None:
         self._lg = lg
         self._base_path = Path(base_path).expanduser() if base_path else None
+        self._base_model_path = Path(base_model_path) if base_model_path else None
         self._adapters: dict[str, LoadedAdapter] = {}  # full_key → adapter
         self._versions: dict[str, list[str]] = {}  # name → [full_keys by mtime desc]
 
@@ -252,6 +260,55 @@ class AdapterManager:
 
         return config
 
+    def _read_adapter_config_json(self, adapter_path: Path, key: str) -> str | None:
+        """Read base_model_name_or_path from adapter_config.json.
+
+        Returns the base model path string, or None if unavailable.
+        """
+        config_path = adapter_path / self.ADAPTER_CONFIG_FILENAME
+        if not config_path.exists():
+            return None
+
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                config = json.load(f)
+            base_model: str | None = config.get("base_model_name_or_path")
+            return base_model
+        except Exception as e:
+            self._lg.warning(
+                "failed to read adapter_config.json",
+                extra={"key": key, "path": str(config_path), "exception": e},
+            )
+            return None
+
+    def _check_base_model_compatibility(self, adapter_path: Path, key: str) -> bool:
+        """Check if adapter's base model matches the current model.
+
+        Returns True if compatible, False if incompatible.
+        """
+        if self._base_model_path is None:
+            return True
+
+        adapter_base_model = self._read_adapter_config_json(adapter_path, key)
+        if not adapter_base_model:
+            return True  # No base model info, allow
+
+        current_model_name = self._base_model_path.name
+        adapter_model_name = Path(adapter_base_model).name
+
+        if current_model_name != adapter_model_name:
+            self._lg.info(
+                "adapter base model mismatch - skipping",
+                extra={
+                    "key": key,
+                    "adapter_base_model": adapter_model_name,
+                    "current_model": current_model_name,
+                },
+            )
+            return False
+
+        return True
+
     def _load_adapter(self, path: Path, key: str | None = None) -> LoadedAdapter | None:
         """Load adapter config and compute metadata from a directory.
 
@@ -265,6 +322,11 @@ class AdapterManager:
             return None
 
         full_key = key if key is not None else path.name
+
+        # Check base model compatibility before loading
+        if not self._check_base_model_compatibility(path, full_key):
+            return None
+
         name, _ = parse_adapter_key(full_key)
         metadata = compute_adapter_metadata(path)
         return LoadedAdapter(

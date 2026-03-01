@@ -17,7 +17,7 @@ selection:
 # =============================================================================
 # Templates (YAML anchors for reuse)
 # =============================================================================
-# Use <<: *anchor_name to merge template into model config
+# Use <<: *anchor for shallow merge, <<: !deep *anchor for deep merge (nested dicts)
 
 templates:
   # Qwen 2.5/3 instruct models - support /think /no_think tokens
@@ -54,10 +54,18 @@ templates:
         open: ["<think>"]
         close: ["</think>"]
 
-  # vLLM settings for small models (skip CUDA graph capture)
+  # vLLM settings for small models (≤1.5B) - skip CUDA graph capture, shorter context
   vllm_small: &vllm_small
+    max_model_len: 4096
     vllm:
       enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
+      max_num_seqs: 2
+
+  # vLLM settings for regular models (3B+) - standard 8K context
+  vllm_default: &vllm_default
+    max_model_len: 8192
+    vllm:
+      max_num_seqs: 4
 
 # =============================================================================
 # Models
@@ -84,85 +92,118 @@ models:
   # ---------------------------------------------------------------------------
   qwen2.5-0.5b-instruct:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 4096  # Don't need 16K for a tiny test model
+    <<: !deep *vllm_small
     vllm:
-      enforce_eager: true  # Must repeat - local vllm block replaces merged one
-      gpu_memory_gb: 4.0  # Absolute limit (clearer than utilization fraction)
-      max_num_seqs: 2  # E2E tests run sequentially
+      gpu_memory_gb: 4.0
 
   qwen2.5-coder-3b-instruct-bnb-4bit:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 8192
+    <<: !deep *vllm_default
     vllm:
-      enforce_eager: true  # Must repeat - local vllm block replaces merged one
-      gpu_memory_utilization: 0.85  # 2GB model + LoRA + KV cache fits 8GB comfortably
+      gpu_memory_gb: 8.0
 
   qwen2.5-3b-instruct-bnb-4bit:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 8192
+    <<: !deep *vllm_default
     vllm:
-      enforce_eager: true
-      gpu_memory_utilization: 0.85
+      gpu_memory_gb: 8.0
 
   qwen2.5-3b-instruct-unsloth-bnb-4bit:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 8192
+    <<: !deep *vllm_default
     vllm:
-      enforce_eager: true
-      gpu_memory_utilization: 0.85
+      gpu_memory_gb: 8.0
 
   qwen2.5-coder-7b-instruct-bnb-4bit:
     <<: *qwen_think
-    max_model_len: 4096  # Reduced for 8GB GPU
+    <<: !deep *vllm_default
     vllm:
-      enforce_eager: true
-      gpu_memory_utilization: 0.85  # BNB 4-bit is compact, leave room for LoRA + KV
-      # Note: BNB quantized model - supports QLoRA training and LoRA inference
+      gpu_memory_gb: 8.0
+
+  qwen2.5-coder-14b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 16.0
+
+  qwen2.5-coder-32b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 32.0
+
+  qwen2.5-0.5b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_small
+    vllm:
+      gpu_memory_gb: 4.0
+
+  qwen2.5-1.5b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_small
+    vllm:
+      gpu_memory_gb: 4.0
+
+  qwen2.5-7b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 10.0
+
+  qwen2.5-14b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 16.0
+
+  qwen2.5-32b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 32.0
+
+  qwen2.5-72b-instruct-bnb-4bit:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 64.0
 
   # ---------------------------------------------------------------------------
   # Qwen3 instruct models
   # ---------------------------------------------------------------------------
   qwen3-0.6b-instruct:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 4096
+    <<: !deep *vllm_small
     vllm:
       gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
   qwen3-0.6b-instruct-w4a16:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 4096
+    <<: !deep *vllm_small
 
   qwen3-1.7b-gptq-int8:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 4096  # Reduced for 8GB GPU dev environment
+    <<: !deep *vllm_small
 
   qwen3-1.7b-instruct-w4a16:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 4096
+    <<: !deep *vllm_small
     vllm:
       gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
   qwen3-1.7b-instruct:
     <<: *qwen_think
-    <<: *vllm_small
-    max_model_len: 4096
+    <<: !deep *vllm_small
     vllm:
       gpu_memory_utilization: 0.5  # Need headroom for LoRA overhead + KV cache
 
   qwen3-4b-instruct-2507-awq:
     <<: *qwen_think
-    max_model_len: 8192
+    <<: !deep *vllm_default
 
   qwen3-4b-instruct-w4a16:
     <<: *qwen_think
+    <<: !deep *vllm_default
 
   # ---------------------------------------------------------------------------
   # DeepSeek R1 distillations

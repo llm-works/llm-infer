@@ -248,7 +248,10 @@ class BootSequence:
             self._handler.set_lora_base_path(lora_cfg.base_path)
 
             # Initialize adapter manager and scan for adapters
-            self._adapter_manager = AdapterManager(self._lg, lora_cfg.base_path)
+            # Pass base model path to filter out incompatible adapters
+            self._adapter_manager = AdapterManager(
+                self._lg, lora_cfg.base_path, base_model_path=self._config.models.path
+            )
             count = self._adapter_manager.scan()
             self._handler.set_adapter_manager(self._adapter_manager)
             self._lg.info(
