@@ -334,7 +334,7 @@ class VLLMServerConfig:
                 kwargs["lora"] = LoRAConfig(
                     enabled=lora_data.get("enabled", False),
                     max_loras=lora_data.get("max_loras", 4),
-                    max_lora_rank=lora_data.get("max_lora_rank", 64),
+                    max_lora_rank=lora_data.get("max_lora_rank", 128),
                     base_path=lora_data.get("base_path"),
                 )
             elif f.name != "model_path" and f.name in data:
@@ -488,7 +488,7 @@ class InferenceConfig:
         return LoRAConfig(
             enabled=data.get("enabled", False),
             max_loras=data.get("max_loras", 4),
-            max_lora_rank=data.get("max_lora_rank", 64),
+            max_lora_rank=data.get("max_lora_rank", 128),
             base_path=data.get("base_path"),
         )
 
