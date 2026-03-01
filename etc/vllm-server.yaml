@@ -27,7 +27,7 @@ enable_prefix_caching: true
 lora:
   enabled: true              # Enable LoRA adapter support
   max_loras: 4               # Maximum concurrent adapters in GPU memory
-  max_lora_rank: 64          # Maximum LoRA rank supported
+  max_lora_rank: 128         # Maximum LoRA rank supported
   base_path: !include "../.env.yaml#paths.adapters"
 
 # Tool calling

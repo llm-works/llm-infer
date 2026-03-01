@@ -81,7 +81,7 @@ warmup: true
 lora:
   enabled: true
   max_loras: 4
-  max_lora_rank: 64
+  max_lora_rank: 128
   base_path: /path/to/adapters
 ```
 
