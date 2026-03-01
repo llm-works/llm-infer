@@ -293,8 +293,8 @@ class AdapterManager:
         if not adapter_base_model:
             return True  # No base model info, allow
 
-        current_model_name = self._base_model_path.name
-        adapter_model_name = Path(adapter_base_model).name
+        current_model_name = self._base_model_path.name.lower()
+        adapter_model_name = Path(adapter_base_model).name.lower()
 
         if current_model_name != adapter_model_name:
             self._lg.info(

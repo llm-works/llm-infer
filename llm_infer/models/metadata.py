@@ -210,7 +210,7 @@ def _compute_attention_params(config: dict, num_layers: int, hidden_size: int) -
 
 def _is_swiglu(config: dict) -> bool:
     """Check if model uses SwiGLU activation (3 FFN projections instead of 2)."""
-    hidden_act = config.get("hidden_act", "")
+    hidden_act = config.get("hidden_act") or ""
     return "silu" in hidden_act.lower() or "swiglu" in hidden_act.lower()
 
 

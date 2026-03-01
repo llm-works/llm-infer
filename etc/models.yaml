@@ -67,6 +67,13 @@ templates:
     vllm:
       max_num_seqs: 4
 
+  # GPU memory configuration:
+  # - gpu_memory_gb: Absolute limit in GB. Use for fixed deployments where you know
+  #   the exact GPU size (e.g., 4.0 for 8GB GPU with headroom for OS/other processes).
+  # - gpu_memory_utilization: Fraction of GPU memory (0.0-1.0). Use when model needs
+  #   dynamic headroom for LoRA adapters or KV cache (e.g., 0.5 for small models
+  #   that need overhead for adapter loading).
+
 # =============================================================================
 # Models
 # =============================================================================
