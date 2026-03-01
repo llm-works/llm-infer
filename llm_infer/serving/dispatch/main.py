@@ -366,7 +366,7 @@ class BootSequence:
         """Build initial ServerBuilder with host/port/metadata."""
         cfg = self._config.api
         return (
-            ServerBuilder("inference")
+            ServerBuilder(self._lg, "inference")
             .with_host(cfg.host)
             .with_port(cfg.port)
             .with_title(cfg.title)
