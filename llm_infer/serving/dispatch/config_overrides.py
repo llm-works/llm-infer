@@ -149,7 +149,7 @@ class EnvConfigOverride(ConfigOverride):
     - BLOCK_SIZE -> engines.native.block_size
     - MAX_BATCH_SIZE -> engines.native.max_batch_size
     - MAX_PENDING -> dispatch.max_pending
-    - HANDLER -> dispatch.handler
+    - HANDLER -> dispatch.handler_fallback
     - HOST -> api.host
     - PORT -> api.port
     """
