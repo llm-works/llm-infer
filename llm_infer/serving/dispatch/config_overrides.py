@@ -208,7 +208,8 @@ class CliConfigOverride(ConfigOverride):
         if self.overrides.port is not None:
             config.api.port = self.overrides.port
         if self.overrides.handler is not None:
-            config.dispatch.handler = self.overrides.handler
+            # CLI --handler sets fallback (for in-process engines)
+            config.dispatch.handler_fallback = self.overrides.handler
         if self.overrides.log_file is not None:
             config.api.log_file = self.overrides.log_file
         if self.overrides.model_path is not None:

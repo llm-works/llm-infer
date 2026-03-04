@@ -41,7 +41,9 @@ api:
 
 # Request handling
 dispatch:
-  handler: bounded      # sequential | bounded | batching
+  handler:
+    primary: concurrent_http  # Used for HTTP engines (vllm-server, ollama)
+    fallback: bounded         # Used for in-process engines (native, vllm)
   max_pending: 10
 ```
 
@@ -62,6 +64,7 @@ keep_alive: 5m          # Keep model loaded after request
 num_ctx: null           # Context window (null = model default)
 num_gpu: null           # GPU layers (null = auto, 0 = CPU only)
 warmup: true            # Run warmup query on startup
+max_concurrent: 4       # Concurrent HTTP requests to Ollama
 ```
 
 ### vLLM (`etc/vllm.yaml`)
@@ -100,6 +103,7 @@ max_model_len: null
 enforce_eager: true
 enable_prefix_caching: true
 tool_call_parser: hermes  # Tool call extraction
+max_concurrent: 4         # Concurrent HTTP requests to vLLM server
 
 lora:
   enabled: true

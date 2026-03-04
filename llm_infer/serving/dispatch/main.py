@@ -146,9 +146,21 @@ def create_engine(lg: Logger, config: InferenceConfig) -> Any:
     return engine
 
 
+def _select_handler_type(config: InferenceConfig) -> str:
+    """Select handler type based on engine.
+
+    Uses primary handler for HTTP-based engines (vLLM server, Ollama),
+    fallback handler for in-process engines (native, vllm).
+    """
+    if config.backends.engine in ("vllm-server", "ollama"):
+        return config.dispatch.handler_primary
+    return config.dispatch.handler_fallback
+
+
 def create_handler(lg: Logger, engine: Any, config: InferenceConfig) -> Any:
     """Create a request handler for the engine using factory pattern."""
-    factory = get_handler_factory(config.dispatch.handler)
+    handler_type = _select_handler_type(config)
+    factory = get_handler_factory(handler_type)
     return factory.create(lg, engine, config)
 
 
@@ -233,8 +245,9 @@ class BootSequence:
 
     def create_handler(self) -> None:
         """Phase 3: Create request handler."""
+        handler_type = _select_handler_type(self._config)
         self._handler = create_handler(self._lg, self._engine, self._config)
-        self._lg.info("handler created", extra={"type": self._config.dispatch.handler})
+        self._lg.info("handler created", extra={"type": handler_type})
 
         # Configure LoRA if enabled (use engine-specific config)
         engine_type = self._config.backends.engine

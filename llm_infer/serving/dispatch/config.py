@@ -37,7 +37,10 @@ class NativeEngineConfig:
 class DispatchConfig:
     """Dispatch configuration."""
 
-    handler: str = "bounded"
+    # Handler selection: primary is used for HTTP engines (vllm-server, ollama),
+    # fallback is used for in-process engines (native, vllm)
+    handler_primary: str = "concurrent_http"
+    handler_fallback: str = "bounded"
     max_pending: int = 10
     poll_timeout: float = 0.01
     batch_streaming: bool = False  # Allow streaming requests in batched decode
@@ -97,6 +100,9 @@ class OllamaConfig:
     auto_start: bool = True  # Automatically start Ollama server if not running
     binary_path: str = "ollama"  # Path to ollama binary
 
+    # Concurrency (dispatch layer)
+    max_concurrent: int = 4  # Max concurrent HTTP requests to Ollama server
+
     @classmethod
     def from_dict(cls, data: dict[str, Any], model: str = "") -> "OllamaConfig":
         """Create config from dictionary (ollama section of config file).
@@ -120,6 +126,7 @@ class OllamaConfig:
             warmup=data.get("warmup", True),
             auto_start=data.get("auto_start", True),
             binary_path=data.get("binary_path", "ollama"),
+            max_concurrent=data.get("max_concurrent", 4),
         )
 
 
@@ -311,6 +318,9 @@ class VLLMServerConfig:
     # Warmup
     warmup: bool = True
 
+    # Concurrency (dispatch layer)
+    max_concurrent: int = 4  # Max concurrent HTTP requests to vLLM server
+
     @classmethod
     def from_dict(
         cls, data: dict[str, Any], model_path: str = ""
@@ -397,17 +407,34 @@ class InferenceConfig:
                 linear=backends.get("linear", "pytorch"),
             ),
             engines=cls._parse_engines_config(data.get("engines", {}) or {}),
-            dispatch=DispatchConfig(
-                handler=dispatch.get("handler", "bounded"),
-                max_pending=dispatch.get("max_pending", 10),
-                poll_timeout=dispatch.get("poll_timeout", 0.01),
-                batch_streaming=dispatch.get("batch_streaming", False),
-            ),
+            dispatch=cls._parse_dispatch_config(dispatch),
             api=cls._parse_api_config(data.get("api", {}) or {}),
             logging=ThirdPartyLoggingConfig(
                 torch=logging.get("torch", "warning"),
                 transformers=logging.get("transformers", "error"),
             ),
+        )
+
+    @classmethod
+    def _parse_dispatch_config(cls, dispatch: dict[str, Any]) -> DispatchConfig:
+        """Parse dispatch config with handler primary/fallback support."""
+        handler = dispatch.get("handler", {})
+
+        # Support both dict (primary/fallback) and string (legacy) formats
+        if isinstance(handler, dict):
+            handler_primary = handler.get("primary", "concurrent_http")
+            handler_fallback = handler.get("fallback", "bounded")
+        else:
+            # Legacy string format: use as fallback, default primary to concurrent_http
+            handler_primary = "concurrent_http"
+            handler_fallback = handler if handler else "bounded"
+
+        return DispatchConfig(
+            handler_primary=handler_primary,
+            handler_fallback=handler_fallback,
+            max_pending=dispatch.get("max_pending", 10),
+            poll_timeout=dispatch.get("poll_timeout", 0.01),
+            batch_streaming=dispatch.get("batch_streaming", False),
         )
 
     @classmethod
