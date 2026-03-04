@@ -40,8 +40,12 @@ engines:
 
 # Dispatch configuration
 dispatch:
-  # Handler type: sequential, bounded, batching
-  handler: bounded
+  # Handler type: sequential, bounded, concurrent_http
+  # - primary: used for HTTP engines (vllm-server, ollama) - enables parallel requests
+  # - fallback: used for in-process engines (native, vllm)
+  handler:
+    primary: concurrent_http
+    fallback: bounded
 
   # Maximum pending requests before rejection (bounded/batching handlers)
   max_pending: 10
@@ -61,7 +65,7 @@ api:
 
   # Response timeout for client requests (seconds)
   # Note: First LoRA request may take 2+ minutes for kernel compilation
-  response_timeout: 30.0
+  response_timeout: 300.0
 
   # Uvicorn log isolation
   log_file: null          # Set to path to isolate uvicorn logs (e.g., .logs/uvicorn.log)

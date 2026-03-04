@@ -149,7 +149,7 @@ class EnvConfigOverride(ConfigOverride):
     - BLOCK_SIZE -> engines.native.block_size
     - MAX_BATCH_SIZE -> engines.native.max_batch_size
     - MAX_PENDING -> dispatch.max_pending
-    - HANDLER -> dispatch.handler
+    - HANDLER -> dispatch.handler_fallback
     - HOST -> api.host
     - PORT -> api.port
     """
@@ -160,7 +160,7 @@ class EnvConfigOverride(ConfigOverride):
         ("BLOCK_SIZE", "engines.native.block_size", int),
         ("MAX_BATCH_SIZE", "engines.native.max_batch_size", int),
         ("MAX_PENDING", "dispatch.max_pending", int),
-        ("HANDLER", "dispatch.handler", str),
+        ("HANDLER", "dispatch.handler_fallback", str),
         ("HOST", "api.host", str),
         ("PORT", "api.port", int),
     ]
@@ -208,7 +208,8 @@ class CliConfigOverride(ConfigOverride):
         if self.overrides.port is not None:
             config.api.port = self.overrides.port
         if self.overrides.handler is not None:
-            config.dispatch.handler = self.overrides.handler
+            # CLI --handler sets fallback (for in-process engines)
+            config.dispatch.handler_fallback = self.overrides.handler
         if self.overrides.log_file is not None:
             config.api.log_file = self.overrides.log_file
         if self.overrides.model_path is not None:

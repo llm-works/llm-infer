@@ -328,10 +328,37 @@ class BoundedHandlerFactory(HandlerFactory):
         )
 
 
+class ConcurrentHttpHandlerFactory(HandlerFactory):
+    """Factory for concurrent HTTP handler (vLLM server, Ollama)."""
+
+    def _get_max_concurrent(self, config: InferenceConfig) -> int:
+        """Get max_concurrent from the appropriate engine config."""
+        engine_type = config.backends.engine
+        if engine_type == "vllm-server":
+            return config.engines.vllm_server.max_concurrent
+        if engine_type == "ollama":
+            return config.engines.ollama.max_concurrent
+        raise ValueError(
+            f"concurrent_http handler only supports vllm-server/ollama, got: {engine_type}"
+        )
+
+    def create(
+        self, lg: Logger, engine: Any, config: InferenceConfig
+    ) -> RequestHandler:
+        from .handlers import ConcurrentHttpHandler
+
+        return ConcurrentHttpHandler(
+            engine,
+            max_pending=config.dispatch.max_pending,
+            max_concurrent=self._get_max_concurrent(config),
+        )
+
+
 # Handler factory registry
 HANDLER_FACTORIES: dict[str, HandlerFactory] = {
     "sequential": SequentialHandlerFactory(),
     "bounded": BoundedHandlerFactory(),
+    "concurrent_http": ConcurrentHttpHandlerFactory(),
 }
 
 

@@ -54,14 +54,14 @@ templates:
         open: ["<think>"]
         close: ["</think>"]
 
-  # vLLM settings for small models (≤1.5B) - skip CUDA graph capture, shorter context
+  # vLLM settings for small models and testing - skip CUDA graph capture, shorter context
   vllm_small: &vllm_small
     max_model_len: 4096
     vllm:
       enforce_eager: true  # Skip CUDA graph capture (small model, not worth 2min startup)
       max_num_seqs: 2
 
-  # vLLM settings for regular models (3B+) - standard 8K context
+  # vLLM settings for regular models - standard 8K context
   vllm_default: &vllm_default
     max_model_len: 8192
     vllm:
@@ -131,7 +131,7 @@ models:
     <<: *qwen_think
     <<: !deep *vllm_default
     vllm:
-      gpu_memory_gb: 16.0
+      gpu_memory_gb: 24.0
 
   qwen2.5-coder-32b-instruct-bnb-4bit:
     <<: *qwen_think
@@ -141,13 +141,13 @@ models:
 
   qwen2.5-0.5b-instruct-bnb-4bit:
     <<: *qwen_think
-    <<: !deep *vllm_small
+    <<: !deep *vllm_default
     vllm:
       gpu_memory_gb: 4.0
 
   qwen2.5-1.5b-instruct-bnb-4bit:
     <<: *qwen_think
-    <<: !deep *vllm_small
+    <<: !deep *vllm_default
     vllm:
       gpu_memory_gb: 4.0
 
@@ -161,7 +161,7 @@ models:
     <<: *qwen_think
     <<: !deep *vllm_default
     vllm:
-      gpu_memory_gb: 16.0
+      gpu_memory_gb: 24.0
 
   qwen2.5-32b-instruct-bnb-4bit:
     <<: *qwen_think

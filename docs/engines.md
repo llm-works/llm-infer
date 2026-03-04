@@ -60,6 +60,7 @@ auto_start: true               # Start Ollama if not running
 keep_alive: 5m                 # How long to keep model loaded
 num_ctx: null                  # Context window (null = model default)
 num_gpu: null                  # GPU layers (null = auto, 0 = CPU only)
+max_concurrent: 4              # Concurrent HTTP requests to Ollama
 ```
 
 ### Model Name Mapping
@@ -147,11 +148,23 @@ max_num_seqs: 256
 enable_prefix_caching: true
 dtype: auto
 
+# Dispatch layer concurrency
+max_concurrent: 4              # Concurrent HTTP requests to vLLM server
+
 # LoRA configuration
 lora:
   enabled: true
   base_path: /path/to/adapters
 ```
+
+### Parallel Requests
+
+llm-infer sends multiple concurrent HTTP requests to vLLM server, allowing vLLM's continuous
+batching to process them together. This achieves near-linear speedup:
+
+- 4 requests completing in ~1.3s instead of ~5s sequential
+- Configurable via `max_concurrent` (default: 4)
+- Works together with vLLM's `max_num_seqs` for internal batching
 
 ### LoRA Limitation
 

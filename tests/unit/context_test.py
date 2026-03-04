@@ -17,11 +17,11 @@ class TestEvent:
         assert Event.REQUESTED in _DEBUG_EVENTS
         assert Event.TOKENIZED in _DEBUG_EVENTS
         assert Event.PREFILLED in _DEBUG_EVENTS
-        assert Event.DECODED in _DEBUG_EVENTS
         assert Event.COMPLETE in _DEBUG_EVENTS
 
     def test_trace_events(self) -> None:
         """Test that trace events are not in debug set."""
+        assert Event.DECODED not in _DEBUG_EVENTS
         assert Event.DECODE not in _DEBUG_EVENTS
         assert Event.KV_ALLOC not in _DEBUG_EVENTS
         assert Event.KV_FREE not in _DEBUG_EVENTS

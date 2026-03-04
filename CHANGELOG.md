@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Parallel HTTP requests** for vLLM server and Ollama engines: llm-infer now sends concurrent HTTP
+  requests to leverage backend continuous batching, achieving near-linear speedup (4 requests in
+  ~1.3s vs ~5s sequential)
+- `max_concurrent` config option for HTTP engines: controls how many concurrent requests llm-infer
+  sends to the backend (default: 4). Configure in `engines.vllm_server.max_concurrent` or
+  `engines.ollama.max_concurrent`
+- New `ConcurrentHttpHandler` for HTTP-based engines with thread pool execution
 - Clean timeout error handling: request timeouts now log a single error line without stack traces
   and return proper 504 JSON response to clients
 - `gpu_memory_gb` config option for vLLM engines: specify absolute GPU memory limit in GB instead
@@ -18,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `dispatch.handler` config now supports primary/fallback structure: `handler.primary` for HTTP
+  engines (vllm-server, ollama), `handler.fallback` for in-process engines (native, vllm). Legacy
+  string format still supported for backward compatibility.
+- `decoded` request lifecycle event moved from DEBUG to TRACE log level (reduces log noise)
 - Refactored vLLM GPU memory resolution into shared `vllm_common.py` module
 
 ## [0.1.1] - 2026-02-25
