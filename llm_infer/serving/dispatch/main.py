@@ -342,11 +342,19 @@ class BootSequence:
 
         Shutdown order (reverse of boot):
         1. Stop memory ticker
-        2. Shutdown engine (releases GPU, destroys process groups)
-        3. Stop HTTP server
+        2. Shutdown handler (stops thread pool, fails pending requests)
+        3. Shutdown engine (releases GPU, destroys process groups)
+        4. Stop HTTP server
         """
         if self._memory_ticker and self._memory_ticker.is_running():
             self._memory_ticker.stop()
+
+        if self._handler is not None and hasattr(self._handler, "shutdown"):
+            self._lg.debug("shutting down handler...")
+            try:
+                self._handler.shutdown()
+            except Exception as e:
+                self._lg.warning("handler shutdown error", extra={"exception": e})
 
         if self._engine is not None:
             self._lg.debug("shutting down engine...")

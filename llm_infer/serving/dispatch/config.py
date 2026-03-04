@@ -460,7 +460,7 @@ class InferenceConfig:
             title="Inference Server",
             description="LLM inference with process isolation and OpenAI API compatibility",
             version="0.1.0",
-            response_timeout=api_data.get("response_timeout", 60.0),
+            response_timeout=api_data.get("response_timeout", 300.0),
             log_file=api_data.get("log_file"),
             uvicorn=uvicorn_config,
         )
