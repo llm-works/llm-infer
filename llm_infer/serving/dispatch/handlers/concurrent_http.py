@@ -43,6 +43,11 @@ class ConcurrentHttpHandler(RequestHandler):
             max_pending: Maximum number of pending requests before rejection.
             max_concurrent: Maximum concurrent HTTP requests to the backend.
         """
+        if max_pending <= 0:
+            raise ValueError(f"max_pending must be positive, got {max_pending}")
+        if max_concurrent <= 0:
+            raise ValueError(f"max_concurrent must be positive, got {max_concurrent}")
+
         super().__init__()
         self._engine = engine
         self.max_pending = max_pending

@@ -338,8 +338,9 @@ class ConcurrentHttpHandlerFactory(HandlerFactory):
             return config.engines.vllm_server.max_concurrent
         if engine_type == "ollama":
             return config.engines.ollama.max_concurrent
-        # Fallback for unknown engines
-        return 4
+        raise ValueError(
+            f"concurrent_http handler only supports vllm-server/ollama, got: {engine_type}"
+        )
 
     def create(
         self, lg: Logger, engine: Any, config: InferenceConfig

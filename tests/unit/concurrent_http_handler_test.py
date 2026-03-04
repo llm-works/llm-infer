@@ -1,6 +1,7 @@
 """Unit tests for ConcurrentHttpHandler."""
 
 import time
+from collections.abc import Generator
 from concurrent.futures import Future
 from unittest.mock import MagicMock
 
@@ -25,12 +26,43 @@ def _create_mock_engine() -> MagicMock:
     return engine
 
 
+@pytest.fixture
+def handler() -> Generator[ConcurrentHttpHandler, None, None]:
+    """Create a handler with deterministic cleanup."""
+    h = ConcurrentHttpHandler(_create_mock_engine(), max_pending=10, max_concurrent=2)
+    yield h
+    h.shutdown()
+
+
+class TestConcurrentHttpHandlerValidation:
+    """Tests for __init__ validation."""
+
+    def test_rejects_zero_max_pending(self) -> None:
+        """__init__ rejects max_pending <= 0."""
+        with pytest.raises(ValueError, match="max_pending must be positive"):
+            ConcurrentHttpHandler(_create_mock_engine(), max_pending=0)
+
+    def test_rejects_negative_max_pending(self) -> None:
+        """__init__ rejects negative max_pending."""
+        with pytest.raises(ValueError, match="max_pending must be positive"):
+            ConcurrentHttpHandler(_create_mock_engine(), max_pending=-1)
+
+    def test_rejects_zero_max_concurrent(self) -> None:
+        """__init__ rejects max_concurrent <= 0."""
+        with pytest.raises(ValueError, match="max_concurrent must be positive"):
+            ConcurrentHttpHandler(_create_mock_engine(), max_concurrent=0)
+
+    def test_rejects_negative_max_concurrent(self) -> None:
+        """__init__ rejects negative max_concurrent."""
+        with pytest.raises(ValueError, match="max_concurrent must be positive"):
+            ConcurrentHttpHandler(_create_mock_engine(), max_concurrent=-1)
+
+
 class TestConcurrentHttpHandlerSubmit:
     """Tests for submit() method."""
 
-    def test_submit_accepts_request(self) -> None:
+    def test_submit_accepts_request(self, handler: ConcurrentHttpHandler) -> None:
         """Submit accepts request when under capacity."""
-        handler = ConcurrentHttpHandler(_create_mock_engine(), max_pending=10)
         request = _create_request()
 
         result = handler.submit(request)
@@ -44,20 +76,23 @@ class TestConcurrentHttpHandlerSubmit:
         handler = ConcurrentHttpHandler(
             _create_mock_engine(), max_pending=2, max_concurrent=1
         )
+        try:
+            # Fill to capacity
+            handler.submit(_create_request("req-1"))
+            handler.submit(_create_request("req-2"))
 
-        # Fill to capacity
-        handler.submit(_create_request("req-1"))
-        handler.submit(_create_request("req-2"))
+            # Should reject
+            result = handler.submit(_create_request("req-3"))
 
-        # Should reject
-        result = handler.submit(_create_request("req-3"))
+            assert result is False
+            assert handler.pending_count == 2
+        finally:
+            handler.shutdown()
 
-        assert result is False
-        assert handler.pending_count == 2
-
-    def test_submit_rejects_after_shutdown(self) -> None:
+    def test_submit_rejects_after_shutdown(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
         """Submit rejects requests after shutdown called."""
-        handler = ConcurrentHttpHandler(_create_mock_engine())
         handler._shutdown = True
 
         result = handler.submit(_create_request())
@@ -67,14 +102,18 @@ class TestConcurrentHttpHandlerSubmit:
     def test_is_saturated_at_max_pending(self) -> None:
         """is_saturated returns True when at max_pending."""
         handler = ConcurrentHttpHandler(_create_mock_engine(), max_pending=2)
-        handler.submit(_create_request("req-1"))
-        handler.submit(_create_request("req-2"))
+        try:
+            handler.submit(_create_request("req-1"))
+            handler.submit(_create_request("req-2"))
 
-        assert handler.is_saturated is True
+            assert handler.is_saturated is True
+        finally:
+            handler.shutdown()
 
-    def test_is_saturated_below_max_pending(self) -> None:
+    def test_is_saturated_below_max_pending(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
         """is_saturated returns False when below max_pending."""
-        handler = ConcurrentHttpHandler(_create_mock_engine(), max_pending=10)
         handler.submit(_create_request())
 
         assert handler.is_saturated is False
@@ -83,11 +122,10 @@ class TestConcurrentHttpHandlerSubmit:
 class TestConcurrentHttpHandlerStep:
     """Tests for step() method."""
 
-    def test_step_promotes_queued_to_in_flight(self) -> None:
+    def test_step_promotes_queued_to_in_flight(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
         """step() promotes queued requests to in_flight."""
-        handler = ConcurrentHttpHandler(
-            _create_mock_engine(), max_pending=10, max_concurrent=2
-        )
         handler.submit(_create_request("req-1"))
         handler.submit(_create_request("req-2"))
         handler.submit(_create_request("req-3"))
@@ -98,11 +136,8 @@ class TestConcurrentHttpHandlerStep:
         assert len(handler.queue) == 1
         assert len(handler.in_flight) == 2
 
-    def test_step_respects_max_concurrent(self) -> None:
+    def test_step_respects_max_concurrent(self, handler: ConcurrentHttpHandler) -> None:
         """step() doesn't exceed max_concurrent in-flight."""
-        handler = ConcurrentHttpHandler(
-            _create_mock_engine(), max_pending=10, max_concurrent=2
-        )
         # Submit more than max_concurrent
         for i in range(5):
             handler.submit(_create_request(f"req-{i}"))
@@ -112,11 +147,10 @@ class TestConcurrentHttpHandlerStep:
         assert len(handler.in_flight) == 2
         assert len(handler.queue) == 3
 
-    def test_step_collects_completed_futures(self) -> None:
+    def test_step_collects_completed_futures(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
         """step() collects responses from completed futures."""
-        engine = _create_mock_engine()
-        handler = ConcurrentHttpHandler(engine, max_pending=10, max_concurrent=2)
-
         # Create a completed future manually
         future: Future[Response] = Future()
         response = Response(
@@ -133,10 +167,10 @@ class TestConcurrentHttpHandlerStep:
         assert responses[0].status == RequestStatus.COMPLETED
         assert "req-1" not in handler.in_flight
 
-    def test_step_handles_future_exception(self) -> None:
+    def test_step_handles_future_exception(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
         """step() handles exceptions from futures gracefully."""
-        handler = ConcurrentHttpHandler(_create_mock_engine())
-
         # Create a future that raises exception
         future: Future[Response] = Future()
         future.set_exception(RuntimeError("test error"))
@@ -176,18 +210,14 @@ class TestConcurrentHttpHandlerShutdown:
             assert response.status == RequestStatus.FAILED
             assert "shutting down" in response.error
 
-    def test_shutdown_sets_flag(self) -> None:
+    def test_shutdown_sets_flag(self, handler: ConcurrentHttpHandler) -> None:
         """shutdown() sets the shutdown flag."""
-        handler = ConcurrentHttpHandler(_create_mock_engine())
-
         handler.shutdown()
 
         assert handler._shutdown is True
 
-    def test_shutdown_waits_for_in_flight(self) -> None:
+    def test_shutdown_waits_for_in_flight(self, handler: ConcurrentHttpHandler) -> None:
         """shutdown() waits for in-flight requests to complete."""
-        handler = ConcurrentHttpHandler(_create_mock_engine(), max_concurrent=2)
-
         # Submit and promote a request
         handler.submit(_create_request())
         handler._promote_to_in_flight()
@@ -201,11 +231,10 @@ class TestConcurrentHttpHandlerShutdown:
 class TestConcurrentHttpHandlerProperties:
     """Tests for handler properties."""
 
-    def test_pending_count_includes_queue_and_in_flight(self) -> None:
+    def test_pending_count_includes_queue_and_in_flight(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
         """pending_count includes both queued and in-flight requests."""
-        handler = ConcurrentHttpHandler(
-            _create_mock_engine(), max_pending=10, max_concurrent=2
-        )
         handler.queue.append(_create_request("req-1"))
         handler.queue.append(_create_request("req-2"))
 
@@ -218,8 +247,10 @@ class TestConcurrentHttpHandlerProperties:
         """engine property returns the configured engine."""
         engine = _create_mock_engine()
         handler = ConcurrentHttpHandler(engine)
-
-        assert handler.engine is engine
+        try:
+            assert handler.engine is engine
+        finally:
+            handler.shutdown()
 
 
 class TestConcurrentHttpHandlerProcessing:
@@ -230,19 +261,18 @@ class TestConcurrentHttpHandlerProcessing:
         engine = _create_mock_engine()
         engine.generate.side_effect = RuntimeError("engine error")
         handler = ConcurrentHttpHandler(engine)
-        request = _create_request()
+        try:
+            request = _create_request()
 
-        response = handler._process_request_threadsafe(request)
+            response = handler._process_request_threadsafe(request)
 
-        assert response.status == RequestStatus.FAILED
-        assert "engine error" in (response.error or "")
+            assert response.status == RequestStatus.FAILED
+            assert "engine error" in (response.error or "")
+        finally:
+            handler.shutdown()
 
-    def test_full_request_lifecycle(self) -> None:
+    def test_full_request_lifecycle(self, handler: ConcurrentHttpHandler) -> None:
         """Test complete request lifecycle: submit -> step until complete."""
-        engine = _create_mock_engine()
-        engine.generate.return_value = "generated text"
-        handler = ConcurrentHttpHandler(engine, max_pending=10, max_concurrent=4)
-
         # Submit request
         request = _create_request("req-1")
         assert handler.submit(request) is True

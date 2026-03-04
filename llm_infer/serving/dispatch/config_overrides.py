@@ -160,7 +160,7 @@ class EnvConfigOverride(ConfigOverride):
         ("BLOCK_SIZE", "engines.native.block_size", int),
         ("MAX_BATCH_SIZE", "engines.native.max_batch_size", int),
         ("MAX_PENDING", "dispatch.max_pending", int),
-        ("HANDLER", "dispatch.handler", str),
+        ("HANDLER", "dispatch.handler_fallback", str),
         ("HOST", "api.host", str),
         ("PORT", "api.port", int),
     ]

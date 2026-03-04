@@ -41,8 +41,8 @@ engines:
 # Dispatch configuration
 dispatch:
   # Handler type: sequential, bounded, concurrent_http
-  # Note: For HTTP engines (vllm-server, ollama), concurrent_http is auto-selected
-  # to enable parallel requests. This setting only affects native/vllm engines.
+  # - primary: used for HTTP engines (vllm-server, ollama) - enables parallel requests
+  # - fallback: used for in-process engines (native, vllm)
   handler:
     primary: concurrent_http
     fallback: bounded
