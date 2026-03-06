@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **LoRA adapter warmup**: adapters are warmed up during server boot with short generations to
+  verify they load correctly and produce EOS tokens. Adapters that hit max_tokens without EOS
+  (indicating potential training issues) are logged with warnings.
 - **Parallel HTTP requests** for vLLM server and Ollama engines: llm-infer now sends concurrent HTTP
   requests to leverage backend continuous batching, achieving near-linear speedup (4 requests in
   ~1.3s vs ~5s sequential)

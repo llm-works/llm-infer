@@ -1,6 +1,6 @@
 """LoRA adapter warmup utilities."""
 
-from typing import Any
+from typing import Any, Protocol
 
 from appinfra.log import Logger
 from appinfra.time import since, start
@@ -8,8 +8,15 @@ from appinfra.time import since, start
 from ..adapters import AdapterManager
 
 
+class LoraRequest(Protocol):
+    """Protocol for LoRA request objects expected by vLLM engine."""
+
+    @property
+    def lora_name(self) -> str: ...
+
+
 class _WarmupLoraRequest:
-    """Simple LoRA request for warmup (needs lora_name attribute for vllm-server)."""
+    """Simple LoRA request for warmup."""
 
     def __init__(self, name: str) -> None:
         self.lora_name = name
@@ -39,13 +46,16 @@ def warmup_adapters(
     lg.debug("warming up LoRA adapters...", extra={"count": len(adapters)})
     t0 = start()
 
+    failed = 0
     for adapter in adapters:
-        _warmup_single_adapter(lg, engine, adapter.key)
+        if not _warmup_single_adapter(lg, engine, adapter.key):
+            failed += 1
 
-    lg.info(
-        "all adapters warmed up",
-        extra={"after": since(t0), "count": len(adapters)},
-    )
+    extra = {"after": since(t0), "count": len(adapters), "failed": failed}
+    if failed:
+        lg.warning("adapter warmup completed with failures", extra=extra)
+    else:
+        lg.info("all adapters warmed up", extra=extra)
 
 
 # Warmup prompts with varying expected response lengths to catch partial EOS learning
@@ -55,8 +65,8 @@ _WARMUP_PROMPTS = [
 ]
 
 
-def _warmup_single_adapter(lg: Logger, engine: Any, adapter_key: str) -> None:
-    """Warmup a single LoRA adapter with multiple prompts."""
+def _warmup_single_adapter(lg: Logger, engine: Any, adapter_key: str) -> bool:
+    """Warmup a single LoRA adapter with multiple prompts. Returns True on success."""
     t0 = start()
     lora_req = _WarmupLoraRequest(adapter_key)
 
@@ -64,11 +74,12 @@ def _warmup_single_adapter(lg: Logger, engine: Any, adapter_key: str) -> None:
         if not _test_adapter_prompt(
             lg, engine, lora_req, adapter_key, prompt, max_tokens, t0
         ):
-            return  # Stop on first failure
+            return False
 
     lg.info(
         "adapter warmup complete", extra={"after": since(t0), "adapter": adapter_key}
     )
+    return True
 
 
 def _test_adapter_prompt(
