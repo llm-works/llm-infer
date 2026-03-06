@@ -786,14 +786,17 @@ class VLLMServerEngine:
         content: str = message.get("content") or ""
         tool_calls = message.get("tool_calls")
         usage = data.get("usage", {})
+        finish_reason = choice.get("finish_reason")
 
         # Verify adapter was actually used
         response_model = data.get("model", "")
         adapter_info = self._verify_adapter_response(response_model, lora_request)
 
-        # Build response dict if we have extra info
-        if tool_calls or usage or adapter_info:
+        # Build response dict if we have extra info (includes finish_reason for warmup checks)
+        if tool_calls or usage or adapter_info or lora_request:
             result: dict[str, Any] = {"content": content}
+            if finish_reason:
+                result["finish_reason"] = finish_reason
             if tool_calls:
                 result["tool_calls"] = tool_calls
             if usage:
