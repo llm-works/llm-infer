@@ -33,14 +33,16 @@ class ProgressTracker:
         label, progress_field = _PHASE_LABELS.get(phase, (phase, None))
         action_ing, action_ed = _PHASE_ACTIONS.get(phase, ("loading", "loaded"))
 
-        if current == 0:
+        # Ensure phase is initialized before progress/completion
+        if phase not in self._start_times:
             self._on_phase_start(phase, total, action_ing, label)
-        elif current < total:
+
+        if current >= total:
+            self._on_phase_complete(phase, action_ed, label)
+        elif current > 0:
             self._on_phase_progress(
                 phase, current, total, action_ing, label, progress_field
             )
-        else:
-            self._on_phase_complete(phase, action_ed, label)
 
     def _on_phase_start(
         self, phase: str, total: int, action_ing: str, label: str

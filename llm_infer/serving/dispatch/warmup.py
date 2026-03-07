@@ -153,19 +153,52 @@ def _test_adapter_eos(
         )
         return False
 
-    if _extract_finish_reason(output) == "length":
+    return _verify_adapter_output(lg, output, adapter_key, max_tokens, t0)
+
+
+def _verify_adapter_output(
+    lg: Logger,
+    output: str | dict[str, Any],
+    adapter_key: str,
+    max_tokens: int,
+    t0: float,
+) -> bool:
+    """Verify adapter output: check fallback and finish_reason."""
+    extra = {"adapter": adapter_key, "max_tokens": max_tokens}
+
+    if _check_adapter_fallback(output):
+        lg.warning("adapter warmup: vLLM fell back to base model", extra=extra)
+        return False
+
+    finish_reason = _extract_finish_reason(output)
+
+    if finish_reason == "unknown":
+        lg.info(
+            "adapter warmed up (EOS verification skipped)",
+            extra={"after": since(t0), **extra},
+        )
+        return True
+
+    if finish_reason == "length":
         lg.warning(
             "adapter warmup: hit max_tokens without EOS - may generate infinitely. "
             "Check training data for proper EOS tokens.",
-            extra={"adapter": adapter_key, "max_tokens": max_tokens},
+            extra=extra,
         )
         return False
 
-    lg.info(
-        "adapter warmed up",
-        extra={"after": since(t0), "adapter": adapter_key, "max_tokens": max_tokens},
-    )
+    lg.info("adapter warmed up", extra={"after": since(t0), **extra})
     return True
+
+
+def _check_adapter_fallback(output: str | dict[str, Any]) -> bool:
+    """Check if vLLM fell back to base model instead of using requested adapter."""
+    if not isinstance(output, dict):
+        return False
+    adapter_info = output.get("adapter_info")
+    if not isinstance(adapter_info, dict):
+        return False
+    return bool(adapter_info.get("fallback", False))
 
 
 def _extract_finish_reason(output: str | dict[str, Any]) -> str:
