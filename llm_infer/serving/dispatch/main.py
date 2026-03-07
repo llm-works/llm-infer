@@ -21,8 +21,8 @@ from .errors import ExceptionHandler
 from .factories import get_engine_factory, get_handler_factory
 from .handler import RequestHandler
 from .loop import run_engine_loop
-from .lora import warmup_adapters
 from .progress import ProgressTracker
+from .warmup import warmup_adapters, warmup_base_model
 
 # ---------------------------------------------------------------------------
 # Engine and handler creation via factories
@@ -192,26 +192,7 @@ class BootSequence:
         if not factory.warmup_enabled(self._config):
             return
 
-        self._lg.debug("running warmup query...")
-        t0 = start()
-
-        # Use embed() for embedding models, generate() for generative
-        if getattr(self._engine, "supports_embeddings", lambda: False)():
-            self._engine.embed(["warmup"])
-            self._lg.info(
-                "warmup complete", extra={"after": since(t0), "type": "embed"}
-            )
-        else:
-            output = self._engine.generate("Say hello", max_tokens=8)
-            # Handle both str and dict responses (some engines include usage data)
-            text = output["content"] if isinstance(output, dict) else output
-            # Limit split to first 100 chars for token counting (warmup output is tiny anyway)
-            self._lg.info(
-                "warmup complete",
-                extra={"after": since(t0), "tokens": len(text[:100].split())},
-            )
-
-        # Warmup LoRA adapters if any are registered
+        warmup_base_model(self._lg, self._engine)
         warmup_adapters(self._lg, self._engine, self._adapter_manager)
 
     def mark_ready(self) -> None:

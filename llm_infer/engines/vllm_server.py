@@ -211,16 +211,6 @@ class VLLMServerStreamingIterator:
                 "adapter mismatch: vLLM used different model than requested",
                 extra={"requested": requested, "actual": actual},
             )
-        else:
-            meta = self._adapter_metadata
-            self._lg.debug(
-                "verified LoRA adapter",
-                extra={
-                    "key": requested,
-                    "mtime": meta.get("mtime", ""),
-                    "md5": meta.get("md5", ""),
-                },
-            )
         self.adapter_info = _build_adapter_info(
             requested, actual, fallback, None if fallback else self._adapter_metadata
         )
@@ -332,6 +322,9 @@ class VLLMServerEngine:
         if adapters:
             self._init_adapters(adapters)
 
+        # Cached from /v1/models query during connection verification
+        self._max_model_len: int | None = None
+
         self._client = httpx.Client(
             base_url=self._base_url,
             timeout=httpx.Timeout(config.timeout, connect=10.0),
@@ -384,7 +377,7 @@ class VLLMServerEngine:
                 "md5": adapter.md5 or "unknown",
                 "mtime": adapter.mtime or "unknown",
             }
-            self._lg.debug(
+            self._lg.info(
                 "registered adapter",
                 extra={
                     "key": adapter.key,
@@ -563,7 +556,15 @@ class VLLMServerEngine:
             response = self._client.get("/v1/models")
             response.raise_for_status()
             data = response.json()
-            models = [m.get("id", "") for m in data.get("data", [])]
+            model_list = data.get("data", [])
+            models = [m.get("id", "") for m in model_list]
+
+            # Cache max_model_len from base model (first in list, parent=null)
+            for m in model_list:
+                if m.get("parent") is None and m.get("max_model_len"):
+                    self._max_model_len = m["max_model_len"]
+                    break
+
             self._lg.info(
                 "connected to vllm server",
                 extra={"url": self._base_url, "models": models},
@@ -620,6 +621,11 @@ class VLLMServerEngine:
     def model_name(self) -> str:
         """Return model name used for API requests."""
         return self._model_name
+
+    @property
+    def max_model_len(self) -> int | None:
+        """Return max model length from vLLM server, or None if unknown."""
+        return self._max_model_len
 
     @property
     def eos_token_id(self) -> int | None:
@@ -756,16 +762,6 @@ class VLLMServerEngine:
             self._lg.warning(
                 "adapter mismatch: vLLM used different model than requested",
                 extra={"requested": requested, "actual": response_model},
-            )
-        else:
-            meta = self._adapter_metadata.get(requested, {})
-            self._lg.debug(
-                "verified LoRA adapter",
-                extra={
-                    "key": requested,
-                    "mtime": meta.get("mtime", ""),
-                    "md5": meta.get("md5", ""),
-                },
             )
         return _build_adapter_info(
             requested,
