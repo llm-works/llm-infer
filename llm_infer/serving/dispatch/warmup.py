@@ -42,7 +42,7 @@ def warmup_base_model(lg: Logger, engine: Any) -> None:
         text = output["content"] if isinstance(output, dict) else output
         lg.info(
             "base model warmed up",
-            extra={"after": since(t0), "tokens": len(text[:100].split())},
+            extra={"after": since(t0), "words": len(text[:100].split())},
         )
 
 
