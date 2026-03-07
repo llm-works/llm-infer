@@ -11,8 +11,15 @@ from ..adapters import AdapterManager
 # Default max_model_len when engine doesn't provide it
 _DEFAULT_MAX_MODEL_LEN = 4096
 
-# Constrained prompt that should complete quickly with a definite answer
-_WARMUP_PROMPT = "What is 2+2? Answer with just the number."
+# Prompts calibrated to different response lengths for EOS stress testing.
+# Each prompt is designed to naturally produce roughly that many tokens,
+# allowing us to test EOS behavior at different generation lengths.
+_WARMUP_PROMPTS: dict[int, str] = {
+    32: "What is 2+2? Answer with just the number.",
+    128: "Explain addition in one paragraph.",
+    512: "Describe how neural networks learn through backpropagation.",
+    2048: "Write a detailed guide explaining gradient descent optimization.",
+}
 
 
 @dataclass
@@ -42,14 +49,9 @@ def _get_max_model_len(engine: Any) -> int:
 
 
 def _build_token_sweep(max_model_len: int) -> list[int]:
-    """Build geometric sweep: 128, 512, 2048, ... up to max_model_len // 2."""
-    sweep = []
-    tokens = 128
+    """Build sweep from available prompts, capped at max_model_len // 2."""
     cap = max_model_len // 2
-    while tokens <= cap:
-        sweep.append(tokens)
-        tokens *= 4
-    return sweep
+    return [t for t in sorted(_WARMUP_PROMPTS.keys()) if t <= cap]
 
 
 def _extract_finish_reason(output: str | dict[str, Any]) -> str:
@@ -76,11 +78,12 @@ def _run_warmup_test(
     lora_request: _WarmupLoraRequest | None = None,
 ) -> tuple[WarmupResult, str | dict[str, Any]]:
     """Run single warmup test, return result and raw output."""
+    prompt = _WARMUP_PROMPTS[max_tokens]
     kwargs: dict[str, Any] = {"max_tokens": max_tokens}
     if lora_request is not None:
         kwargs["lora_request"] = lora_request
 
-    output = engine.generate(_WARMUP_PROMPT, **kwargs)
+    output = engine.generate(prompt, **kwargs)
     finish_reason = _extract_finish_reason(output)
     return WarmupResult(max_tokens=max_tokens, finish_reason=finish_reason), output
 
@@ -184,10 +187,11 @@ def warmup_adapters(
 def _warmup_adapters_simple(lg: Logger, engine: Any, adapters: list[Any]) -> None:
     """Simple adapter warmup without baseline comparison."""
     t0 = start()
+    min_tokens = min(_WARMUP_PROMPTS.keys())
     for adapter in adapters:
         lora_req = _WarmupLoraRequest(adapter.key)
         try:
-            _run_warmup_test(engine, 128, lora_req)
+            _run_warmup_test(engine, min_tokens, lora_req)
             lg.info("adapter warmed up", extra={"adapter": adapter.key})
         except Exception as e:
             lg.error(
