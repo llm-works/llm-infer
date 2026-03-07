@@ -1,6 +1,6 @@
 """Model and adapter warmup utilities."""
 
-from typing import Any, Protocol
+from typing import Any
 
 from appinfra.log import Logger
 from appinfra.time import since, start
@@ -15,13 +15,6 @@ _STRESS_PROMPT = (
     "Write a detailed, comprehensive guide explaining how neural networks learn. "
     "Cover backpropagation, gradient descent, activation functions, and optimization."
 )
-
-
-class LoraRequest(Protocol):
-    """Protocol for LoRA request objects expected by vLLM engine."""
-
-    @property
-    def lora_name(self) -> str: ...
 
 
 class _WarmupLoraRequest:
@@ -70,6 +63,10 @@ def warmup_adapters(
 
     If an adapter produces finish_reason="length" instead of "stop",
     it likely has a training issue where EOS tokens weren't learned.
+
+    Note: EOS verification only works with vLLM-server engine, which returns finish_reason
+    in generate() responses. The native vLLM engine returns plain strings, so EOS checks
+    are skipped (finish_reason is "unknown").
     """
     if adapter_manager is None:
         return
