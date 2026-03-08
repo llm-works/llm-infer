@@ -31,7 +31,7 @@ from ....schemas.openai import (
     Role,
     ToolCall,
 )
-from ..errors import raise_for_error_status
+from ..errors import raise_for_error_status, submit_or_timeout
 from .mappers import (
     chat_request_to_internal,
     completion_request_to_internal,
@@ -220,15 +220,16 @@ async def _handle_chat_non_streaming(
 ) -> ChatCompletionResponse | JSONResponse:
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
-    response = await ipc.submit(request_id, internal_request)
+    response = await submit_or_timeout(ipc, request_id, internal_request)
+    if isinstance(response, JSONResponse):
+        return response
     raise_for_error_status(response)
 
     thinking, content = _extract_and_separate_thinking(
         response.result or "", body.think, model_config
     )
     tool_calls = _convert_tool_calls(getattr(response, "tool_calls", None))
-    has_tool_calls = bool(tool_calls)
-    finish_reason = _determine_chat_finish_reason(response, body, has_tool_calls)
+    finish_reason = _determine_chat_finish_reason(response, body, bool(tool_calls))
 
     chat_response = _build_chat_response(
         request_id,
@@ -288,7 +289,9 @@ async def _handle_completion_non_streaming(
 ) -> CompletionResponse | JSONResponse:
     """Handle non-streaming legacy completion request."""
     internal_request = completion_request_to_internal(body, request_id)
-    response = await ipc.submit(request_id, internal_request)
+    response = await submit_or_timeout(ipc, request_id, internal_request)
+    if isinstance(response, JSONResponse):
+        return response
     raise_for_error_status(response)
 
     completion_response = _build_completion_response_obj(
@@ -400,7 +403,7 @@ def _build_embedding_response(response: Any, model_name: str) -> EmbeddingRespon
 
 async def _handle_embedding_request(
     body: EmbeddingRequest, ipc: Any, model_name: str
-) -> EmbeddingResponse:
+) -> EmbeddingResponse | JSONResponse:
     """Process embedding request and return response."""
     from ...dispatch.types import EmbeddingRequest as InternalEmbeddingRequest
 
@@ -409,7 +412,9 @@ async def _handle_embedding_request(
     internal_request = InternalEmbeddingRequest(
         id=request_id, inputs=inputs, dimensions=body.dimensions
     )
-    response = await ipc.submit(request_id, internal_request)
+    response = await submit_or_timeout(ipc, request_id, internal_request)
+    if isinstance(response, JSONResponse):
+        return response
     raise_for_error_status(response)
     return _build_embedding_response(response, model_name)
 
@@ -418,7 +423,9 @@ def _register_embedding_routes(router: APIRouter, model_name: str) -> None:
     """Register embedding endpoints."""
 
     @router.post("/embeddings", response_model=EmbeddingResponse)
-    async def embeddings(body: EmbeddingRequest, request: Request) -> EmbeddingResponse:
+    async def embeddings(
+        body: EmbeddingRequest, request: Request
+    ) -> EmbeddingResponse | JSONResponse:
         """Generate embeddings for input text(s)."""
         ipc = request.app.state.ipc_channel
         return await _handle_embedding_request(body, ipc, model_name)

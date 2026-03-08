@@ -12,6 +12,7 @@ from .streaming import (
     create_chat_chunk,
     create_completion_chunk,
     format_sse_done,
+    format_sse_error,
     format_sse_event,
 )
 
@@ -100,16 +101,23 @@ class StreamingGenerator(ABC):
         finish_reason = FinishReason.STOP
         tool_calls = None
         adapter: AdapterInfoResponse | None = None
-        async for chunk in self.ipc.submit_streaming(self.request_id, internal_request):
-            if chunk.is_final:
-                finish_reason = _map_finish_reason(chunk.finish_reason)
-                tool_calls = getattr(chunk, "tool_calls", None)
-                adapter = _extract_adapter_info(chunk)
-                break
-            if chunk.token:
-                content = self.create_content_chunk(chunk.token)
-                if content:  # Skip empty chunks (e.g., normalizer buffering)
-                    yield content
+        try:
+            async for chunk in self.ipc.submit_streaming(
+                self.request_id, internal_request
+            ):
+                if chunk.is_final:
+                    finish_reason = _map_finish_reason(chunk.finish_reason)
+                    tool_calls = getattr(chunk, "tool_calls", None)
+                    adapter = _extract_adapter_info(chunk)
+                    break
+                if chunk.token:
+                    content = self.create_content_chunk(chunk.token)
+                    if content:  # Skip empty chunks (e.g., normalizer buffering)
+                        yield content
+        except TimeoutError as e:
+            yield format_sse_error(str(e), code="timeout")
+            yield format_sse_done()
+            return
 
         # Final chunk with finish_reason, tool_calls, and adapter info
         yield self.create_final_chunk(finish_reason, tool_calls, adapter)

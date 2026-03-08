@@ -29,6 +29,25 @@ def format_sse_done() -> str:
     return "data: [DONE]\n\n"
 
 
+def format_sse_error(
+    message: str, error_type: str = "server_error", code: str = "error"
+) -> str:
+    """Format error as SSE event.
+
+    Args:
+        message: Error message to include.
+        error_type: Error type (e.g., "server_error").
+        code: Error code (e.g., "timeout").
+
+    Returns:
+        SSE-formatted error event string.
+    """
+    import json
+
+    error_data = {"error": {"message": message, "type": error_type, "code": code}}
+    return f"data: {json.dumps(error_data)}\n\n"
+
+
 def _convert_tool_calls_to_deltas(
     tool_calls: list[dict[str, Any]] | None,
 ) -> list[ToolCallDelta] | None:
