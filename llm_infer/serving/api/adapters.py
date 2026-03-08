@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from appinfra.log import Logger
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -54,16 +55,23 @@ def _get_ipc(request: Request) -> Any:
     return request.app.state.ipc_channel
 
 
+def _get_lg(request: Request) -> Logger:
+    """Get logger from app state."""
+    lg: Logger = request.app.state.lg
+    return lg
+
+
 async def _list_adapters(request: Request) -> AdapterListResponse | JSONResponse:
     """List all loaded adapters.
 
     Queries the main process for the current adapter list.
     """
+    lg = _get_lg(request)
     ipc = _get_ipc(request)
     request_id = f"adapter-list-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterListRequest(id=request_id)
 
-    response = await submit_or_timeout(ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
 
@@ -97,11 +105,12 @@ async def _refresh_adapters(
     This operation is performed in the main process, ensuring the
     adapter state used for inference validation is updated.
     """
+    lg = _get_lg(request)
     ipc = _get_ipc(request)
     request_id = f"adapter-refresh-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterRefreshRequest(id=request_id, key=key)
 
-    response = await submit_or_timeout(ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
 

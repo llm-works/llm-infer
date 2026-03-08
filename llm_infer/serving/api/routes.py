@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from appinfra.log import Logger
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -42,7 +43,7 @@ async def health_handler() -> HealthResponse:
 
 
 async def _handle_generate(
-    body: GenerateRequest, ipc: Any
+    lg: Logger, body: GenerateRequest, ipc: Any
 ) -> GenerateResponse | JSONResponse:
     """Handle generate request submission and response."""
     request_id = str(uuid.uuid4())
@@ -57,7 +58,7 @@ async def _handle_generate(
         use_chat_template=body.use_chat_template,
     )
 
-    response = await submit_or_timeout(ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -86,17 +87,19 @@ def create_routes(model_name: str) -> APIRouter:
         body: GenerateRequest, request: Request
     ) -> GenerateResponse | JSONResponse:
         """Generate text from a prompt."""
-        return await _handle_generate(body, request.app.state.ipc_channel)
+        lg: Logger = request.app.state.lg
+        return await _handle_generate(lg, body, request.app.state.ipc_channel)
 
     @router.get("/metrics")
     async def metrics(
         request: Request, reset_peak: bool = False
     ) -> dict | JSONResponse:
         """Get server metrics including GPU memory and KV cache usage."""
+        lg: Logger = request.app.state.lg
         ipc = request.app.state.ipc_channel
         request_id = str(uuid.uuid4())
         metrics_request = MetricsRequest(id=request_id, reset_peak=reset_peak)
-        response = await submit_or_timeout(ipc, request_id, metrics_request)
+        response = await submit_or_timeout(lg, ipc, request_id, metrics_request)
         if isinstance(response, JSONResponse):
             return response
         return format_metrics_for_api(response)

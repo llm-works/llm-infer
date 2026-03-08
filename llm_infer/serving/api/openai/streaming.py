@@ -1,5 +1,6 @@
 """SSE streaming utilities for OpenAI-compatible responses."""
 
+import json
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
@@ -42,8 +43,6 @@ def format_sse_error(
     Returns:
         SSE-formatted error event string.
     """
-    import json
-
     error_data = {"error": {"message": message, "type": error_type, "code": code}}
     return f"data: {json.dumps(error_data)}\n\n"
 

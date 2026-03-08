@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -211,7 +212,20 @@ def _build_adapter_fallback_headers(response: Any) -> dict[str, str]:
     return {}
 
 
+def _with_fallback_headers(
+    response_model: Any, raw_response: Any
+) -> Any | JSONResponse:
+    """Return response model, adding fallback headers if needed."""
+    headers = _build_adapter_fallback_headers(raw_response)
+    if headers:
+        return JSONResponse(
+            content=response_model.model_dump(mode="json"), headers=headers
+        )
+    return response_model
+
+
 async def _handle_chat_non_streaming(
+    lg: Logger,
     request_id: str,
     body: ChatCompletionRequest,
     model_name: str,
@@ -220,7 +234,7 @@ async def _handle_chat_non_streaming(
 ) -> ChatCompletionResponse | JSONResponse:
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
-    response = await submit_or_timeout(ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -229,7 +243,8 @@ async def _handle_chat_non_streaming(
         response.result or "", body.think, model_config
     )
     tool_calls = _convert_tool_calls(getattr(response, "tool_calls", None))
-    finish_reason = _determine_chat_finish_reason(response, body, bool(tool_calls))
+    has_tool_calls = bool(tool_calls)
+    finish_reason = _determine_chat_finish_reason(response, body, has_tool_calls)
 
     chat_response = _build_chat_response(
         request_id,
@@ -240,15 +255,7 @@ async def _handle_chat_non_streaming(
         response,
         tool_calls,
     )
-
-    # Add adapter fallback headers if needed
-    headers = _build_adapter_fallback_headers(response)
-    if headers:
-        return JSONResponse(
-            content=chat_response.model_dump(mode="json"),
-            headers=headers,
-        )
-    return chat_response
+    return _with_fallback_headers(chat_response, response)
 
 
 def _build_completion_response_obj(
@@ -282,6 +289,7 @@ def _build_completion_response_obj(
 
 
 async def _handle_completion_non_streaming(
+    lg: Logger,
     request_id: str,
     body: CompletionRequest,
     model_name: str,
@@ -289,7 +297,7 @@ async def _handle_completion_non_streaming(
 ) -> CompletionResponse | JSONResponse:
     """Handle non-streaming legacy completion request."""
     internal_request = completion_request_to_internal(body, request_id)
-    response = await submit_or_timeout(ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -297,14 +305,7 @@ async def _handle_completion_non_streaming(
     completion_response = _build_completion_response_obj(
         request_id, body, model_name, response
     )
-
-    headers = _build_adapter_fallback_headers(response)
-    if headers:
-        return JSONResponse(
-            content=completion_response.model_dump(mode="json"),
-            headers=headers,
-        )
-    return completion_response
+    return _with_fallback_headers(completion_response, response)
 
 
 def _create_model_info(model_name: str) -> ModelInfo:
@@ -330,6 +331,7 @@ def _register_model_routes(router: APIRouter, model_name: str) -> None:
 
 
 def _handle_chat_streaming(
+    lg: Logger,
     request_id: str,
     body: ChatCompletionRequest,
     model_name: str,
@@ -339,7 +341,7 @@ def _handle_chat_streaming(
     """Handle streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
     normalizer = _create_normalizer(body.think, model_config)
-    generator = ChatStreamingGenerator(request_id, model_name, ipc, normalizer)
+    generator = ChatStreamingGenerator(lg, request_id, model_name, ipc, normalizer)
     return StreamingResponse(
         generator.stream(internal_request),
         media_type="text/event-stream",
@@ -355,14 +357,15 @@ def _register_chat_completion_routes(
     async def chat_completions(
         body: ChatCompletionRequest, request: Request
     ) -> ChatCompletionResponse | StreamingResponse | JSONResponse:
+        lg: Logger = request.app.state.lg
         ipc = request.app.state.ipc_channel
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
             return _handle_chat_streaming(
-                request_id, body, model_name, ipc, model_config
+                lg, request_id, body, model_name, ipc, model_config
             )
         return await _handle_chat_non_streaming(
-            request_id, body, model_name, ipc, model_config
+            lg, request_id, body, model_name, ipc, model_config
         )
 
 
@@ -373,16 +376,19 @@ def _register_legacy_completion_routes(router: APIRouter, model_name: str) -> No
     async def completions(
         body: CompletionRequest, request: Request
     ) -> CompletionResponse | StreamingResponse | JSONResponse:
+        lg: Logger = request.app.state.lg
         ipc = request.app.state.ipc_channel
         request_id = f"cmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
             internal_request = completion_request_to_internal(body, request_id)
-            generator = CompletionStreamingGenerator(request_id, model_name, ipc)
+            generator = CompletionStreamingGenerator(lg, request_id, model_name, ipc)
             return StreamingResponse(
                 generator.stream(internal_request),
                 media_type="text/event-stream",
             )
-        return await _handle_completion_non_streaming(request_id, body, model_name, ipc)
+        return await _handle_completion_non_streaming(
+            lg, request_id, body, model_name, ipc
+        )
 
 
 def _build_embedding_response(response: Any, model_name: str) -> EmbeddingResponse:
@@ -402,7 +408,7 @@ def _build_embedding_response(response: Any, model_name: str) -> EmbeddingRespon
 
 
 async def _handle_embedding_request(
-    body: EmbeddingRequest, ipc: Any, model_name: str
+    lg: Logger, body: EmbeddingRequest, ipc: Any, model_name: str
 ) -> EmbeddingResponse | JSONResponse:
     """Process embedding request and return response."""
     from ...dispatch.types import EmbeddingRequest as InternalEmbeddingRequest
@@ -412,7 +418,7 @@ async def _handle_embedding_request(
     internal_request = InternalEmbeddingRequest(
         id=request_id, inputs=inputs, dimensions=body.dimensions
     )
-    response = await submit_or_timeout(ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -427,8 +433,9 @@ def _register_embedding_routes(router: APIRouter, model_name: str) -> None:
         body: EmbeddingRequest, request: Request
     ) -> EmbeddingResponse | JSONResponse:
         """Generate embeddings for input text(s)."""
+        lg: Logger = request.app.state.lg
         ipc = request.app.state.ipc_channel
-        return await _handle_embedding_request(body, ipc, model_name)
+        return await _handle_embedding_request(lg, body, ipc, model_name)
 
 
 def create_openai_router(

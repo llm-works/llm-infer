@@ -7,6 +7,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
+
 from ....schemas.openai import AdapterInfoResponse, FinishReason, Role
 from .streaming import (
     create_chat_chunk,
@@ -57,7 +59,8 @@ class StreamingGenerator(ABC):
     with subclasses providing chunk creation specifics.
     """
 
-    def __init__(self, request_id: str, model: str, ipc: Any):
+    def __init__(self, lg: Logger, request_id: str, model: str, ipc: Any):
+        self._lg = lg
         self.request_id = request_id
         self.model = model
         self.ipc = ipc
@@ -90,6 +93,12 @@ class StreamingGenerator(ABC):
         """Create SSE event for the final chunk with finish reason."""
         pass
 
+    def _log_timeout(self, e: TimeoutError) -> None:
+        """Log IPC timeout error."""
+        self._lg.warning(
+            "IPC timeout", extra={"request_id": self.request_id, "error": str(e)}
+        )
+
     async def stream(self, internal_request: InternalRequest) -> AsyncIterator[str]:
         """Template method: execute the streaming algorithm."""
         # Optional header chunk
@@ -97,7 +106,6 @@ class StreamingGenerator(ABC):
         if header:
             yield header
 
-        # Stream tokens
         finish_reason = FinishReason.STOP
         tool_calls = None
         adapter: AdapterInfoResponse | None = None
@@ -115,6 +123,7 @@ class StreamingGenerator(ABC):
                     if content:  # Skip empty chunks (e.g., normalizer buffering)
                         yield content
         except TimeoutError as e:
+            self._log_timeout(e)
             yield format_sse_error(str(e), code="timeout")
             yield format_sse_done()
             return
@@ -134,12 +143,13 @@ class ChatStreamingGenerator(StreamingGenerator):
 
     def __init__(
         self,
+        lg: Logger,
         request_id: str,
         model: str,
         ipc: Any,
         normalizer: ThinkTagNormalizer | None = None,
     ):
-        super().__init__(request_id, model, ipc)
+        super().__init__(lg, request_id, model, ipc)
         self._normalizer = normalizer
 
     def create_header_chunk(self) -> str:
