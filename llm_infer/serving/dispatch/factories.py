@@ -267,12 +267,82 @@ class VLLMServerEngineFactory(EngineFactory):
         return 1
 
 
+class PEFTEngineFactory(EngineFactory):
+    """Factory for PEFT-backed inference engine.
+
+    Uses HuggingFace Transformers + PEFT for adapter inference.
+    Supports PROMPT_TUNING and other PEFT adapter types that vLLM
+    doesn't support.
+    """
+
+    def _validate_model_path(self, config: InferenceConfig) -> None:
+        """Validate model path is set."""
+        if config.models.path is None:
+            raise ValueError(
+                "models.path is required for PEFT engine "
+                "(set via config, --model-path, or MODEL_PATH)"
+            )
+
+    def _scan_adapters(self, lg: Logger, config: InferenceConfig) -> list[Any]:
+        """Scan for PEFT adapters (prompt-learning types only).
+
+        Returns list of LoadedAdapter objects for enabled adapters.
+        Only loads adapters that are compatible with the current base model
+        and are prompt-learning types (PROMPT_TUNING, PREFIX_TUNING, P_TUNING).
+        """
+        from ..adapters import AdapterManager
+
+        peft_cfg = config.engines.peft
+        if not peft_cfg.adapter_base_path:
+            return []
+
+        manager = AdapterManager(
+            lg,
+            peft_cfg.adapter_base_path,
+            base_model_path=config.models.path,
+            peft_type_filter=AdapterManager.PROMPT_LEARNING_TYPES,
+        )
+        manager.scan()
+        return manager.list()
+
+    def create(
+        self, lg: Logger, config: InferenceConfig, on_progress: Any = None
+    ) -> Any:
+        try:
+            from ...engines.peft import PEFTEngine
+        except ImportError as e:
+            raise ImportError(
+                "PEFT engine requested (backends.engine=peft) but dependencies "
+                "not installed. Install with: pip install transformers peft"
+            ) from e
+
+        self._validate_model_path(config)
+
+        # Scan adapters for metadata
+        adapters = self._scan_adapters(lg, config)
+
+        return PEFTEngine(
+            lg,
+            config.engines.peft,
+            model_path=str(config.models.path),
+            adapters=adapters or None,
+        )
+
+    def warmup_enabled(self, config: InferenceConfig) -> bool:
+        return config.engines.peft.warmup
+
+    def max_batch_size(self, config: InferenceConfig) -> int:
+        # PEFT handles one request at a time
+        return 1
+
+
 # Engine factory registry
 ENGINE_FACTORIES: dict[str, EngineFactory] = {
     "native": NativeEngineFactory(),
     "vllm": VLLMEngineFactory(),
     "vllm-server": VLLMServerEngineFactory(),
     "ollama": OllamaEngineFactory(),
+    "peft": PEFTEngineFactory(),
 }
 
 

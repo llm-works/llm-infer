@@ -1,0 +1,25 @@
+# PEFT engine configuration
+#
+# Uses HuggingFace Transformers + PEFT library for adapter inference.
+# Supports PROMPT_TUNING and other PEFT adapter types that vLLM doesn't support.
+#
+# Use for experimentation/evaluation, not production serving.
+# For production LoRA inference, use vllm-server instead.
+
+# Device and dtype
+device: cuda                  # Device to load model on (cuda, cpu)
+dtype: auto                   # Model dtype (auto, float16, bfloat16)
+
+# Adapter caching
+max_cached_adapters: 4        # LRU cache size for loaded adapters
+
+# Quantization (for large models)
+load_in_4bit: false           # Use bitsandbytes 4-bit quantization
+
+# Warmup: Run initial query on startup
+# Disabling for now since kv-cache and prompt tuning bug,
+# see: https://github.com/huggingface/peft/issues/2123
+warmup: false
+
+# Adapter directory
+adapter_base_path: !include "../.env.yaml#paths.adapters"

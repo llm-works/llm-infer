@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PEFT engine for PROMPT_TUNING adapters**: New `peft` engine type using HuggingFace Transformers
+  + PEFT library for adapter types that vLLM's `--enable-lora` doesn't support (PROMPT_TUNING,
+  PREFIX_TUNING, P_TUNING). Lazy-loads base model on first adapter request to minimize memory when
+  coexisting with other engines.
+- **Adapter peft_type detection**: AdapterManager reads `peft_type` from `adapter_config.json` and
+  stores it in `LoadedAdapter.peft_type`. Enables routing to appropriate backend based on adapter
+  type.
+- **TraceMiddleware for API debugging**: Request/response logging at TRACE level for `/v1/`
+  endpoints. Enable with `--log-level trace` to see full request bodies and responses.
 - **Model warmup with EOS verification**: base model and LoRA adapters warmed up with token sweep
   (32, 128, 512, 2048 tokens) using prompts calibrated to each length. Adapters flagged if they
   hit max_tokens where base model produced EOS (indicates training issue). Note: EOS verification

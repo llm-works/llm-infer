@@ -11,6 +11,7 @@ different trade-offs for ease of use, performance, and features.
 | `vllm-server` | HTTP to `vllm serve` subprocess | Pre-registered only | Production (full optimizations) |
 | `vllm` | Python API (in-process) | Dynamic loading | Dynamic LoRA adapters |
 | `native` | Custom torch implementation | No | Learning, experimentation |
+| `peft` | HuggingFace Transformers + PEFT | PROMPT_TUNING only | Prompt tuning adapters |
 
 ## Ollama Engine (Default)
 
@@ -335,6 +336,106 @@ warmup: true                  # Warmup on startup
 
 ---
 
+## PEFT Engine
+
+Uses HuggingFace Transformers + PEFT library for prompt-learning adapter types that vLLM's
+`--enable-lora` doesn't support: PROMPT_TUNING, PREFIX_TUNING, and P_TUNING.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────┐
+│               llm-infer process                 │
+│  ┌─────────┐    ┌─────────────────────────────┐ │
+│  │ FastAPI │────│       PEFT Engine           │ │
+│  │ server  │    │  ┌───────────┐ ┌──────────┐ │ │
+│  └─────────┘    │  │Transformers│ │  PEFT   │ │ │
+│                 │  │ AutoModel  │ │ Adapter │ │ │
+│                 │  └───────────┘ └──────────┘ │ │
+│                 └─────────────────────────────┘ │
+└─────────────────────────────────────────────────┘
+```
+
+- Lazy-loads base model on first adapter request (minimizes memory when coexisting with vLLM)
+- LRU cache for loaded adapters (configurable size)
+- Supports 4-bit quantization via bitsandbytes
+- Automatically routes PROMPT_TUNING requests away from vLLM
+
+### Why This Engine Exists
+
+vLLM's `--enable-lora` only supports LoRA adapters. When loading a PROMPT_TUNING adapter, vLLM
+fails with:
+
+```
+ValueError: Missing required configuration fields: {'r', 'target_modules', 'lora_alpha'}
+```
+
+The PEFT engine handles these non-LoRA adapter types using the PEFT library directly.
+
+### Supported Adapter Types
+
+| Adapter Type | Engine | Notes |
+|-------------|--------|-------|
+| LoRA | vllm, vllm-server | Use vLLM for best performance |
+| PROMPT_TUNING | peft | Soft prompts prepended to input |
+| PREFIX_TUNING | peft | Learnable prefix activations |
+| P_TUNING | peft | Continuous prompt embeddings |
+
+### Prerequisites
+
+```bash
+pip install transformers peft
+
+# Optional: 4-bit quantization
+pip install bitsandbytes
+```
+
+### Usage
+
+```bash
+llm-infer serve --engine peft --model-path /path/to/model
+```
+
+### Configuration
+
+```yaml
+# etc/peft.yaml
+device: cuda                  # Device to load model on
+dtype: auto                   # Model dtype (auto, float16, bfloat16)
+max_cached_adapters: 4        # LRU cache size for loaded adapters
+warmup: true                  # Run warmup on first adapter load
+load_in_4bit: false           # Use bitsandbytes 4-bit quantization
+adapter_base_path: /path/to/adapters  # Base directory for adapters
+```
+
+### Adapter Type Detection
+
+The PEFT engine automatically validates adapter types. When an adapter is requested:
+
+1. Reads `peft_type` from `adapter_config.json`
+2. Validates it's a supported prompt-learning type
+3. Rejects LoRA adapters with a helpful error directing to vLLM
+
+This prevents accidentally loading LoRA adapters through the slower PEFT engine.
+
+### Memory Management
+
+The engine uses lazy loading and LRU caching:
+
+- **Lazy loading**: Base model only loads on first adapter request
+- **LRU cache**: Keeps `max_cached_adapters` adapters in memory
+- **Automatic eviction**: Least-recently-used adapter deleted when cache is full
+
+### When to Use
+
+- PROMPT_TUNING, PREFIX_TUNING, or P_TUNING adapters
+- Non-LoRA adapter types that vLLM doesn't support
+- Research/experimentation with prompt-learning methods
+
+**Note:** For LoRA adapters, always use `vllm` or `vllm-server` for better performance.
+
+---
+
 ## Engine Selection Guide
 
 | Scenario | Recommended Engine |
@@ -347,6 +448,8 @@ warmup: true                  # Warmup on startup
 | E2E tests with temp adapters | `vllm` |
 | Process isolation | `vllm-server` |
 | Multi-GPU (tensor parallel) | `vllm-server` |
+| PROMPT_TUNING adapters | `peft` |
+| Non-LoRA adapter types | `peft` |
 | Learning/experimentation | `native` |
 
 ## Overriding Engine at Runtime

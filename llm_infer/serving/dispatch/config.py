@@ -353,6 +353,25 @@ class VLLMServerConfig:
 
 
 @dataclass
+class PEFTEngineConfig:
+    """PEFT engine configuration for PROMPT_TUNING and other PEFT adapters.
+
+    This engine uses HuggingFace Transformers + PEFT library directly,
+    as vLLM's --enable-lora only supports LoRA adapters.
+
+    Use with backends.engine=peft for PROMPT_TUNING adapter inference.
+    For LoRA adapters in production, use vllm-server instead.
+    """
+
+    device: str = "cuda"  # Device to load model on
+    dtype: str = "auto"  # Model dtype (auto, float16, bfloat16)
+    max_cached_adapters: int = 4  # LRU cache size for loaded adapters
+    warmup: bool = True  # Run warmup on first adapter load
+    load_in_4bit: bool = False  # Use bitsandbytes 4-bit quantization
+    adapter_base_path: str | None = None  # Base directory for adapter weights
+
+
+@dataclass
 class EnginesConfig:
     """Engine configurations container.
 
@@ -364,6 +383,7 @@ class EnginesConfig:
     vllm: VLLMConfig = field(default_factory=VLLMConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     vllm_server: VLLMServerConfig = field(default_factory=VLLMServerConfig)
+    peft: PEFTEngineConfig = field(default_factory=PEFTEngineConfig)
 
 
 @dataclass
@@ -530,6 +550,18 @@ class InferenceConfig:
         return VLLMServerConfig.from_dict(data)
 
     @classmethod
+    def _parse_peft_config(cls, data: dict[str, Any]) -> PEFTEngineConfig:
+        """Parse PEFT engine configuration."""
+        return PEFTEngineConfig(
+            device=data.get("device", "cuda"),
+            dtype=data.get("dtype", "auto"),
+            max_cached_adapters=data.get("max_cached_adapters", 4),
+            warmup=data.get("warmup", True),
+            load_in_4bit=data.get("load_in_4bit", False),
+            adapter_base_path=data.get("adapter_base_path"),
+        )
+
+    @classmethod
     def _parse_engines_config(cls, engines_data: dict[str, Any]) -> EnginesConfig:
         """Parse engines configuration section."""
         return EnginesConfig(
@@ -539,6 +571,7 @@ class InferenceConfig:
             vllm_server=cls._parse_vllm_server_config(
                 engines_data.get("vllm_server", {}) or {}
             ),
+            peft=cls._parse_peft_config(engines_data.get("peft", {}) or {}),
         )
 
     def apply_env_overrides(self) -> "InferenceConfig":

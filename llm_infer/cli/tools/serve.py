@@ -52,7 +52,7 @@ class ServeTool(Tool):
         )
         parser.add_argument(
             "--engine",
-            choices=["native", "vllm", "vllm-server", "ollama"],
+            choices=["native", "vllm", "vllm-server", "ollama", "peft"],
             help="Inference engine backend",
         )
         parser.add_argument(
