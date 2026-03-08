@@ -118,7 +118,7 @@ lora:
 device: cuda                  # Device to load model on
 dtype: auto                   # Model dtype (auto, float16, bfloat16)
 max_cached_adapters: 4        # LRU cache size for loaded adapters
-warmup: true                  # Run warmup on first adapter load
+warmup: false                 # Disabled: prompt-tuning KV cache bug causes ~30min warmup
 load_in_4bit: false           # Use bitsandbytes 4-bit quantization
 adapter_base_path: /path/to/adapters  # Base directory for adapters
 ```

@@ -514,11 +514,13 @@ class PEFTEngine:
     def _maybe_resolve_adapter_key(self, path_or_key: str) -> str:
         """Resolve adapter key to full path if needed.
 
-        If the input looks like a path (contains separator or exists), returns it as-is.
-        Otherwise, resolves it relative to adapter_base_path.
+        First checks the pre-scanned adapter map, then falls back to path resolution.
         """
         import os
 
+        # Check pre-scanned adapter map first (canonical resolved paths)
+        if path_or_key in self._adapter_paths:
+            return self._adapter_paths[path_or_key]
         # If it's already a path (has directory separator or exists), use it directly
         if os.path.sep in path_or_key or os.path.exists(path_or_key):
             return path_or_key
@@ -735,6 +737,8 @@ class PEFTEngine:
         """Start background thread for streaming generation."""
         import torch
 
+        streamer = gen_kwargs.get("streamer")
+
         def generate() -> None:
             try:
                 with torch.no_grad():
@@ -743,6 +747,9 @@ class PEFTEngine:
                     )
             except Exception as e:
                 error_holder.error = e
+                # Signal streamer to unblock iterator
+                if streamer is not None:
+                    streamer.end()
 
         Thread(target=generate).start()
 

@@ -309,6 +309,10 @@ class PEFTEngineFactory(EngineFactory):
         self, lg: Logger, config: InferenceConfig, on_progress: Any = None
     ) -> Any:
         try:
+            # Eagerly verify runtime dependencies (imported lazily in PEFTEngine)
+            import peft  # noqa: F401
+            import transformers  # noqa: F401
+
             from ...engines.peft import PEFTEngine
         except ImportError as e:
             raise ImportError(

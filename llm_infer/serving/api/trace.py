@@ -47,8 +47,10 @@ class TraceMiddleware(BaseHTTPMiddleware):
                     "body": body.decode(),
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            lg.error(
+                "failed to decode response body for tracing", extra={"exception": e}
+            )
         return Response(
             content=body,
             status_code=response.status_code,

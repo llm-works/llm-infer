@@ -366,7 +366,7 @@ Uses HuggingFace Transformers + PEFT library for prompt-learning adapter types t
 vLLM's `--enable-lora` only supports LoRA adapters. When loading a PROMPT_TUNING adapter, vLLM
 fails with:
 
-```
+```text
 ValueError: Missing required configuration fields: {'r', 'target_modules', 'lora_alpha'}
 ```
 
