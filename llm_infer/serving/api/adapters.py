@@ -132,6 +132,7 @@ def create_adapter_router() -> APIRouter:
         _list_adapters,
         methods=["GET"],
         response_model=AdapterListResponse,
+        responses={504: {"description": "Gateway Timeout"}},
         summary="List loaded adapters",
         description="Returns all adapters that are enabled and loaded for inference.",
     )
@@ -140,6 +141,7 @@ def create_adapter_router() -> APIRouter:
         _refresh_adapters,
         methods=["POST"],
         response_model=RefreshResponse,
+        responses={504: {"description": "Gateway Timeout"}},
         summary="Refresh adapters",
         description="Rescan adapter directory and reload enabled adapters.",
     )
