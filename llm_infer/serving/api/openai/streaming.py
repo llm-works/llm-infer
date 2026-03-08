@@ -1,5 +1,6 @@
 """SSE streaming utilities for OpenAI-compatible responses."""
 
+import json
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
@@ -27,6 +28,23 @@ def format_sse_event(data: str) -> str:
 def format_sse_done() -> str:
     """Format SSE done marker."""
     return "data: [DONE]\n\n"
+
+
+def format_sse_error(
+    message: str, error_type: str = "server_error", code: str = "error"
+) -> str:
+    """Format error as SSE event.
+
+    Args:
+        message: Error message to include.
+        error_type: Error type (e.g., "server_error").
+        code: Error code (e.g., "timeout").
+
+    Returns:
+        SSE-formatted error event string.
+    """
+    error_data = {"error": {"message": message, "type": error_type, "code": code}}
+    return f"data: {json.dumps(error_data)}\n\n"
 
 
 def _convert_tool_calls_to_deltas(

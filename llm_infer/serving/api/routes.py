@@ -7,12 +7,14 @@ import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from appinfra.log import Logger
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from ..dispatch.metrics import format_metrics_for_api
-from ..dispatch.types import MetricsRequest, MetricsResponse
+from ..dispatch.types import MetricsRequest
 from ..dispatch.types import Request as InternalRequest
-from .errors import raise_for_error_status
+from .errors import raise_for_error_status, submit_or_timeout
 from .schemas import GenerateRequest, GenerateResponse, HealthResponse
 
 
@@ -40,7 +42,9 @@ async def health_handler() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-async def _handle_generate(body: GenerateRequest, ipc: Any) -> GenerateResponse:
+async def _handle_generate(
+    lg: Logger, body: GenerateRequest, ipc: Any
+) -> GenerateResponse | JSONResponse:
     """Handle generate request submission and response."""
     request_id = str(uuid.uuid4())
     internal_request = InternalRequest(
@@ -54,7 +58,9 @@ async def _handle_generate(body: GenerateRequest, ipc: Any) -> GenerateResponse:
         use_chat_template=body.use_chat_template,
     )
 
-    response = await ipc.submit(request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    if isinstance(response, JSONResponse):
+        return response
     raise_for_error_status(response)
 
     return GenerateResponse(
@@ -62,6 +68,19 @@ async def _handle_generate(body: GenerateRequest, ipc: Any) -> GenerateResponse:
         prompt_tokens=response.prompt_tokens or 0,
         completion_tokens=response.completion_tokens or 0,
     )
+
+
+async def _handle_metrics(
+    lg: Logger, ipc: Any, reset_peak: bool
+) -> dict | JSONResponse:
+    """Handle metrics request submission and response."""
+    request_id = str(uuid.uuid4())
+    metrics_request = MetricsRequest(id=request_id, reset_peak=reset_peak)
+    response = await submit_or_timeout(lg, ipc, request_id, metrics_request)
+    if isinstance(response, JSONResponse):
+        return response
+    raise_for_error_status(response)
+    return format_metrics_for_api(response)
 
 
 def create_routes(model_name: str) -> APIRouter:
@@ -76,18 +95,29 @@ def create_routes(model_name: str) -> APIRouter:
     """
     router = APIRouter()
 
-    @router.post("/generate", response_model=GenerateResponse)
-    async def generate(body: GenerateRequest, request: Request) -> GenerateResponse:
+    @router.post(
+        "/generate",
+        response_model=GenerateResponse,
+        responses={504: {"description": "Gateway Timeout"}},
+    )
+    async def generate(
+        body: GenerateRequest, request: Request
+    ) -> GenerateResponse | JSONResponse:
         """Generate text from a prompt."""
-        return await _handle_generate(body, request.app.state.ipc_channel)
+        lg: Logger = request.state.lg
+        return await _handle_generate(lg, body, request.app.state.ipc_channel)
 
-    @router.get("/metrics")
-    async def metrics(request: Request, reset_peak: bool = False) -> dict:
+    @router.get(
+        "/metrics",
+        response_model=None,
+        responses={504: {"description": "Gateway Timeout"}},
+    )
+    async def metrics(
+        request: Request, reset_peak: bool = False
+    ) -> dict | JSONResponse:
         """Get server metrics including GPU memory and KV cache usage."""
-        ipc = request.app.state.ipc_channel
-        request_id = str(uuid.uuid4())
-        metrics_request = MetricsRequest(id=request_id, reset_peak=reset_peak)
-        response: MetricsResponse = await ipc.submit(request_id, metrics_request)
-        return format_metrics_for_api(response)
+        return await _handle_metrics(
+            request.state.lg, request.app.state.ipc_channel, reset_peak
+        )
 
     return router
