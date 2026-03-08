@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..dispatch.types import AdapterListRequest, AdapterRefreshRequest
-from .errors import submit_or_timeout
+from .errors import raise_for_error_status, submit_or_timeout
 
 
 class AdapterInfo(BaseModel):
@@ -74,6 +74,7 @@ async def _list_adapters(request: Request) -> AdapterListResponse | JSONResponse
     response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
+    raise_for_error_status(response)
 
     return AdapterListResponse(
         adapters=[
@@ -113,6 +114,7 @@ async def _refresh_adapters(
     response = await submit_or_timeout(lg, ipc, request_id, internal_request)
     if isinstance(response, JSONResponse):
         return response
+    raise_for_error_status(response)
 
     return RefreshResponse(
         key=response.key,

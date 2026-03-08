@@ -102,6 +102,7 @@ def create_routes(model_name: str) -> APIRouter:
         response = await submit_or_timeout(lg, ipc, request_id, metrics_request)
         if isinstance(response, JSONResponse):
             return response
+        raise_for_error_status(response)
         return format_metrics_for_api(response)
 
     return router
