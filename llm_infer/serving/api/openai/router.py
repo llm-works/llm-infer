@@ -357,7 +357,7 @@ def _register_chat_completion_routes(
     async def chat_completions(
         body: ChatCompletionRequest, request: Request
     ) -> ChatCompletionResponse | StreamingResponse | JSONResponse:
-        lg: Logger = request.app.state.lg
+        lg: Logger = request.state.lg
         ipc = request.app.state.ipc_channel
         request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
@@ -376,7 +376,7 @@ def _register_legacy_completion_routes(router: APIRouter, model_name: str) -> No
     async def completions(
         body: CompletionRequest, request: Request
     ) -> CompletionResponse | StreamingResponse | JSONResponse:
-        lg: Logger = request.app.state.lg
+        lg: Logger = request.state.lg
         ipc = request.app.state.ipc_channel
         request_id = f"cmpl-{uuid.uuid4().hex[:24]}"
         if body.stream:
@@ -433,7 +433,7 @@ def _register_embedding_routes(router: APIRouter, model_name: str) -> None:
         body: EmbeddingRequest, request: Request
     ) -> EmbeddingResponse | JSONResponse:
         """Generate embeddings for input text(s)."""
-        lg: Logger = request.app.state.lg
+        lg: Logger = request.state.lg
         ipc = request.app.state.ipc_channel
         return await _handle_embedding_request(lg, body, ipc, model_name)
 

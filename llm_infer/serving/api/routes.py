@@ -87,7 +87,7 @@ def create_routes(model_name: str) -> APIRouter:
         body: GenerateRequest, request: Request
     ) -> GenerateResponse | JSONResponse:
         """Generate text from a prompt."""
-        lg: Logger = request.app.state.lg
+        lg: Logger = request.state.lg
         return await _handle_generate(lg, body, request.app.state.ipc_channel)
 
     @router.get("/metrics", response_model=None)
@@ -95,7 +95,7 @@ def create_routes(model_name: str) -> APIRouter:
         request: Request, reset_peak: bool = False
     ) -> dict | JSONResponse:
         """Get server metrics including GPU memory and KV cache usage."""
-        lg: Logger = request.app.state.lg
+        lg: Logger = request.state.lg
         ipc = request.app.state.ipc_channel
         request_id = str(uuid.uuid4())
         metrics_request = MetricsRequest(id=request_id, reset_peak=reset_peak)

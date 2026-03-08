@@ -56,8 +56,8 @@ def _get_ipc(request: Request) -> Any:
 
 
 def _get_lg(request: Request) -> Logger:
-    """Get logger from app state."""
-    lg: Logger = request.app.state.lg
+    """Get logger from request state (injected by middleware)."""
+    lg: Logger = request.state.lg
     return lg
 
 
