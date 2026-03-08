@@ -90,7 +90,7 @@ def create_routes(model_name: str) -> APIRouter:
         lg: Logger = request.app.state.lg
         return await _handle_generate(lg, body, request.app.state.ipc_channel)
 
-    @router.get("/metrics")
+    @router.get("/metrics", response_model=None)
     async def metrics(
         request: Request, reset_peak: bool = False
     ) -> dict | JSONResponse:
