@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Iterator
-from threading import Lock
+from threading import Lock, Thread
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
@@ -20,6 +20,13 @@ if TYPE_CHECKING:
     from ..context import RequestContext
     from ..serving.adapters import LoadedAdapter
     from ..serving.dispatch.config import PEFTEngineConfig
+
+
+class _GenerationErrorHolder:
+    """Thread-safe holder for exceptions from background generation thread."""
+
+    def __init__(self) -> None:
+        self.error: BaseException | None = None
 
 
 class PEFTStreamingIterator:
@@ -32,11 +39,15 @@ class PEFTStreamingIterator:
         self,
         streamer: Any,  # TextIteratorStreamer
         prompt_tokens: int,
+        tokenizer: Any,
+        error_holder: _GenerationErrorHolder | None = None,
     ) -> None:
         self._streamer = streamer
+        self._tokenizer = tokenizer
         self._iter: Iterator[str] | None = None
         self._finished = False
-        self._completion_tokens = 0
+        self._accumulated_text = ""
+        self._error_holder = error_holder
 
         # Stats
         self.prompt_tokens: int = prompt_tokens
@@ -54,12 +65,22 @@ class PEFTStreamingIterator:
             self._iter = iter(self._streamer)
 
         try:
-            token = next(self._iter)
-            self._completion_tokens += 1
-            return token
+            chunk = next(self._iter)
+            self._accumulated_text += chunk
+            return chunk
         except StopIteration:
             self._finished = True
-            self.completion_tokens = self._completion_tokens
+            # Count actual tokens from accumulated text
+            if self._accumulated_text:
+                tokens = self._tokenizer.encode(
+                    self._accumulated_text, add_special_tokens=False
+                )
+                self.completion_tokens = len(tokens)
+            # Check if generation thread had an error
+            if self._error_holder and self._error_holder.error:
+                raise RuntimeError(
+                    f"Generation failed: {self._error_holder.error}"
+                ) from self._error_holder.error
             raise
 
 
@@ -695,8 +716,13 @@ class PEFTEngine:
             self._tokenizer, skip_prompt=True, skip_special_tokens=True
         )
         gen_kwargs["streamer"] = streamer
-        self._start_generation_thread(model, input_ids, attention_mask, gen_kwargs)
-        return PEFTStreamingIterator(streamer, prompt_tokens)
+        error_holder = _GenerationErrorHolder()
+        self._start_generation_thread(
+            model, input_ids, attention_mask, gen_kwargs, error_holder
+        )
+        return PEFTStreamingIterator(
+            streamer, prompt_tokens, self._tokenizer, error_holder
+        )
 
     def _start_generation_thread(
         self,
@@ -704,19 +730,21 @@ class PEFTEngine:
         input_ids: Any,
         attention_mask: Any,
         gen_kwargs: dict[str, Any],
+        error_holder: _GenerationErrorHolder,
     ) -> None:
         """Start background thread for streaming generation."""
-        import threading
-
         import torch
 
         def generate() -> None:
-            with torch.no_grad():
-                model.generate(
-                    input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs
-                )
+            try:
+                with torch.no_grad():
+                    model.generate(
+                        input_ids=input_ids, attention_mask=attention_mask, **gen_kwargs
+                    )
+            except Exception as e:
+                error_holder.error = e
 
-        threading.Thread(target=generate).start()
+        Thread(target=generate).start()
 
     def _build_stopping_criteria(self, stop_sequences: list[str]) -> Any:
         """Build stopping criteria from stop sequences."""

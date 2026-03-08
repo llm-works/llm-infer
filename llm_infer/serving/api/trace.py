@@ -66,7 +66,8 @@ class TraceMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
 
-        if is_api:
+        # Skip response logging for SSE streaming to preserve streaming behavior
+        if is_api and response.media_type != "text/event-stream":
             return await self._log_response(cast("Logger", lg), request, response)
 
         return cast(Response, response)
