@@ -327,10 +327,16 @@ class PEFTEngine:
             kwargs["torch_dtype"] = dtype
 
     def _resolve_dtype(self) -> Any:
-        """Resolve dtype string to torch dtype."""
+        """Resolve dtype string to torch dtype.
+
+        For 'auto', uses bfloat16 if supported by the device, otherwise float16.
+        """
         import torch
 
         if self._config.dtype == "auto":
+            # Prefer bfloat16 on supported hardware (Ampere+)
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                return torch.bfloat16
             return torch.float16
         dtype_map = {
             "float16": torch.float16,
@@ -751,7 +757,7 @@ class PEFTEngine:
                 if streamer is not None:
                     streamer.end()
 
-        Thread(target=generate).start()
+        Thread(target=generate, daemon=True).start()
 
     def _build_stopping_criteria(self, stop_sequences: list[str]) -> Any:
         """Build stopping criteria from stop sequences."""
