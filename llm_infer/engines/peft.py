@@ -398,7 +398,11 @@ class PEFTEngine:
                 config = json.load(f)
             peft_type: str | None = config.get("peft_type")
             return peft_type
-        except Exception:
+        except Exception as e:
+            self._lg.trace(
+                "failed to read adapter config",
+                extra={"config_path": config_path, "exception": e},
+            )
             return None
 
     # Prompt-learning types supported by this engine
@@ -779,10 +783,12 @@ class PEFTEngine:
         stop_sequences: list[str] | None,
     ) -> dict[str, Any]:
         """Build kwargs for model.generate()."""
+        # Use pad_token_id if set, otherwise fall back to eos_token_id
+        pad_token_id = self._tokenizer.pad_token_id or self._tokenizer.eos_token_id
         kwargs: dict[str, Any] = {
             "max_new_tokens": max_tokens,
             "do_sample": temperature > 0,
-            "pad_token_id": self._tokenizer.eos_token_id,
+            "pad_token_id": pad_token_id,
             "use_cache": False,  # Required for PROMPT_TUNING compatibility
         }
         if temperature > 0:

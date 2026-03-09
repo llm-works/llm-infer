@@ -343,7 +343,7 @@ Uses HuggingFace Transformers + PEFT library for prompt-learning adapter types t
 
 ### How It Works
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │               llm-infer process                 │
 │  ┌─────────┐    ┌─────────────────────────────┐ │
