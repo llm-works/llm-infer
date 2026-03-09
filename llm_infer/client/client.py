@@ -130,6 +130,16 @@ class LLMClient(ChatClient):
         """
         return self._backend.last_response
 
+    @property
+    def backoff(self) -> Backoff | None:
+        """Backoff configuration for retry behavior, if configured."""
+        return self._backoff
+
+    @property
+    def timeout(self) -> float:
+        """Total timeout in seconds for retry attempts (0 = retry forever)."""
+        return self._timeout
+
     def can_call(self) -> bool:
         """Check if a call would be allowed right now (non-blocking).
 

@@ -40,7 +40,8 @@ class Backend(ABC):
             response = await backend.chat_async(messages)
     """
 
-    # Rate limiter injected by LLMClient (optional)
+    # Rate limiter injected via set_rate_limiter() by LLMClient.
+    # Class-level default is safe here (None is immutable, always overwritten).
     _rate_limiter: RateLimiter | None = None
 
     @property

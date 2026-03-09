@@ -277,8 +277,8 @@ class LLMRouter(ChatClient):
             BackendUnavailableError: If backend unavailable after retries.
             Exception: For unexpected errors.
         """
-        backoff = client._backoff
-        timeout = client._timeout
+        backoff = client.backoff
+        timeout = client.timeout
         start_time = time.time()
 
         while True:
