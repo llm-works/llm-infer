@@ -233,10 +233,7 @@ class LLMClient(ChatClient):
             BackendRequestError: If HTTP error occurs and retries exhausted,
                 or if error is non-transient (e.g., 400 Bad Request).
         """
-        # Enforce rate limit (blocks until allowed)
-        if self._rate_limiter is not None:
-            self._rate_limiter.next()
-
+        # Note: Rate limiting is handled by Backend layer (set_rate_limiter)
         if self._backoff is None:
             return fn()
         self._apply_backoff_cooldown()
@@ -258,10 +255,7 @@ class LLMClient(ChatClient):
             BackendRequestError: If HTTP error occurs and retries exhausted,
                 or if error is non-transient (e.g., 400 Bad Request).
         """
-        # Enforce rate limit (run blocking call in thread to not block event loop)
-        if self._rate_limiter is not None:
-            await asyncio.to_thread(self._rate_limiter.next)
-
+        # Note: Rate limiting is handled by Backend layer (set_rate_limiter)
         if self._backoff is None:
             return await fn()
         await self._apply_backoff_cooldown_async()
@@ -365,10 +359,7 @@ class LLMClient(ChatClient):
         Yields:
             String tokens as they arrive.
         """
-        # Enforce rate limit (blocks until allowed)
-        if self._rate_limiter is not None:
-            self._rate_limiter.next()
-
+        # Note: Rate limiting is handled by Backend layer (set_rate_limiter)
         yield from self._backend.chat_stream(
             messages=messages,
             model=model or self._default_model,
@@ -472,10 +463,7 @@ class LLMClient(ChatClient):
         Yields:
             String tokens as they arrive.
         """
-        # Enforce rate limit (run blocking call in thread to not block event loop)
-        if self._rate_limiter is not None:
-            await asyncio.to_thread(self._rate_limiter.next)
-
+        # Note: Rate limiting is handled by Backend layer (set_rate_limiter)
         async for token in self._backend.chat_stream_async(
             messages=messages,
             model=model or self._default_model,

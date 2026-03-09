@@ -1,5 +1,6 @@
 """Unit tests for LLMClient facade and Factory."""
 
+import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -42,11 +43,15 @@ class MockBackend(Backend):
         return self._last_response
 
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> ChatResponse:
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
         response = next(self._responses)
         self._last_response = response
         return response
 
     def chat_stream(self, messages: list[dict[str, Any]], **kwargs: Any):
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
         response = next(self._responses)
         yield from response.content
         self._last_response = response
@@ -54,11 +59,15 @@ class MockBackend(Backend):
     async def chat_async(
         self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> ChatResponse:
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
         response = next(self._responses)
         self._last_response = response
         return response
 
     async def chat_stream_async(self, messages: list[dict[str, Any]], **kwargs: Any):
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
         response = next(self._responses)
         for char in response.content:
             yield char

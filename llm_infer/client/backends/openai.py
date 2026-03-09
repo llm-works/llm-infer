@@ -212,6 +212,8 @@ class OpenAICompatibleBackend(Backend):
 
     def list_models(self) -> list[str]:
         """List available models from this backend via /v1/models endpoint."""
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
         url = f"{self._base_url}/models"
         try:
             resp = self._client.get(url, headers=self._build_headers())
