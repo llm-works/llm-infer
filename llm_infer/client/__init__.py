@@ -63,7 +63,7 @@ from .backends import Backend, OpenAICompatibleBackend
 from .base import ChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .exceptions import (
+from .errors import (
     BackendError,
     BackendRequestError,
     BackendTimeoutError,

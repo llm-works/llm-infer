@@ -38,11 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Rate limiting moved to Backend layer**: Rate limiter is now injected into Backend and enforced
+  on all HTTP requests (including `list_models()` for model discovery), not just chat calls. This
+  ensures rate limiting applies uniformly to all external API calls.
 - `dispatch.handler` config now supports primary/fallback structure: `handler.primary` for HTTP
   engines (vllm-server, ollama), `handler.fallback` for in-process engines (native, vllm). Legacy
   string format still supported for backward compatibility.
 - `decoded` request lifecycle event moved from DEBUG to TRACE log level (reduces log noise)
 - Refactored vLLM GPU memory resolution into shared `vllm_common.py` module
+- Auto model resolution now retries on `BackendUnavailableError` if client has backoff configured,
+  waiting for backend to come up before falling back. Logs expected errors without stack traces.
+- **Internal**: Renamed `llm_infer.client.exceptions` module to `llm_infer.client.errors`. Public
+  API unchanged (import from `llm_infer.client` as before)
 
 ## [0.1.1] - 2026-02-25
 

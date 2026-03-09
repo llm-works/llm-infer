@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
 from ..types import ChatResponse
+
+if TYPE_CHECKING:
+    from appinfra.rate_limit import RateLimiter
 
 
 class Backend(ABC):
@@ -37,6 +40,10 @@ class Backend(ABC):
             response = await backend.chat_async(messages)
     """
 
+    # Rate limiter injected via set_rate_limiter() by LLMClient.
+    # Class-level default is safe here (None is immutable, always overwritten).
+    _rate_limiter: RateLimiter | None = None
+
     @property
     @abstractmethod
     def last_response(self) -> ChatResponse | None:
@@ -47,6 +54,14 @@ class Backend(ABC):
         be available at the end of generation.
         """
         ...
+
+    def set_rate_limiter(self, rate_limiter: RateLimiter | None) -> None:
+        """Set rate limiter for this backend.
+
+        Called by LLMClient to inject rate limiting. When set, all HTTP
+        requests will be rate limited.
+        """
+        self._rate_limiter = rate_limiter
 
     # =========================================================================
     # Sync methods

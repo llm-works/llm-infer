@@ -15,6 +15,7 @@ llm-infer Extensions:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
@@ -30,7 +31,7 @@ from ...schemas.openai import (
     Role,
     ToolCall,
 )
-from ..exceptions import (
+from ..errors import (
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
@@ -211,6 +212,8 @@ class OpenAICompatibleBackend(Backend):
 
     def list_models(self) -> list[str]:
         """List available models from this backend via /v1/models endpoint."""
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
         url = f"{self._base_url}/models"
         try:
             resp = self._client.get(url, headers=self._build_headers())
@@ -241,6 +244,8 @@ class OpenAICompatibleBackend(Backend):
 
     def _execute_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute sync request with error translation."""
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
         try:
             resp = self._client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
@@ -267,6 +272,8 @@ class OpenAICompatibleBackend(Backend):
         self, url: str, payload: dict[str, Any]
     ) -> Iterator[dict[str, Any]]:
         """Execute sync streaming request with error translation."""
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
         try:
             with self._client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
@@ -292,6 +299,8 @@ class OpenAICompatibleBackend(Backend):
 
     async def _execute_async(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute async request with error translation."""
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
         client = self._get_async_client()
         try:
             resp = await client.post(url, json=payload, headers=self._build_headers())
@@ -319,6 +328,8 @@ class OpenAICompatibleBackend(Backend):
         self, url: str, payload: dict[str, Any]
     ) -> AsyncIterator[dict[str, Any]]:
         """Execute async streaming request with error translation."""
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
         client = self._get_async_client()
         try:
             async with client.stream(
