@@ -33,6 +33,7 @@ class MockBackend(Backend):
         self, lg: Logger | None = None, responses: list[ChatResponse] | None = None
     ) -> None:
         self._lg = lg
+        self._rate_limiter = None  # May be set by LLMClient via set_rate_limiter()
         self._responses = iter(responses or [])
         self._last_response: ChatResponse | None = None
         self._closed = False
