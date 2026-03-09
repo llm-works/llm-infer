@@ -5,7 +5,7 @@ models: !include './models.yaml'
 
 # Backend configuration
 # Multi-level backend selection for flexibility in inference optimization:
-# - engine: Full inference engine (native | vllm | vllm-server | ollama) - REQUIRED
+# - engine: Full inference engine (native | vllm | vllm-server | ollama | peft) - REQUIRED
 # - model: Model implementation (native | gptqmodel) - only if engine=native
 # - linear: Kernel implementation (pytorch | marlin) - only if model=native
 #
@@ -13,12 +13,13 @@ models: !include './models.yaml'
 # - engine=vllm → uses engines.vllm config, ignores model/linear settings
 # - engine=vllm-server → connects to vllm serve subprocess, ignores model/linear
 # - engine=ollama → connects to Ollama server, ignores model/linear settings
+# - engine=peft → uses Transformers+PEFT for PROMPT_TUNING adapters (experimentation)
 # - engine=native, model=gptqmodel → ignores linear setting
 #
 # Default: ollama (easiest, works on CPU or GPU)
 # Override with --engine or change below
 backends:
-  engine: ollama        # ollama | vllm | vllm-server | native
+  engine: ollama        # ollama | vllm | vllm-server | native | peft
   model: native         # native | gptqmodel (only if engine=native)
   linear: marlin        # pytorch | marlin (only if model=native)
 
@@ -37,6 +38,9 @@ engines:
 
   # Ollama engine - connects to running Ollama server
   ollama: !include './ollama.yaml'
+
+  # PEFT engine - HuggingFace Transformers + PEFT for adapter inference
+  peft: !include './peft.yaml'
 
 # Dispatch configuration
 dispatch:

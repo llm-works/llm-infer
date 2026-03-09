@@ -13,6 +13,7 @@ etc/
 ├── vllm.yaml           # vLLM Python API settings
 ├── vllm-server.yaml    # vLLM HTTP server settings
 ├── native.yaml         # Native engine settings
+├── peft.yaml           # PEFT engine settings (PROMPT_TUNING adapters)
 ├── uvicorn.yaml        # HTTP server settings
 └── infra.yaml          # Logging configuration
 ```
@@ -24,7 +25,7 @@ The main config (`etc/llm-infer.yaml`) selects the engine and includes engine-sp
 ```yaml
 # Backend selection
 backends:
-  engine: ollama        # ollama | vllm | vllm-server | native
+  engine: ollama        # ollama | vllm | vllm-server | native | peft
 
 # Engine configs (loaded via !include)
 engines:
@@ -32,6 +33,7 @@ engines:
   vllm: !include './vllm.yaml'
   vllm_server: !include './vllm-server.yaml'
   ollama: !include './ollama.yaml'
+  peft: !include './peft.yaml'
 
 # API settings
 api:
@@ -109,6 +111,20 @@ lora:
   enabled: true
   base_path: /path/to/adapters
 ```
+
+### PEFT (`etc/peft.yaml`)
+
+```yaml
+device: cuda                  # Device to load model on
+dtype: auto                   # Model dtype (auto, float16, bfloat16)
+max_cached_adapters: 4        # LRU cache size for loaded adapters
+warmup: false                 # Disabled: prompt-tuning KV cache bug causes ~30min warmup
+load_in_4bit: false           # Use bitsandbytes 4-bit quantization
+adapter_base_path: /path/to/adapters  # Base directory for adapters
+```
+
+The PEFT engine is for PROMPT_TUNING, PREFIX_TUNING, and P_TUNING adapters that vLLM's
+`--enable-lora` doesn't support. For LoRA adapters, use `vllm` or `vllm-server` instead.
 
 ## Model Configuration
 

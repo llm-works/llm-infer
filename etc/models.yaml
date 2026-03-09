@@ -213,6 +213,27 @@ models:
     <<: !deep *vllm_default
 
   # ---------------------------------------------------------------------------
+  # Qwen3.5 instruct models (hybrid Mamba architecture)
+  # ---------------------------------------------------------------------------
+  qwen3.5-4b-instruct:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 16.0  # BF16 model ~8GB + headroom for KV cache
+
+  qwen3.5-4b-instruct-bnb-4bit-self:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 8.0  # 4-bit quantized ~3GB + headroom
+
+  qwen3.5-9b-instruct:
+    <<: *qwen_think
+    <<: !deep *vllm_default
+    vllm:
+      gpu_memory_gb: 32.0  # BF16 model ~19GB + headroom for KV cache
+
+  # ---------------------------------------------------------------------------
   # DeepSeek R1 distillations
   # ---------------------------------------------------------------------------
   deepseek-r1-distill-qwen-7b:

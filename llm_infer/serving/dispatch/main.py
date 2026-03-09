@@ -146,6 +146,7 @@ class BootSequence:
         """Phase 2: Load model and create engine.
 
         This is the heavy phase - triggers torch import and loads weights.
+        Also creates PEFT engine if enabled (lazy-loaded on first use).
         """
         self._engine = create_engine(self._lg, self._config)
 
@@ -156,35 +157,47 @@ class BootSequence:
         # Start periodic GPU stats logging
         self._start_memory_ticker()
 
+    def _get_adapter_base_path(self) -> str | None:
+        """Get adapter base path based on engine type."""
+        engine_type = self._config.backends.engine
+        if engine_type == "vllm":
+            lora_cfg = self._config.engines.vllm.lora
+            return lora_cfg.base_path if lora_cfg.enabled else None
+        if engine_type == "vllm-server":
+            lora_cfg = self._config.engines.vllm_server.lora
+            return lora_cfg.base_path if lora_cfg.enabled else None
+        if engine_type == "peft":
+            return self._config.engines.peft.adapter_base_path
+        return None
+
+    def _configure_adapters(self, adapter_base_path: str) -> None:
+        """Configure adapter manager for the handler."""
+        assert self._handler is not None
+        self._handler.set_lora_base_path(adapter_base_path)
+        peft_type_filter = None
+        if self._config.backends.engine == "peft":
+            peft_type_filter = AdapterManager.PROMPT_LEARNING_TYPES
+        self._adapter_manager = AdapterManager(
+            self._lg,
+            adapter_base_path,
+            base_model_path=self._config.models.path,
+            peft_type_filter=peft_type_filter,
+        )
+        count = self._adapter_manager.scan()
+        self._handler.set_adapter_manager(self._adapter_manager)
+        self._lg.info(
+            "adapters enabled",
+            extra={"base_path": adapter_base_path, "adapters_loaded": count},
+        )
+
     def create_handler(self) -> None:
         """Phase 3: Create request handler."""
         handler_type = _select_handler_type(self._config)
         self._handler = create_handler(self._lg, self._engine, self._config)
         self._lg.info("handler created", extra={"type": handler_type})
-
-        # Configure LoRA if enabled (use engine-specific config)
-        engine_type = self._config.backends.engine
-        if engine_type == "vllm":
-            lora_cfg = self._config.engines.vllm.lora
-        elif engine_type == "vllm-server":
-            lora_cfg = self._config.engines.vllm_server.lora
-        else:
-            lora_cfg = None
-
-        if lora_cfg and lora_cfg.enabled and lora_cfg.base_path:
-            self._handler.set_lora_base_path(lora_cfg.base_path)
-
-            # Initialize adapter manager and scan for adapters
-            # Pass base model path to filter out incompatible adapters
-            self._adapter_manager = AdapterManager(
-                self._lg, lora_cfg.base_path, base_model_path=self._config.models.path
-            )
-            count = self._adapter_manager.scan()
-            self._handler.set_adapter_manager(self._adapter_manager)
-            self._lg.info(
-                "LoRA enabled",
-                extra={"base_path": lora_cfg.base_path, "adapters_loaded": count},
-            )
+        adapter_base_path = self._get_adapter_base_path()
+        if adapter_base_path:
+            self._configure_adapters(adapter_base_path)
 
     def warmup(self) -> None:
         """Phase 4: Run warmup query if configured."""
@@ -292,23 +305,26 @@ class BootSequence:
             .with_version(cfg.version)
         )
 
-    def _build_server(self, model_name: str) -> Server:
-        """Build the HTTP server."""
-        cfg = self._config.api
+    def _build_routes(self, model_name: str) -> Any:
+        """Build routes configuration."""
+        from ..api.trace import TraceMiddleware
+
         health_handler = create_health_handler(self._ready)
-
-        # Get model config for server-side handling of system prompts and think mode
         model_config = self._config.models.get(model_name)
-
-        routes_builder = (
+        routes = (
             self._build_server_builder()
-            .routes.with_route("/health", health_handler)
+            .routes.with_middleware(TraceMiddleware)
+            .with_route("/health", health_handler)
             .with_router(create_routes(model_name))
             .with_router(create_openai_router(model_name, model_config), prefix="/v1")
             .with_exception_handler(Exception, ExceptionHandler(self._lg))
         )
-        routes_builder = self._add_lora_routes(routes_builder)
+        return self._add_lora_routes(routes)
 
+    def _build_server(self, model_name: str) -> Server:
+        """Build the HTTP server."""
+        cfg = self._config.api
+        routes_builder = self._build_routes(model_name)
         return cast(
             Server,
             routes_builder.done()
