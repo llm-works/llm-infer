@@ -463,35 +463,32 @@ class TestLLMClientRateLimiting:
         self, mock_lg: Logger
     ) -> None:
         """Test can_call returns True when rate limit allows."""
-        import time
+        from unittest.mock import MagicMock
 
         from appinfra.rate_limit import RateLimiter
 
-        rate_limiter = RateLimiter(mock_lg, per_minute=60)
-        # Set last_t to past time so can_proceed() returns True
-        # (last_t is the earliest time we're allowed to proceed)
-        rate_limiter.last_t = time.monotonic() - 1.0
+        rate_limiter = MagicMock(spec=RateLimiter)
+        rate_limiter.can_proceed.return_value = True
         backend = MockBackend()
         client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
 
         assert client.can_call() is True
+        rate_limiter.can_proceed.assert_called_once()
 
     def test_can_call_returns_false_when_rate_limited(self, mock_lg: Logger) -> None:
         """Test can_call returns False when rate limit exceeded."""
-        import time
+        from unittest.mock import MagicMock
 
         from appinfra.rate_limit import RateLimiter
 
-        rate_limiter = RateLimiter(mock_lg, per_minute=60)
-        # Set last_t to future time so can_proceed() returns False
-        # (last_t is the earliest time we're allowed to proceed)
-        rate_limiter.last_t = time.monotonic() + 10.0
+        rate_limiter = MagicMock(spec=RateLimiter)
+        rate_limiter.can_proceed.return_value = False
 
         backend = MockBackend()
         client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
 
-        # Should be rate limited (not yet reached last_t)
         assert client.can_call() is False
+        rate_limiter.can_proceed.assert_called_once()
 
     def test_rate_limiter_enforced_on_chat(self, mock_lg: Logger) -> None:
         """Test rate limiter is enforced (not just informational) on chat calls."""
