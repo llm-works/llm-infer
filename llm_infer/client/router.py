@@ -29,6 +29,7 @@ Example:
 
 from __future__ import annotations
 
+import time
 import types
 from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ from appinfra.log import Logger
 
 from .base import ChatClient
 from .client import LLMClient
+from .errors import BackendUnavailableError
 from .types import ChatResponse
 
 if TYPE_CHECKING:
@@ -146,7 +148,11 @@ class LLMRouter(ChatClient):
         return self._discovery
 
     def resolve(
-        self, model: str | None = None, backend: str | None = None
+        self,
+        model: str | None = None,
+        backend: str | None = None,
+        *,
+        retry: bool = True,
     ) -> ResolvedTarget:
         """Resolve which backend and model will be used for a request.
 
@@ -172,6 +178,8 @@ class LLMRouter(ChatClient):
         Args:
             model: Model to use (for routing and as the resolved model).
             backend: Explicit backend name (highest priority).
+            retry: If True (default) and client has backoff configured,
+                retry on backend unavailable. Set to False to fail fast.
 
         Returns:
             ResolvedTarget with resolved backend name and model.
@@ -196,7 +204,7 @@ class LLMRouter(ChatClient):
 
         # Resolve model on target backend
         client = self._clients[backend_name]
-        resolved_model = self._resolve_model(client, model)
+        resolved_model = self._resolve_model(client, model, retry=retry)
 
         return ResolvedTarget(backend=backend_name, model=resolved_model)
 
@@ -226,12 +234,15 @@ class LLMRouter(ChatClient):
         # Fall back to default
         return self._default
 
-    def _resolve_model(self, client: LLMClient, model: str | None) -> str | None:
+    def _resolve_model(
+        self, client: LLMClient, model: str | None, *, retry: bool = True
+    ) -> str | None:
         """Resolve model name, handling reserved names.
 
         Args:
             client: Target client to resolve model for.
             model: Model name (may be reserved like "auto" or "default").
+            retry: If True and client has backoff, retry on backend failure.
 
         Returns:
             Resolved model name, or None if no model configured.
@@ -242,15 +253,63 @@ class LLMRouter(ChatClient):
         if model == "default":
             default = client.default_model
             if default == "auto" or default is None:
-                return self._resolve_auto_model(client)
+                return self._resolve_auto_model(client, retry=retry)
             return default
 
         if model == "auto":
-            return self._resolve_auto_model(client)
+            return self._resolve_auto_model(client, retry=retry)
 
         return model
 
-    def _resolve_auto_model(self, client: LLMClient) -> str | None:
+    def _list_models_with_retry(
+        self, client: LLMClient, *, retry: bool = True
+    ) -> list[str]:
+        """List models from backend, retrying if backoff is configured.
+
+        Args:
+            client: Client to probe.
+            retry: If True and client has backoff, retry on failure.
+
+        Returns:
+            List of model names.
+
+        Raises:
+            BackendUnavailableError: If backend unavailable after retries.
+            Exception: For unexpected errors.
+        """
+        backoff = client._backoff
+        timeout = client._timeout
+        start_time = time.time()
+
+        while True:
+            try:
+                models = client.backend.list_models()
+                if backoff is not None:
+                    backoff.reset()
+                return models
+            except BackendUnavailableError as e:
+                if backoff is None or not retry:
+                    raise
+
+                # Check timeout
+                elapsed = time.time() - start_time
+                if timeout > 0 and elapsed >= timeout:
+                    self._lg.error(
+                        "model discovery timed out",
+                        extra={"error": str(e), "elapsed": elapsed},
+                    )
+                    raise
+
+                delay = backoff.next_delay()
+                self._lg.warning(
+                    "backend unavailable for model discovery, retrying",
+                    extra={"error": str(e), "delay": delay, "elapsed": elapsed},
+                )
+                time.sleep(delay)
+
+    def _resolve_auto_model(
+        self, client: LLMClient, *, retry: bool = True
+    ) -> str | None:
         """Resolve "auto" to an actual model by probing the backend.
 
         Resolution order:
@@ -258,20 +317,29 @@ class LLMRouter(ChatClient):
             2. If backend has configured default_model (non-auto), use it
             3. Use first model from list_models()
 
+        If retry=True and client has backoff configured, retries on
+        BackendUnavailableError until success or timeout.
+
         Args:
             client: Client to probe for available models.
+            retry: If True and client has backoff, retry on failure.
 
         Returns:
             Resolved model name, or None if no models available.
         """
         try:
-            models = client.backend.list_models()
+            models = self._list_models_with_retry(client, retry=retry)
+        except BackendUnavailableError as e:
+            self._lg.warning(
+                "failed to discover models for auto resolution",
+                extra={"error": str(e)},
+            )
+            return client.default_model if client.default_model != "auto" else None
         except Exception as e:
             self._lg.warning(
                 "failed to discover models for auto resolution",
                 extra={"exception": e},
             )
-            # Fall back to configured default (even if it's None)
             return client.default_model if client.default_model != "auto" else None
 
         if not models:

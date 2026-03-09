@@ -454,9 +454,14 @@ class TestLLMClientRateLimiting:
         self, mock_lg: Logger
     ) -> None:
         """Test can_call returns True when rate limit allows."""
+        import time
+
         from appinfra.rate_limit import RateLimiter
 
         rate_limiter = RateLimiter(mock_lg, per_minute=60)
+        # Set last_t to past time so can_proceed() returns True
+        # (last_t is the earliest time we're allowed to proceed)
+        rate_limiter.last_t = time.monotonic() - 1.0
         backend = MockBackend()
         client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
 
@@ -464,18 +469,19 @@ class TestLLMClientRateLimiting:
 
     def test_can_call_returns_false_when_rate_limited(self, mock_lg: Logger) -> None:
         """Test can_call returns False when rate limit exceeded."""
+        import time
+
         from appinfra.rate_limit import RateLimiter
 
         rate_limiter = RateLimiter(mock_lg, per_minute=60)
-        # Simulate a recent call by setting last_t
-        import time
-
-        rate_limiter.last_t = time.time()
+        # Set last_t to future time so can_proceed() returns False
+        # (last_t is the earliest time we're allowed to proceed)
+        rate_limiter.last_t = time.monotonic() + 10.0
 
         backend = MockBackend()
         client = LLMClient(lg=mock_lg, backend=backend, rate_limiter=rate_limiter)
 
-        # Should be rate limited (less than 1 second since last call)
+        # Should be rate limited (not yet reached last_t)
         assert client.can_call() is False
 
     def test_rate_limiter_enforced_on_chat(self, mock_lg: Logger) -> None:
@@ -627,7 +633,7 @@ class TestLLMClientRetry:
         """Test client retries on 429 rate limited error."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -651,7 +657,7 @@ class TestLLMClientRetry:
         """Test client retries on 500 internal server error."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -672,7 +678,7 @@ class TestLLMClientRetry:
         """Test client retries on 503 service unavailable."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -693,7 +699,7 @@ class TestLLMClientRetry:
         """Test client retries on 529 overloaded (Anthropic-specific)."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -714,7 +720,7 @@ class TestLLMClientRetry:
         """Test client retries on connection failure (BackendUnavailableError)."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendUnavailableError
+        from llm_infer.client.errors import BackendUnavailableError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -735,7 +741,7 @@ class TestLLMClientRetry:
         """Test client retries on transport error (no status code)."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -757,7 +763,7 @@ class TestLLMClientRetry:
         """Test client does not retry on non-transient errors (e.g., 400)."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -776,7 +782,7 @@ class TestLLMClientRetry:
         """Test client raises after timeout exceeded."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -795,7 +801,7 @@ class TestLLMClientRetry:
 
     def test_no_retry_when_backoff_not_configured(self, mock_lg: Logger) -> None:
         """Test client does not retry when backoff is not configured."""
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backend = MagicMock(spec=Backend)
         backend.chat.side_effect = BackendRequestError("Rate limited", status_code=429)
@@ -814,7 +820,7 @@ class TestLLMClientRetry:
         """Test async client retries on transient errors."""
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=0.01, max_delay=0.1, jitter=False)
         backend = MagicMock(spec=Backend)
@@ -844,7 +850,7 @@ class TestLLMClientRetry:
 
         from appinfra.rate_limit import Backoff
 
-        from llm_infer.client.exceptions import BackendRequestError
+        from llm_infer.client.errors import BackendRequestError
 
         backoff = Backoff(mock_lg, base=1.0, max_delay=60.0, jitter=False)
         backend = MagicMock(spec=Backend)

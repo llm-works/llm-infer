@@ -13,6 +13,7 @@ Key differences from OpenAI-compatible backends:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
@@ -26,7 +27,7 @@ from ...schemas.openai import (
     FunctionCall,
     ToolCall,
 )
-from ..exceptions import (
+from ..errors import (
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
@@ -287,6 +288,8 @@ class AnthropicBackend(Backend):
     @contextmanager
     def _handle_errors(self) -> Generator[None, None, None]:
         """Context manager to translate Anthropic exceptions to backend errors."""
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
         try:
             yield
         except self._anthropic.APIConnectionError as e:
@@ -303,6 +306,8 @@ class AnthropicBackend(Backend):
     @asynccontextmanager
     async def _handle_errors_async(self) -> AsyncGenerator[None, None]:
         """Async context manager to translate Anthropic exceptions to backend errors."""
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
         try:
             yield
         except self._anthropic.APIConnectionError as e:

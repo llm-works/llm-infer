@@ -37,7 +37,7 @@ from appinfra.rate_limit import Backoff, RateLimiter
 
 from .backends import Backend
 from .base import ChatClient
-from .exceptions import BackendRequestError, BackendUnavailableError
+from .errors import BackendRequestError, BackendUnavailableError
 from .types import ChatResponse
 
 # Non-5xx status codes that should trigger retry (5xx are always retried)
@@ -107,6 +107,9 @@ class LLMClient(ChatClient):
         self._rate_limiter = rate_limiter
         self._backoff = backoff
         self._timeout = timeout
+
+        # Inject rate limiter into backend for deep rate limiting
+        backend.set_rate_limiter(rate_limiter)
 
     @property
     def backend(self) -> Backend:

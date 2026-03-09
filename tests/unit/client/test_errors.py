@@ -1,4 +1,4 @@
-"""Unit tests for client exceptions."""
+"""Unit tests for client errors."""
 
 import pytest
 

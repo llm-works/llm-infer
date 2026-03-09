@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
-from .exceptions import ModelConflictError
+from .errors import ModelConflictError
 
 if TYPE_CHECKING:
     from .client import LLMClient
