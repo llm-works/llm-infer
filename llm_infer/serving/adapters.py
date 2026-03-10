@@ -144,6 +144,9 @@ class AdapterManager:
     # Prompt-learning peft types (for filtering when using PEFT engine)
     PROMPT_LEARNING_TYPES = {"PROMPT_TUNING", "PREFIX_TUNING", "P_TUNING"}
 
+    # LoRA peft types (for filtering when using vLLM engine)
+    LORA_TYPES = {"LORA"}
+
     def __init__(
         self,
         lg: Logger,
