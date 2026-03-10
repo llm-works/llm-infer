@@ -222,7 +222,8 @@ class VLLMServerEngineFactory(EngineFactory):
         """Scan for LoRA adapters if enabled.
 
         Returns list of LoadedAdapter objects for enabled adapters.
-        Only loads adapters that are compatible with the current base model.
+        Only loads adapters that are compatible with the current base model
+        and are LoRA type (excludes PROMPT_TUNING and other non-LoRA types).
         """
         from ..adapters import AdapterManager
 
@@ -231,7 +232,10 @@ class VLLMServerEngineFactory(EngineFactory):
             return []
 
         manager = AdapterManager(
-            lg, lora_cfg.base_path, base_model_path=config.models.path
+            lg,
+            lora_cfg.base_path,
+            base_model_path=config.models.path,
+            peft_type_filter=AdapterManager.LORA_TYPES,
         )
         manager.scan()
         return manager.list()
