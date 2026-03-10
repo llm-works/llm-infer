@@ -177,7 +177,7 @@ class BootSequence:
         peft_type_filter = None
         if self._config.backends.engine == "peft":
             peft_type_filter = AdapterManager.PROMPT_LEARNING_TYPES
-        elif self._config.backends.engine == "vllm-server":
+        elif self._config.backends.engine in ("vllm", "vllm-server"):
             peft_type_filter = AdapterManager.LORA_TYPES
         self._adapter_manager = AdapterManager(
             self._lg,
