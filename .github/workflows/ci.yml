@@ -67,7 +67,7 @@ jobs:
           # Use --extra-index-url to keep PyPI for torch's deps (networkx, etc.)
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
           # Install appinfra from GitHub (need unreleased FastAPI subprocess logger injection)
-          python -m pip install "appinfra[fastapi] @ git+https://github.com/serendip-ml/appinfra.git@develop"
+          python -m pip install "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
           # python -m pip install "appinfra>=0.4.0,<0.5.0"  # switch back after next appinfra release
           # Install package with dev, runtime, and saia extras
           python -m pip install -e ".[dev,runtime,saia]"
@@ -106,7 +106,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # Install appinfra from GitHub (need unreleased FastAPI subprocess logger injection)
-          python -m pip install "appinfra[fastapi] @ git+https://github.com/serendip-ml/appinfra.git@develop"
+          python -m pip install "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
           # python -m pip install "appinfra>=0.4.0,<0.5.0"  # switch back after next appinfra release
           python -m pip install -e .
 
@@ -193,7 +193,7 @@ jobs:
           # Use --extra-index-url to keep PyPI for torch's deps (networkx, etc.)
           python -m pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
           # Install appinfra from GitHub (need unreleased FastAPI subprocess logger injection)
-          python -m pip install "appinfra[fastapi] @ git+https://github.com/serendip-ml/appinfra.git@develop"
+          python -m pip install "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
           # python -m pip install "appinfra>=0.4.0,<0.5.0"  # switch back after next appinfra release
           # Install package with dev, runtime, and saia extras
           python -m pip install -e ".[dev,runtime,saia]"

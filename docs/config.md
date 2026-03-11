@@ -49,7 +49,7 @@ dispatch:
   max_pending: 10
 ```
 
-The `!include` directive is from [appinfra](https://github.com/serendip-ml/appinfra) and pulls in
+The `!include` directive is from [appinfra](https://github.com/llm-works/appinfra) and pulls in
 the contents of the referenced file at that location.
 
 ## Engine Configuration
