@@ -3,7 +3,7 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/serendip-ml/llm-infer.git
+git clone https://github.com/llm-works/llm-infer.git
 cd llm-infer
 
 # Install in development mode

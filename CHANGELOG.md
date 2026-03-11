@@ -118,6 +118,6 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/serendip-ml/llm-infer/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/serendip-ml/llm-infer/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/serendip-ml/llm-infer/releases/tag/v0.1.0
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/llm-works/llm-infer/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/llm-works/llm-infer/releases/tag/v0.1.0
