@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - vLLM added to `cuda` optional dependencies: `pip install llm-infer[cuda]` now includes vLLM
 - `make setup` now installs `dev,runtime,cuda` extras by default
 
+### Breaking Changes
+
+- **Renamed `ConfigurationError` to `ConfigError`** for brevity
+
 ### Changed
 
 - **Rate limiting moved to Backend layer**: Rate limiter is now injected into Backend and enforced
