@@ -13,6 +13,7 @@ etc/
 ├── vllm.yaml           # vLLM Python API settings
 ├── vllm-server.yaml    # vLLM HTTP server settings
 ├── native.yaml         # Native engine settings
+├── peft.yaml           # PEFT engine settings (PROMPT_TUNING adapters)
 ├── uvicorn.yaml        # HTTP server settings
 └── infra.yaml          # Logging configuration
 ```
@@ -24,7 +25,7 @@ The main config (`etc/llm-infer.yaml`) selects the engine and includes engine-sp
 ```yaml
 # Backend selection
 backends:
-  engine: ollama        # ollama | vllm | vllm-server | native
+  engine: ollama        # ollama | vllm | vllm-server | native | peft
 
 # Engine configs (loaded via !include)
 engines:
@@ -32,6 +33,7 @@ engines:
   vllm: !include './vllm.yaml'
   vllm_server: !include './vllm-server.yaml'
   ollama: !include './ollama.yaml'
+  peft: !include './peft.yaml'
 
 # API settings
 api:
@@ -41,11 +43,13 @@ api:
 
 # Request handling
 dispatch:
-  handler: bounded      # sequential | bounded | batching
+  handler:
+    primary: concurrent_http  # Used for HTTP engines (vllm-server, ollama)
+    fallback: bounded         # Used for in-process engines (native, vllm)
   max_pending: 10
 ```
 
-The `!include` directive is from [appinfra](https://github.com/serendip-ml/appinfra) and pulls in
+The `!include` directive is from [appinfra](https://github.com/llm-works/appinfra) and pulls in
 the contents of the referenced file at that location.
 
 ## Engine Configuration
@@ -62,12 +66,15 @@ keep_alive: 5m          # Keep model loaded after request
 num_ctx: null           # Context window (null = model default)
 num_gpu: null           # GPU layers (null = auto, 0 = CPU only)
 warmup: true            # Run warmup query on startup
+max_concurrent: 4       # Concurrent HTTP requests to Ollama
 ```
 
 ### vLLM (`etc/vllm.yaml`)
 
 ```yaml
-gpu_memory_utilization: 0.9
+# Memory: use gpu_memory_gb (absolute) OR gpu_memory_utilization (fraction)
+gpu_memory_gb: null             # e.g., 8.0 for 8GB limit (null = use utilization)
+gpu_memory_utilization: 0.9     # fraction of total VRAM (0-1)
 max_model_len: 16384
 tensor_parallel_size: 1
 max_num_seqs: 256
@@ -79,7 +86,7 @@ warmup: true
 lora:
   enabled: true
   max_loras: 4
-  max_lora_rank: 64
+  max_lora_rank: 128
   base_path: /path/to/adapters
 ```
 
@@ -92,16 +99,32 @@ auto_start: true        # Start `vllm serve` subprocess
 startup_timeout: 300    # vLLM model loading is slow
 timeout: 300
 
-gpu_memory_utilization: 0.95
+gpu_memory_gb: null             # e.g., 8.0 for 8GB limit
+gpu_memory_utilization: 0.95    # used if gpu_memory_gb is null
 max_model_len: null
 enforce_eager: true
 enable_prefix_caching: true
 tool_call_parser: hermes  # Tool call extraction
+max_concurrent: 4         # Concurrent HTTP requests to vLLM server
 
 lora:
   enabled: true
   base_path: /path/to/adapters
 ```
+
+### PEFT (`etc/peft.yaml`)
+
+```yaml
+device: cuda                  # Device to load model on
+dtype: auto                   # Model dtype (auto, float16, bfloat16)
+max_cached_adapters: 4        # LRU cache size for loaded adapters
+warmup: false                 # Disabled: prompt-tuning KV cache bug causes ~30min warmup
+load_in_4bit: false           # Use bitsandbytes 4-bit quantization
+adapter_base_path: /path/to/adapters  # Base directory for adapters
+```
+
+The PEFT engine is for PROMPT_TUNING, PREFIX_TUNING, and P_TUNING adapters that vLLM's
+`--enable-lora` doesn't support. For LoRA adapters, use `vllm` or `vllm-server` instead.
 
 ## Model Configuration
 
@@ -125,7 +148,7 @@ models:
     max_model_len: 4096
     vllm:
       enforce_eager: true
-      gpu_memory_utilization: 0.5
+      gpu_memory_gb: 4.0        # 4GB absolute limit
 
   qwen2.5-7b:
     ollama: qwen2.5:7b   # Ollama model name mapping

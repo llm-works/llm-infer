@@ -15,14 +15,14 @@ class BackendError(Exception):
     """
 
 
-class ConfigurationError(Exception):
+class ConfigError(Exception):
     """Base exception for configuration errors.
 
     Raised when client configuration is invalid or inconsistent.
     """
 
 
-class ModelConflictError(ConfigurationError):
+class ModelConflictError(ConfigError):
     """Same model found in multiple backends.
 
     Raised when the model routing table has a conflict - the same model ID

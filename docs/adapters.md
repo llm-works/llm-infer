@@ -1,12 +1,22 @@
-# LoRA Adapters
+# Adapters
 
-This guide covers LoRA adapter setup, versioning, and usage with `llm-infer`.
+This guide covers adapter setup, versioning, and usage with `llm-infer`. Supports both LoRA
+adapters (via vLLM) and prompt-learning adapters like PROMPT_TUNING (via PEFT engine).
 
 ## Overview
 
-LoRA (Low-Rank Adaptation) adapters allow fine-tuning large language models efficiently. `llm-infer`
-supports dynamic adapter loading, enabling you to switch between adapters at inference time without
-restarting the server.
+Adapters allow fine-tuning large language models efficiently. `llm-infer` supports multiple adapter
+types with automatic routing to the appropriate backend:
+
+| Adapter Type | Backend | Notes |
+|-------------|---------|-------|
+| LoRA | vllm, vllm-server | Efficient low-rank adaptation |
+| PROMPT_TUNING | peft | Soft prompts prepended to input |
+| PREFIX_TUNING | peft | Learnable prefix activations |
+| P_TUNING | peft | Continuous prompt embeddings |
+
+The server automatically detects adapter type from `adapter_config.json` and routes to the correct
+engine.
 
 ## Directory Structure
 
@@ -153,12 +163,31 @@ specific adapter.
 
 ## Engine Support
 
-| Engine | Dynamic Loading | Notes |
-|--------|-----------------|-------|
-| `vllm` | Yes | Full dynamic loading at request time |
-| `vllm-server` | Pre-registered only | Adapters must exist at server startup |
-| `ollama` | No | Not supported |
-| `native` | No | Not supported |
+| Engine | Adapter Types | Dynamic Loading | Notes |
+|--------|---------------|-----------------|-------|
+| `vllm` | LoRA | Yes | Full dynamic loading at request time |
+| `vllm-server` | LoRA | Pre-registered only | Adapters must exist at server startup |
+| `peft` | PROMPT_TUNING, PREFIX_TUNING, P_TUNING | Yes | LRU cache for loaded adapters |
+| `ollama` | None | No | Not supported |
+| `native` | None | No | Not supported |
+
+### Adapter Type Detection
+
+llm-infer reads `peft_type` from `adapter_config.json` to determine which engine handles each
+adapter:
+
+```json
+{
+  "peft_type": "PROMPT_TUNING",
+  "base_model_name_or_path": "/path/to/model",
+  ...
+}
+```
+
+- LoRA adapters → vLLM engine (optimized, fast)
+- PROMPT_TUNING/PREFIX_TUNING/P_TUNING → PEFT engine
+
+This happens automatically. You don't need to configure routing.
 
 ### vllm Engine
 
@@ -188,6 +217,24 @@ lora:
 after startup require a server restart.
 
 Use `vllm-server` for production with stable adapter sets. Use `vllm` if you need dynamic loading.
+
+### peft Engine
+
+The `peft` engine handles PROMPT_TUNING and other prompt-learning adapters:
+
+```yaml
+engine: peft
+peft:
+  adapter_base_path: /path/to/adapters
+  max_cached_adapters: 4
+```
+
+Features:
+- **Lazy loading**: Base model only loads on first adapter request
+- **LRU cache**: Keeps recently-used adapters in memory
+- **4-bit quantization**: Optional bitsandbytes support (`load_in_4bit: true`)
+
+Use the `peft` engine when you have PROMPT_TUNING, PREFIX_TUNING, or P_TUNING adapters.
 
 ## Hot Reloading
 

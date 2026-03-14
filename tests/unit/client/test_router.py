@@ -336,16 +336,16 @@ class TestLLMRouterCanCall:
 
     def test_can_call_delegates_to_specified_backend(self, mock_lg: Logger) -> None:
         """Test can_call(backend=...) delegates to specified client."""
+        from unittest.mock import MagicMock
+
         from appinfra.rate_limit import RateLimiter
 
         backend_a = MockBackend()
         backend_b = MockBackend()
 
-        # Client A has rate limiting
-        rate_limiter = RateLimiter(mock_lg, per_minute=60)
-        import time
-
-        rate_limiter.last_t = time.time()  # Simulate recent call
+        # Client A has rate limiting that returns False (rate limited)
+        rate_limiter = MagicMock(spec=RateLimiter)
+        rate_limiter.can_proceed.return_value = False
 
         client_a = LLMClient(lg=mock_lg, backend=backend_a, rate_limiter=rate_limiter)
         client_b = LLMClient(lg=mock_lg, backend=backend_b)  # No rate limiting
@@ -359,16 +359,16 @@ class TestLLMRouterCanCall:
 
     def test_can_call_with_model_routing(self, mock_lg: Logger) -> None:
         """Test can_call(model=...) uses model routing."""
+        from unittest.mock import MagicMock
+
         from appinfra.rate_limit import RateLimiter
 
         backend_a = MockBackend()
         backend_b = MockBackend()
 
-        # Client B has rate limiting active
-        rate_limiter = RateLimiter(mock_lg, per_minute=60)
-        import time
-
-        rate_limiter.last_t = time.time()  # Simulate recent call
+        # Client B has rate limiting that returns False (rate limited)
+        rate_limiter = MagicMock(spec=RateLimiter)
+        rate_limiter.can_proceed.return_value = False
 
         client_a = LLMClient(lg=mock_lg, backend=backend_a)
         client_b = LLMClient(lg=mock_lg, backend=backend_b, rate_limiter=rate_limiter)

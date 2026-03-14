@@ -11,6 +11,7 @@ Versioned Adapter Resolution:
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -101,6 +102,8 @@ class LoadedAdapter:
         enabled: Whether the adapter is enabled for inference.
         description: Optional human-readable description from config.yaml.
         loaded_at: Timestamp when the adapter was loaded/refreshed.
+        peft_type: PEFT adapter type from adapter_config.json (e.g., "LORA",
+            "PROMPT_TUNING"). None if not available.
     """
 
     key: str
@@ -111,6 +114,7 @@ class LoadedAdapter:
     enabled: bool = True
     description: str | None = None
     loaded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    peft_type: str | None = None
 
 
 class AdapterManager:
@@ -135,10 +139,27 @@ class AdapterManager:
     """
 
     CONFIG_FILENAME = "config.yaml"
+    ADAPTER_CONFIG_FILENAME = "adapter_config.json"
 
-    def __init__(self, lg: Logger, base_path: Path | str | None) -> None:
+    # Prompt-learning peft types (for filtering when using PEFT engine)
+    PROMPT_LEARNING_TYPES = {"PROMPT_TUNING", "PREFIX_TUNING", "P_TUNING"}
+
+    # LoRA peft types (for filtering when using vLLM engine)
+    LORA_TYPES = {"LORA"}
+
+    def __init__(
+        self,
+        lg: Logger,
+        base_path: Path | str | None,
+        base_model_path: Path | str | None = None,
+        peft_type_filter: set[str] | None = None,
+    ) -> None:
         self._lg = lg
         self._base_path = Path(base_path).expanduser() if base_path else None
+        self._base_model_path = Path(base_model_path) if base_model_path else None
+        self._peft_type_filter = (
+            peft_type_filter  # Only load these peft types (None = all)
+        )
         self._adapters: dict[str, LoadedAdapter] = {}  # full_key → adapter
         self._versions: dict[str, list[str]] = {}  # name → [full_keys by mtime desc]
 
@@ -176,7 +197,7 @@ class AdapterManager:
         adapters_list = self._scan_and_load_adapters()
         self._populate_indexes(adapters_list)
 
-        self._lg.info(
+        self._lg.debug(
             "adapter scan complete",
             extra={
                 "enabled_count": len(adapters_list),
@@ -194,7 +215,7 @@ class AdapterManager:
             adapter = self._load_adapter(entry)
             if adapter and adapter.enabled:
                 adapters.append(adapter)
-                self._lg.debug(
+                self._lg.info(
                     "adapter loaded",
                     extra={
                         "key": adapter.key,
@@ -252,19 +273,99 @@ class AdapterManager:
 
         return config
 
-    def _load_adapter(self, path: Path, key: str | None = None) -> LoadedAdapter | None:
-        """Load adapter config and compute metadata from a directory.
+    def _read_adapter_config_json(
+        self, adapter_path: Path, key: str
+    ) -> dict[str, str | None]:
+        """Read relevant fields from adapter_config.json.
 
-        Args:
-            path: Path to the adapter directory (may be resolved symlink target).
-            key: Override key to use instead of path.name. Use when path is a
-                resolved symlink but you want the original symlink name as key.
+        Returns dict with:
+            - base_model_name_or_path: Base model path/name (or None)
+            - peft_type: PEFT adapter type like "LORA", "PROMPT_TUNING" (or None)
         """
+        result: dict[str, str | None] = {
+            "base_model_name_or_path": None,
+            "peft_type": None,
+        }
+        config_path = adapter_path / self.ADAPTER_CONFIG_FILENAME
+        if not config_path.exists():
+            return result
+
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                config = json.load(f)
+            result["base_model_name_or_path"] = config.get("base_model_name_or_path")
+            result["peft_type"] = config.get("peft_type")
+            return result
+        except Exception as e:
+            self._lg.warning(
+                "failed to read adapter_config.json",
+                extra={"key": key, "path": str(config_path), "exception": e},
+            )
+            return result
+
+    def _check_base_model_compatibility(
+        self, adapter_path: Path, key: str
+    ) -> tuple[bool, str | None]:
+        """Check if adapter's base model matches the current model.
+
+        Returns:
+            Tuple of (compatible, peft_type):
+            - compatible: True if compatible, False if incompatible
+            - peft_type: PEFT adapter type from adapter_config.json (or None)
+        """
+        adapter_config = self._read_adapter_config_json(adapter_path, key)
+        peft_type = adapter_config["peft_type"]
+
+        if self._base_model_path is None:
+            return True, peft_type
+
+        adapter_base_model = adapter_config["base_model_name_or_path"]
+        if not adapter_base_model:
+            return True, peft_type  # No base model info, allow
+
+        current_model_name = self._base_model_path.name.lower()
+        adapter_model_name = Path(adapter_base_model).name.lower()
+
+        if current_model_name != adapter_model_name:
+            self._lg.debug(
+                "adapter base model mismatch - skipping",
+                extra={
+                    "key": key,
+                    "adapter_base_model": adapter_model_name,
+                    "current_model": current_model_name,
+                },
+            )
+            return False, peft_type
+
+        return True, peft_type
+
+    def _passes_peft_type_filter(self, peft_type: str | None, key: str) -> bool:
+        """Check if adapter passes peft_type filter."""
+        if self._peft_type_filter is None:
+            return True
+        if peft_type in self._peft_type_filter:
+            return True
+        self._lg.debug(
+            "adapter peft_type not in filter - skipping",
+            extra={
+                "key": key,
+                "peft_type": peft_type,
+                "allowed_types": sorted(self._peft_type_filter),
+            },
+        )
+        return False
+
+    def _load_adapter(self, path: Path, key: str | None = None) -> LoadedAdapter | None:
+        """Load adapter config and compute metadata from a directory."""
         config = self._read_config(path / self.CONFIG_FILENAME)
         if config is None:
             return None
-
         full_key = key if key is not None else path.name
+        compatible, peft_type = self._check_base_model_compatibility(path, full_key)
+        if not compatible:
+            return None
+        if not self._passes_peft_type_filter(peft_type, full_key):
+            return None
         name, _ = parse_adapter_key(full_key)
         metadata = compute_adapter_metadata(path)
         return LoadedAdapter(
@@ -275,6 +376,7 @@ class AdapterManager:
             mtime=metadata.mtime if metadata.mtime != "unknown" else None,
             enabled=config.get("enabled", True),
             description=config.get("description"),
+            peft_type=peft_type,
         )
 
     def list(self) -> list[LoadedAdapter]:
@@ -335,6 +437,18 @@ class AdapterManager:
         """
         adapter = self.resolve(key)
         return adapter.path if adapter else None
+
+    def get_peft_type(self, key: str) -> str | None:
+        """Get peft_type for an adapter by key.
+
+        Supports both full keys and names (resolves to latest version).
+
+        Returns:
+            PEFT adapter type (e.g., "LORA", "PROMPT_TUNING") or None if
+            adapter not found or peft_type not available.
+        """
+        adapter = self.resolve(key)
+        return adapter.peft_type if adapter else None
 
     def _validate_refresh_path(self, key: str) -> Path | None:
         """Validate key and return path for refresh, or None if invalid."""

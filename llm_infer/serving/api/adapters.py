@@ -9,10 +9,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from appinfra.log import Logger
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..dispatch.types import AdapterListRequest, AdapterRefreshRequest
+from .errors import raise_for_error_status, submit_or_timeout
 
 
 class AdapterInfo(BaseModel):
@@ -52,21 +55,26 @@ def _get_ipc(request: Request) -> Any:
     return request.app.state.ipc_channel
 
 
-async def _list_adapters(request: Request) -> AdapterListResponse:
+def _get_lg(request: Request) -> Logger:
+    """Get logger from request state (injected by middleware)."""
+    lg: Logger = request.state.lg
+    return lg
+
+
+async def _list_adapters(request: Request) -> AdapterListResponse | JSONResponse:
     """List all loaded adapters.
 
     Queries the main process for the current adapter list.
     """
+    lg = _get_lg(request)
     ipc = _get_ipc(request)
     request_id = f"adapter-list-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterListRequest(id=request_id)
 
-    try:
-        response = await ipc.submit(request_id, internal_request)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to list adapters: {e}"
-        ) from e
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    if isinstance(response, JSONResponse):
+        return response
+    raise_for_error_status(response)
 
     return AdapterListResponse(
         adapters=[
@@ -89,7 +97,7 @@ async def _refresh_adapters(
     key: str | None = Query(
         default=None, description="Specific adapter key to refresh"
     ),
-) -> RefreshResponse:
+) -> RefreshResponse | JSONResponse:
     """Rescan adapter directory and reload enabled adapters.
 
     If key is provided, only refresh that specific adapter.
@@ -98,16 +106,15 @@ async def _refresh_adapters(
     This operation is performed in the main process, ensuring the
     adapter state used for inference validation is updated.
     """
+    lg = _get_lg(request)
     ipc = _get_ipc(request)
     request_id = f"adapter-refresh-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterRefreshRequest(id=request_id, key=key)
 
-    try:
-        response = await ipc.submit(request_id, internal_request)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to refresh adapters: {e}"
-        ) from e
+    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    if isinstance(response, JSONResponse):
+        return response
+    raise_for_error_status(response)
 
     return RefreshResponse(
         key=response.key,
@@ -125,6 +132,7 @@ def create_adapter_router() -> APIRouter:
         _list_adapters,
         methods=["GET"],
         response_model=AdapterListResponse,
+        responses={504: {"description": "Gateway Timeout"}},
         summary="List loaded adapters",
         description="Returns all adapters that are enabled and loaded for inference.",
     )
@@ -133,6 +141,7 @@ def create_adapter_router() -> APIRouter:
         _refresh_adapters,
         methods=["POST"],
         response_model=RefreshResponse,
+        responses={504: {"description": "Gateway Timeout"}},
         summary="Refresh adapters",
         description="Rescan adapter directory and reload enabled adapters.",
     )

@@ -7,11 +7,14 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from appinfra.log import Logger
+
 from ....schemas.openai import AdapterInfoResponse, FinishReason, Role
 from .streaming import (
     create_chat_chunk,
     create_completion_chunk,
     format_sse_done,
+    format_sse_error,
     format_sse_event,
 )
 
@@ -56,7 +59,8 @@ class StreamingGenerator(ABC):
     with subclasses providing chunk creation specifics.
     """
 
-    def __init__(self, request_id: str, model: str, ipc: Any):
+    def __init__(self, lg: Logger, request_id: str, model: str, ipc: Any):
+        self._lg = lg
         self.request_id = request_id
         self.model = model
         self.ipc = ipc
@@ -89,6 +93,12 @@ class StreamingGenerator(ABC):
         """Create SSE event for the final chunk with finish reason."""
         pass
 
+    def _log_timeout(self, e: TimeoutError) -> None:
+        """Log IPC timeout error."""
+        self._lg.warning(
+            "IPC timeout", extra={"request_id": self.request_id, "error": str(e)}
+        )
+
     async def stream(self, internal_request: InternalRequest) -> AsyncIterator[str]:
         """Template method: execute the streaming algorithm."""
         # Optional header chunk
@@ -96,20 +106,27 @@ class StreamingGenerator(ABC):
         if header:
             yield header
 
-        # Stream tokens
         finish_reason = FinishReason.STOP
         tool_calls = None
         adapter: AdapterInfoResponse | None = None
-        async for chunk in self.ipc.submit_streaming(self.request_id, internal_request):
-            if chunk.is_final:
-                finish_reason = _map_finish_reason(chunk.finish_reason)
-                tool_calls = getattr(chunk, "tool_calls", None)
-                adapter = _extract_adapter_info(chunk)
-                break
-            if chunk.token:
-                content = self.create_content_chunk(chunk.token)
-                if content:  # Skip empty chunks (e.g., normalizer buffering)
-                    yield content
+        try:
+            async for chunk in self.ipc.submit_streaming(
+                self.request_id, internal_request
+            ):
+                if chunk.is_final:
+                    finish_reason = _map_finish_reason(chunk.finish_reason)
+                    tool_calls = getattr(chunk, "tool_calls", None)
+                    adapter = _extract_adapter_info(chunk)
+                    break
+                if chunk.token:
+                    content = self.create_content_chunk(chunk.token)
+                    if content:  # Skip empty chunks (e.g., normalizer buffering)
+                        yield content
+        except TimeoutError as e:
+            self._log_timeout(e)
+            yield format_sse_error(str(e), code="timeout")
+            yield format_sse_done()
+            return
 
         # Final chunk with finish_reason, tool_calls, and adapter info
         yield self.create_final_chunk(finish_reason, tool_calls, adapter)
@@ -126,12 +143,13 @@ class ChatStreamingGenerator(StreamingGenerator):
 
     def __init__(
         self,
+        lg: Logger,
         request_id: str,
         model: str,
         ipc: Any,
         normalizer: ThinkTagNormalizer | None = None,
     ):
-        super().__init__(request_id, model, ipc)
+        super().__init__(lg, request_id, model, ipc)
         self._normalizer = normalizer
 
     def create_header_chunk(self) -> str:

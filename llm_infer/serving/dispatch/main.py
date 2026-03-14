@@ -10,105 +10,19 @@ from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
 from appinfra.log import Logger
 from appinfra.size import size_str
-from appinfra.time import ETA, Ticker, delta_str, since, start
+from appinfra.time import Ticker, since, start
 
 from ..adapters import AdapterManager
 from ..api.adapters import create_adapter_router
 from ..api.openai.router import create_openai_router
 from ..api.routes import create_health_handler, create_routes
 from .config import InferenceConfig
+from .errors import ExceptionHandler
 from .factories import get_engine_factory, get_handler_factory
 from .handler import RequestHandler
 from .loop import run_engine_loop
-
-# ---------------------------------------------------------------------------
-# Progress tracking for model loading
-# ---------------------------------------------------------------------------
-
-_PHASE_LABELS = {
-    "tokenizer": ("tokenizer", None),
-    "weights:init": ("weights", "initialized"),
-    "weights:alloc": ("weights", "allocated"),
-    "weights:stream": ("weights", "loaded"),
-    "kv_cache": ("kv_cache", None),
-}
-
-_PHASE_ACTIONS = {
-    "weights:init": ("initializing", "initialized"),
-    "weights:alloc": ("allocating", "allocated"),
-    "weights:stream": ("loading", "loaded"),
-}
-
-
-class ProgressTracker:
-    """Tracks loading progress with timing and ETA for each phase."""
-
-    def __init__(self, lg: Logger) -> None:
-        self._lg = lg
-        self._start_times: dict[str, float] = {}
-        self._last_logged: dict[str, int] = {}
-        self._etas: dict[str, ETA | None] = {}
-
-    def __call__(self, phase: str, current: int, total: int) -> None:
-        label, progress_field = _PHASE_LABELS.get(phase, (phase, None))
-        action_ing, action_ed = _PHASE_ACTIONS.get(phase, ("loading", "loaded"))
-
-        if current == 0:
-            self._on_phase_start(phase, total, action_ing, label)
-        elif current < total:
-            self._on_phase_progress(
-                phase, current, total, action_ing, label, progress_field
-            )
-        else:
-            self._on_phase_complete(phase, action_ed, label)
-
-    def _on_phase_start(
-        self, phase: str, total: int, action_ing: str, label: str
-    ) -> None:
-        self._start_times[phase] = start()
-        self._last_logged[phase] = 0
-        self._etas[phase] = ETA(total=total) if total > 1 else None
-        self._lg.debug(f"{action_ing} {label}...")
-
-    def _build_progress_extra(
-        self, phase: str, current: int, total: int, progress_field: str | None
-    ) -> dict[str, Any]:
-        """Build extra dict for progress logging."""
-        extra: dict[str, Any] = {
-            "after": since(self._start_times[phase]),
-            "total": total,
-            "progress": f"{(current * 100) // total}%",
-        }
-        if progress_field is not None:
-            extra[progress_field] = current
-        if eta_obj := self._etas.get(phase):
-            eta_obj.update(current)
-            if (remaining := eta_obj.remaining_secs()) is not None:
-                extra["eta"] = delta_str(remaining)
-        return extra
-
-    def _on_phase_progress(
-        self,
-        phase: str,
-        current: int,
-        total: int,
-        action_ing: str,
-        label: str,
-        progress_field: str | None,
-    ) -> None:
-        step = max(1, total // 10)
-        if current - self._last_logged.get(phase, 0) < step:
-            return
-        self._lg.debug(
-            f"{action_ing} {label}...",
-            extra=self._build_progress_extra(phase, current, total, progress_field),
-        )
-        self._last_logged[phase] = current
-
-    def _on_phase_complete(self, phase: str, action_ed: str, label: str) -> None:
-        elapsed = since(self._start_times[phase])
-        self._lg.info(f"{label} {action_ed}", extra={"after": elapsed})
-
+from .progress import ProgressTracker
+from .warmup import warmup_adapters, warmup_base_model
 
 # ---------------------------------------------------------------------------
 # Engine and handler creation via factories
@@ -145,9 +59,21 @@ def create_engine(lg: Logger, config: InferenceConfig) -> Any:
     return engine
 
 
+def _select_handler_type(config: InferenceConfig) -> str:
+    """Select handler type based on engine.
+
+    Uses primary handler for HTTP-based engines (vLLM server, Ollama),
+    fallback handler for in-process engines (native, vllm).
+    """
+    if config.backends.engine in ("vllm-server", "ollama"):
+        return config.dispatch.handler_primary
+    return config.dispatch.handler_fallback
+
+
 def create_handler(lg: Logger, engine: Any, config: InferenceConfig) -> Any:
     """Create a request handler for the engine using factory pattern."""
-    factory = get_handler_factory(config.dispatch.handler)
+    handler_type = _select_handler_type(config)
+    factory = get_handler_factory(handler_type)
     return factory.create(lg, engine, config)
 
 
@@ -220,6 +146,7 @@ class BootSequence:
         """Phase 2: Load model and create engine.
 
         This is the heavy phase - triggers torch import and loads weights.
+        Also creates PEFT engine if enabled (lazy-loaded on first use).
         """
         self._engine = create_engine(self._lg, self._config)
 
@@ -230,31 +157,49 @@ class BootSequence:
         # Start periodic GPU stats logging
         self._start_memory_ticker()
 
-    def create_handler(self) -> None:
-        """Phase 3: Create request handler."""
-        self._handler = create_handler(self._lg, self._engine, self._config)
-        self._lg.info("handler created", extra={"type": self._config.dispatch.handler})
-
-        # Configure LoRA if enabled (use engine-specific config)
+    def _get_adapter_base_path(self) -> str | None:
+        """Get adapter base path based on engine type."""
         engine_type = self._config.backends.engine
         if engine_type == "vllm":
             lora_cfg = self._config.engines.vllm.lora
-        elif engine_type == "vllm-server":
+            return lora_cfg.base_path if lora_cfg.enabled else None
+        if engine_type == "vllm-server":
             lora_cfg = self._config.engines.vllm_server.lora
-        else:
-            lora_cfg = None
+            return lora_cfg.base_path if lora_cfg.enabled else None
+        if engine_type == "peft":
+            return self._config.engines.peft.adapter_base_path
+        return None
 
-        if lora_cfg and lora_cfg.enabled and lora_cfg.base_path:
-            self._handler.set_lora_base_path(lora_cfg.base_path)
+    def _configure_adapters(self, adapter_base_path: str) -> None:
+        """Configure adapter manager for the handler."""
+        assert self._handler is not None
+        self._handler.set_lora_base_path(adapter_base_path)
+        peft_type_filter = None
+        if self._config.backends.engine == "peft":
+            peft_type_filter = AdapterManager.PROMPT_LEARNING_TYPES
+        elif self._config.backends.engine in ("vllm", "vllm-server"):
+            peft_type_filter = AdapterManager.LORA_TYPES
+        self._adapter_manager = AdapterManager(
+            self._lg,
+            adapter_base_path,
+            base_model_path=self._config.models.path,
+            peft_type_filter=peft_type_filter,
+        )
+        count = self._adapter_manager.scan()
+        self._handler.set_adapter_manager(self._adapter_manager)
+        self._lg.info(
+            "adapters enabled",
+            extra={"base_path": adapter_base_path, "adapters_loaded": count},
+        )
 
-            # Initialize adapter manager and scan for adapters
-            self._adapter_manager = AdapterManager(self._lg, lora_cfg.base_path)
-            count = self._adapter_manager.scan()
-            self._handler.set_adapter_manager(self._adapter_manager)
-            self._lg.info(
-                "LoRA enabled",
-                extra={"base_path": lora_cfg.base_path, "adapters_loaded": count},
-            )
+    def create_handler(self) -> None:
+        """Phase 3: Create request handler."""
+        handler_type = _select_handler_type(self._config)
+        self._handler = create_handler(self._lg, self._engine, self._config)
+        self._lg.info("handler created", extra={"type": handler_type})
+        adapter_base_path = self._get_adapter_base_path()
+        if adapter_base_path:
+            self._configure_adapters(adapter_base_path)
 
     def warmup(self) -> None:
         """Phase 4: Run warmup query if configured."""
@@ -262,24 +207,8 @@ class BootSequence:
         if not factory.warmup_enabled(self._config):
             return
 
-        self._lg.debug("running warmup query...")
-        t0 = start()
-
-        # Use embed() for embedding models, generate() for generative
-        if getattr(self._engine, "supports_embeddings", lambda: False)():
-            self._engine.embed(["warmup"])
-            self._lg.info(
-                "warmup complete", extra={"after": since(t0), "type": "embed"}
-            )
-        else:
-            output = self._engine.generate("Say hello", max_tokens=8)
-            # Handle both str and dict responses (some engines include usage data)
-            text = output["content"] if isinstance(output, dict) else output
-            # Limit split to first 100 chars for token counting (warmup output is tiny anyway)
-            self._lg.info(
-                "warmup complete",
-                extra={"after": since(t0), "tokens": len(text[:100].split())},
-            )
+        baseline = warmup_base_model(self._lg, self._engine)
+        warmup_adapters(self._lg, self._engine, self._adapter_manager, baseline)
 
     def mark_ready(self) -> None:
         """Phase 5: Mark server as ready to accept requests."""
@@ -325,11 +254,19 @@ class BootSequence:
 
         Shutdown order (reverse of boot):
         1. Stop memory ticker
-        2. Shutdown engine (releases GPU, destroys process groups)
-        3. Stop HTTP server
+        2. Shutdown handler (stops thread pool, fails pending requests)
+        3. Shutdown engine (releases GPU, destroys process groups)
+        4. Stop HTTP server
         """
         if self._memory_ticker and self._memory_ticker.is_running():
             self._memory_ticker.stop()
+
+        if self._handler is not None and hasattr(self._handler, "shutdown"):
+            self._lg.debug("shutting down handler...")
+            try:
+                self._handler.shutdown()
+            except Exception as e:
+                self._lg.warning("handler shutdown error", extra={"exception": e})
 
         if self._engine is not None:
             self._lg.debug("shutting down engine...")
@@ -362,7 +299,7 @@ class BootSequence:
         """Build initial ServerBuilder with host/port/metadata."""
         cfg = self._config.api
         return (
-            ServerBuilder("inference")
+            ServerBuilder(self._lg, "inference")
             .with_host(cfg.host)
             .with_port(cfg.port)
             .with_title(cfg.title)
@@ -370,22 +307,26 @@ class BootSequence:
             .with_version(cfg.version)
         )
 
+    def _build_routes(self, model_name: str) -> Any:
+        """Build routes configuration."""
+        from ..api.trace import TraceMiddleware
+
+        health_handler = create_health_handler(self._ready)
+        model_config = self._config.models.get(model_name)
+        routes = (
+            self._build_server_builder()
+            .routes.with_middleware(TraceMiddleware)
+            .with_route("/health", health_handler)
+            .with_router(create_routes(model_name))
+            .with_router(create_openai_router(model_name, model_config), prefix="/v1")
+            .with_exception_handler(Exception, ExceptionHandler(self._lg))
+        )
+        return self._add_lora_routes(routes)
+
     def _build_server(self, model_name: str) -> Server:
         """Build the HTTP server."""
         cfg = self._config.api
-        health_handler = create_health_handler(self._ready)
-
-        # Get model config for server-side handling of system prompts and think mode
-        model_config = self._config.models.get(model_name)
-
-        routes_builder = (
-            self._build_server_builder()
-            .routes.with_route("/health", health_handler)
-            .with_router(create_routes(model_name))
-            .with_router(create_openai_router(model_name, model_config), prefix="/v1")
-        )
-        routes_builder = self._add_lora_routes(routes_builder)
-
+        routes_builder = self._build_routes(model_name)
         return cast(
             Server,
             routes_builder.done()

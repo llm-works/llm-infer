@@ -24,3 +24,7 @@ num_gpu: null    # Number of GPU layers (null = auto, 0 = CPU only)
 
 # Warmup: Run initial query on startup to ensure model is loaded
 warmup: true
+
+# Dispatch layer concurrency
+# Number of concurrent HTTP requests llm-infer sends to Ollama server.
+max_concurrent: 4

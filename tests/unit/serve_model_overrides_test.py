@@ -35,9 +35,12 @@ class TestApplyModelOverrides:
 
     @pytest.fixture
     def serve_tool(self) -> Generator[tuple[ServeTool, MagicMock], None, None]:
-        """Create ServeTool instance with mocked logger."""
+        """Create ServeTool instance with mocked logger and args."""
         with patch.object(ServeTool, "lg", new_callable=lambda: MagicMock()) as mock_lg:
             tool = ServeTool(parent=None)
+            mock_args = MagicMock()
+            mock_args.model_template = None
+            tool._parsed_args = mock_args
             yield tool, mock_lg
 
     @pytest.fixture
@@ -210,3 +213,101 @@ class TestModelConfigVllmField:
         data = {"task": "generate"}
         config = ModelConfig.from_dict("test-model", data)
         assert config.vllm == {}
+
+
+class TestModelTemplate:
+    """Tests for --model-template functionality."""
+
+    @pytest.fixture
+    def serve_tool_with_template(
+        self,
+    ) -> Generator[tuple[ServeTool, MagicMock, MagicMock], None, None]:
+        """Create ServeTool with mocked logger and args."""
+        with patch.object(ServeTool, "lg", new_callable=lambda: MagicMock()) as mock_lg:
+            tool = ServeTool(parent=None)
+            mock_args = MagicMock()
+            mock_args.model_template = None
+            tool._parsed_args = mock_args
+            yield tool, mock_lg, mock_args
+
+    def test_uses_template_when_model_not_in_config(
+        self, serve_tool_with_template: tuple[ServeTool, MagicMock, MagicMock]
+    ) -> None:
+        """Test that template model config is used when actual model has no config."""
+        tool, mock_lg, mock_args = serve_tool_with_template
+        mock_args.model_template = "base-model"
+
+        # Config has base-model but not derived-model
+        base_cfg = ModelConfig(
+            name="base-model",
+            task="generate",
+            vllm={"gpu_memory_gb": 32.0, "enable_prefix_caching": True},
+        )
+        models = ModelsConfig(models={"base-model": base_cfg})
+        config = MockInferenceConfig(models=models)
+
+        tool._apply_model_overrides(config, "derived-model")
+
+        # Should use base-model's config
+        assert config.engines.vllm.gpu_memory_gb == 32.0
+        assert config.engines.vllm_server.gpu_memory_gb == 32.0
+        mock_lg.info.assert_called_once()
+        assert "using model template" in mock_lg.info.call_args[0][0]
+
+    def test_template_ignored_when_model_has_config(
+        self, serve_tool_with_template: tuple[ServeTool, MagicMock, MagicMock]
+    ) -> None:
+        """Test that template is ignored when model has its own config."""
+        tool, mock_lg, mock_args = serve_tool_with_template
+        mock_args.model_template = "base-model"
+
+        # Config has both models with different settings
+        base_cfg = ModelConfig(
+            name="base-model",
+            vllm={"gpu_memory_gb": 32.0},
+        )
+        derived_cfg = ModelConfig(
+            name="derived-model",
+            vllm={"gpu_memory_gb": 16.0},
+        )
+        models = ModelsConfig(
+            models={"base-model": base_cfg, "derived-model": derived_cfg}
+        )
+        config = MockInferenceConfig(models=models)
+
+        tool._apply_model_overrides(config, "derived-model")
+
+        # Should use derived-model's own config, not template
+        assert config.engines.vllm.gpu_memory_gb == 16.0
+        assert config.engines.vllm_server.gpu_memory_gb == 16.0
+        # No "using model template" log
+        mock_lg.info.assert_not_called()
+
+    def test_warns_when_template_not_found(
+        self, serve_tool_with_template: tuple[ServeTool, MagicMock, MagicMock]
+    ) -> None:
+        """Test that warning is logged when template model doesn't exist."""
+        tool, mock_lg, mock_args = serve_tool_with_template
+        mock_args.model_template = "nonexistent-base"
+
+        config = MockInferenceConfig()
+
+        tool._apply_model_overrides(config, "derived-model")
+
+        mock_lg.warning.assert_called_once()
+        assert "template not found" in mock_lg.warning.call_args[0][0]
+
+    def test_no_template_no_config_is_silent(
+        self, serve_tool_with_template: tuple[ServeTool, MagicMock, MagicMock]
+    ) -> None:
+        """Test that missing model with no template doesn't log anything."""
+        tool, mock_lg, mock_args = serve_tool_with_template
+        mock_args.model_template = None
+
+        config = MockInferenceConfig()
+
+        tool._apply_model_overrides(config, "unknown-model")
+
+        mock_lg.info.assert_not_called()
+        mock_lg.warning.assert_not_called()
+        mock_lg.debug.assert_not_called()

@@ -12,14 +12,14 @@ from appinfra.time import delta_str, start
 class Event(StrEnum):
     """Request lifecycle events."""
 
-    # DEBUG level (~5 per request)
+    # DEBUG level (~4 per request)
     REQUESTED = "requested"
     TOKENIZED = "tokenized"
     PREFILLED = "prefilled"
-    DECODED = "decoded"
     COMPLETE = "complete"
 
     # TRACE level (~10-20 per request)
+    DECODED = "decoded"
     DECODE = "decode"
     KV_ALLOC = "kv_alloc"
     KV_FREE = "kv_free"
@@ -32,7 +32,6 @@ _DEBUG_EVENTS = frozenset(
         Event.REQUESTED,
         Event.TOKENIZED,
         Event.PREFILLED,
-        Event.DECODED,
         Event.COMPLETE,
     }
 )

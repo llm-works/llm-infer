@@ -15,7 +15,7 @@ class LoRAConfig:
 
     enabled: bool = False  # Enable LoRA/QLoRA adapter support
     max_loras: int = 4  # Maximum concurrent adapters in GPU memory
-    max_lora_rank: int = 64  # Maximum LoRA rank supported
+    max_lora_rank: int = 128  # Maximum LoRA rank supported
     base_path: str | None = None  # Base directory for adapter weights
 
 
@@ -37,7 +37,10 @@ class NativeEngineConfig:
 class DispatchConfig:
     """Dispatch configuration."""
 
-    handler: str = "bounded"
+    # Handler selection: primary is used for HTTP engines (vllm-server, ollama),
+    # fallback is used for in-process engines (native, vllm)
+    handler_primary: str = "concurrent_http"
+    handler_fallback: str = "bounded"
     max_pending: int = 10
     poll_timeout: float = 0.01
     batch_streaming: bool = False  # Allow streaming requests in batched decode
@@ -97,6 +100,9 @@ class OllamaConfig:
     auto_start: bool = True  # Automatically start Ollama server if not running
     binary_path: str = "ollama"  # Path to ollama binary
 
+    # Concurrency (dispatch layer)
+    max_concurrent: int = 4  # Max concurrent HTTP requests to Ollama server
+
     @classmethod
     def from_dict(cls, data: dict[str, Any], model: str = "") -> "OllamaConfig":
         """Create config from dictionary (ollama section of config file).
@@ -120,6 +126,7 @@ class OllamaConfig:
             warmup=data.get("warmup", True),
             auto_start=data.get("auto_start", True),
             binary_path=data.get("binary_path", "ollama"),
+            max_concurrent=data.get("max_concurrent", 4),
         )
 
 
@@ -139,6 +146,10 @@ class VLLMConfig:
     task: str = "generate"
 
     # Memory management
+    # Use gpu_memory_gb for absolute limit (e.g., 8.0 for 8GB)
+    # Use gpu_memory_utilization for fraction of total VRAM (e.g., 0.9 for 90%)
+    # If both set, gpu_memory_gb takes precedence
+    gpu_memory_gb: float | None = None
     gpu_memory_utilization: float = 0.9
     cpu_offload_gb: float = 0.0
     swap_space: int = 4  # GB
@@ -287,6 +298,7 @@ class VLLMServerConfig:
     served_model_name: str | None = None
 
     # vLLM engine settings (passed as CLI flags to `vllm serve`)
+    gpu_memory_gb: float | None = None  # Absolute GB limit (converted to utilization)
     gpu_memory_utilization: float = 0.95
     max_model_len: int | None = None
     max_num_seqs: int = 16
@@ -305,6 +317,9 @@ class VLLMServerConfig:
 
     # Warmup
     warmup: bool = True
+
+    # Concurrency (dispatch layer)
+    max_concurrent: int = 4  # Max concurrent HTTP requests to vLLM server
 
     @classmethod
     def from_dict(
@@ -329,12 +344,31 @@ class VLLMServerConfig:
                 kwargs["lora"] = LoRAConfig(
                     enabled=lora_data.get("enabled", False),
                     max_loras=lora_data.get("max_loras", 4),
-                    max_lora_rank=lora_data.get("max_lora_rank", 64),
+                    max_lora_rank=lora_data.get("max_lora_rank", 128),
                     base_path=lora_data.get("base_path"),
                 )
             elif f.name != "model_path" and f.name in data:
                 kwargs[f.name] = data[f.name]
         return cls(**kwargs)
+
+
+@dataclass
+class PEFTEngineConfig:
+    """PEFT engine configuration for PROMPT_TUNING and other PEFT adapters.
+
+    This engine uses HuggingFace Transformers + PEFT library directly,
+    as vLLM's --enable-lora only supports LoRA adapters.
+
+    Use with backends.engine=peft for PROMPT_TUNING adapter inference.
+    For LoRA adapters in production, use vllm-server instead.
+    """
+
+    device: str = "cuda"  # Device to load model on
+    dtype: str = "auto"  # Model dtype (auto, float16, bfloat16)
+    max_cached_adapters: int = 4  # LRU cache size for loaded adapters
+    warmup: bool = True  # Run warmup on first adapter load
+    load_in_4bit: bool = False  # Use bitsandbytes 4-bit quantization
+    adapter_base_path: str | None = None  # Base directory for adapter weights
 
 
 @dataclass
@@ -349,6 +383,7 @@ class EnginesConfig:
     vllm: VLLMConfig = field(default_factory=VLLMConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     vllm_server: VLLMServerConfig = field(default_factory=VLLMServerConfig)
+    peft: PEFTEngineConfig = field(default_factory=PEFTEngineConfig)
 
 
 @dataclass
@@ -392,17 +427,34 @@ class InferenceConfig:
                 linear=backends.get("linear", "pytorch"),
             ),
             engines=cls._parse_engines_config(data.get("engines", {}) or {}),
-            dispatch=DispatchConfig(
-                handler=dispatch.get("handler", "bounded"),
-                max_pending=dispatch.get("max_pending", 10),
-                poll_timeout=dispatch.get("poll_timeout", 0.01),
-                batch_streaming=dispatch.get("batch_streaming", False),
-            ),
+            dispatch=cls._parse_dispatch_config(dispatch),
             api=cls._parse_api_config(data.get("api", {}) or {}),
             logging=ThirdPartyLoggingConfig(
                 torch=logging.get("torch", "warning"),
                 transformers=logging.get("transformers", "error"),
             ),
+        )
+
+    @classmethod
+    def _parse_dispatch_config(cls, dispatch: dict[str, Any]) -> DispatchConfig:
+        """Parse dispatch config with handler primary/fallback support."""
+        handler = dispatch.get("handler", {})
+
+        # Support both dict (primary/fallback) and string (legacy) formats
+        if isinstance(handler, dict):
+            handler_primary = handler.get("primary", "concurrent_http")
+            handler_fallback = handler.get("fallback", "bounded")
+        else:
+            # Legacy string format: use as fallback, default primary to concurrent_http
+            handler_primary = "concurrent_http"
+            handler_fallback = handler if handler else "bounded"
+
+        return DispatchConfig(
+            handler_primary=handler_primary,
+            handler_fallback=handler_fallback,
+            max_pending=dispatch.get("max_pending", 10),
+            poll_timeout=dispatch.get("poll_timeout", 0.01),
+            batch_streaming=dispatch.get("batch_streaming", False),
         )
 
     @classmethod
@@ -428,7 +480,7 @@ class InferenceConfig:
             title="Inference Server",
             description="LLM inference with process isolation and OpenAI API compatibility",
             version="0.1.0",
-            response_timeout=api_data.get("response_timeout", 60.0),
+            response_timeout=api_data.get("response_timeout", 300.0),
             log_file=api_data.get("log_file"),
             uvicorn=uvicorn_config,
         )
@@ -452,6 +504,7 @@ class InferenceConfig:
         """Parse vLLM engine configuration."""
         return VLLMConfig(
             task=data.get("task", "generate"),
+            gpu_memory_gb=data.get("gpu_memory_gb"),
             gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),
             cpu_offload_gb=data.get("cpu_offload_gb", 0.0),
             swap_space=data.get("swap_space", 4),
@@ -482,7 +535,7 @@ class InferenceConfig:
         return LoRAConfig(
             enabled=data.get("enabled", False),
             max_loras=data.get("max_loras", 4),
-            max_lora_rank=data.get("max_lora_rank", 64),
+            max_lora_rank=data.get("max_lora_rank", 128),
             base_path=data.get("base_path"),
         )
 
@@ -497,6 +550,18 @@ class InferenceConfig:
         return VLLMServerConfig.from_dict(data)
 
     @classmethod
+    def _parse_peft_config(cls, data: dict[str, Any]) -> PEFTEngineConfig:
+        """Parse PEFT engine configuration."""
+        return PEFTEngineConfig(
+            device=data.get("device", "cuda"),
+            dtype=data.get("dtype", "auto"),
+            max_cached_adapters=data.get("max_cached_adapters", 4),
+            warmup=data.get("warmup", True),
+            load_in_4bit=data.get("load_in_4bit", False),
+            adapter_base_path=data.get("adapter_base_path"),
+        )
+
+    @classmethod
     def _parse_engines_config(cls, engines_data: dict[str, Any]) -> EnginesConfig:
         """Parse engines configuration section."""
         return EnginesConfig(
@@ -506,6 +571,7 @@ class InferenceConfig:
             vllm_server=cls._parse_vllm_server_config(
                 engines_data.get("vllm_server", {}) or {}
             ),
+            peft=cls._parse_peft_config(engines_data.get("peft", {}) or {}),
         )
 
     def apply_env_overrides(self) -> "InferenceConfig":

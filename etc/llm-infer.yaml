@@ -5,7 +5,7 @@ models: !include './models.yaml'
 
 # Backend configuration
 # Multi-level backend selection for flexibility in inference optimization:
-# - engine: Full inference engine (native | vllm | vllm-server | ollama) - REQUIRED
+# - engine: Full inference engine (native | vllm | vllm-server | ollama | peft) - REQUIRED
 # - model: Model implementation (native | gptqmodel) - only if engine=native
 # - linear: Kernel implementation (pytorch | marlin) - only if model=native
 #
@@ -13,12 +13,13 @@ models: !include './models.yaml'
 # - engine=vllm → uses engines.vllm config, ignores model/linear settings
 # - engine=vllm-server → connects to vllm serve subprocess, ignores model/linear
 # - engine=ollama → connects to Ollama server, ignores model/linear settings
+# - engine=peft → uses Transformers+PEFT for PROMPT_TUNING adapters (experimentation)
 # - engine=native, model=gptqmodel → ignores linear setting
 #
 # Default: ollama (easiest, works on CPU or GPU)
 # Override with --engine or change below
 backends:
-  engine: ollama        # ollama | vllm | vllm-server | native
+  engine: ollama        # ollama | vllm | vllm-server | native | peft
   model: native         # native | gptqmodel (only if engine=native)
   linear: marlin        # pytorch | marlin (only if model=native)
 
@@ -38,10 +39,17 @@ engines:
   # Ollama engine - connects to running Ollama server
   ollama: !include './ollama.yaml'
 
+  # PEFT engine - HuggingFace Transformers + PEFT for adapter inference
+  peft: !include './peft.yaml'
+
 # Dispatch configuration
 dispatch:
-  # Handler type: sequential, bounded, batching
-  handler: bounded
+  # Handler type: sequential, bounded, concurrent_http
+  # - primary: used for HTTP engines (vllm-server, ollama) - enables parallel requests
+  # - fallback: used for in-process engines (native, vllm)
+  handler:
+    primary: concurrent_http
+    fallback: bounded
 
   # Maximum pending requests before rejection (bounded/batching handlers)
   max_pending: 10
@@ -61,7 +69,7 @@ api:
 
   # Response timeout for client requests (seconds)
   # Note: First LoRA request may take 2+ minutes for kernel compilation
-  response_timeout: 180.0
+  response_timeout: 300.0
 
   # Uvicorn log isolation
   log_file: null          # Set to path to isolate uvicorn logs (e.g., .logs/uvicorn.log)

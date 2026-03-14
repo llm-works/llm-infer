@@ -27,7 +27,7 @@ enable_prefix_caching: true
 lora:
   enabled: true              # Enable LoRA adapter support
   max_loras: 4               # Maximum concurrent adapters in GPU memory
-  max_lora_rank: 64          # Maximum LoRA rank supported
+  max_lora_rank: 128         # Maximum LoRA rank supported
   base_path: !include "../.env.yaml#paths.adapters"
 
 # Tool calling
@@ -35,3 +35,9 @@ tool_call_parser: hermes      # hermes, llama, mistral, etc.
 
 # Warmup: Run initial query on startup to ensure model is loaded
 warmup: true
+
+# Dispatch layer concurrency
+# Number of concurrent HTTP requests llm-infer sends to vLLM server.
+# Works with max_num_seqs: llm-infer sends up to max_concurrent requests,
+# vLLM batches them internally (up to max_num_seqs sequences).
+max_concurrent: 4

@@ -38,6 +38,10 @@ class ServeTool(Tool):
             help="Direct path to model weights (alternative to --model)",
         )
         parser.add_argument(
+            "--model-template",
+            help="Use another model's config as template (for models not in config)",
+        )
+        parser.add_argument(
             "--embed",
             action="store_true",
             help="Use default embedding model (from selection.embed)",
@@ -52,7 +56,7 @@ class ServeTool(Tool):
         )
         parser.add_argument(
             "--engine",
-            choices=["native", "vllm", "vllm-server", "ollama"],
+            choices=["native", "vllm", "vllm-server", "ollama", "peft"],
             help="Inference engine backend",
         )
         parser.add_argument(
@@ -137,28 +141,27 @@ class ServeTool(Tool):
 
         return InferenceConfig, run_server
 
-    def _apply_model_overrides(self, config: Any, model_name: str) -> None:
-        """Apply model-specific settings from unified config.
+    def _resolve_model_config(self, config: Any, model_name: str) -> Any | None:
+        """Resolve model config, using --model-template if model not in config."""
+        model_exists = model_name in config.models.models
+        template_name = self.args.model_template
 
-        Applies in order: task, max_model_len, then vllm overrides.
-        Model-level vllm overrides allow models to specify required vLLM settings
-        (e.g., embedding models need enable_prefix_caching=false).
-        """
-        model_cfg = config.models.get(model_name)
-        if model_cfg is None:
-            return
-        if model_cfg.task:
-            config.engines.vllm.task = model_cfg.task
-            config.engines.vllm_server.task = model_cfg.task
-            config.engines.ollama.task = model_cfg.task
-            self.lg.debug("model override", extra={"task": model_cfg.task})
-        if model_cfg._max_model_len_set:
-            config.engines.vllm.max_model_len = model_cfg.max_model_len
-            config.engines.vllm_server.max_model_len = model_cfg.max_model_len
-            self.lg.debug(
-                "model override", extra={"max_model_len": model_cfg.max_model_len}
+        if model_exists:
+            return config.models.get(model_name)
+
+        if template_name:
+            if template_name in config.models.models:
+                self.lg.info("using model template", extra={"template": template_name})
+                return config.models.get(template_name)
+            self.lg.warning(
+                "model template not found in config", extra={"template": template_name}
             )
-        # Apply model-specific vLLM overrides (to both vllm and vllm_server)
+        return None
+
+    def _apply_vllm_overrides(
+        self, config: Any, model_cfg: Any, model_name: str
+    ) -> None:
+        """Apply model-specific vLLM overrides to both vllm and vllm_server."""
         for key, value in model_cfg.vllm.items():
             applied = False
             if hasattr(config.engines.vllm, key):
@@ -174,6 +177,32 @@ class ServeTool(Tool):
                     "unknown vllm config key in model override",
                     extra={"key": key, "model": model_name},
                 )
+
+    def _apply_model_overrides(self, config: Any, model_name: str) -> None:
+        """Apply model-specific settings from unified config.
+
+        Applies in order: task, max_model_len, then vllm overrides.
+        Model-level vllm overrides allow models to specify required vLLM settings
+        (e.g., embedding models need enable_prefix_caching=false).
+        """
+        model_cfg = self._resolve_model_config(config, model_name)
+        if model_cfg is None:
+            return
+
+        if model_cfg.task:
+            config.engines.vllm.task = model_cfg.task
+            config.engines.vllm_server.task = model_cfg.task
+            config.engines.ollama.task = model_cfg.task
+            self.lg.debug("model override", extra={"task": model_cfg.task})
+
+        if model_cfg._max_model_len_set:
+            config.engines.vllm.max_model_len = model_cfg.max_model_len
+            config.engines.vllm_server.max_model_len = model_cfg.max_model_len
+            self.lg.debug(
+                "model override", extra={"max_model_len": model_cfg.max_model_len}
+            )
+
+        self._apply_vllm_overrides(config, model_cfg, model_name)
 
     def _print_model_group(
         self, header: str, models: list[str], default: str | None

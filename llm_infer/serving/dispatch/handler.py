@@ -305,6 +305,7 @@ class RequestHandler(ABC):
                     extra["adapter_name"] = loaded.name
                     extra["md5"] = loaded.md5
                     extra["mtime"] = loaded.mtime
+                    extra["peft_type"] = loaded.peft_type or "LORA"
                 else:
                     extra["adapter"] = adapter
             else:
@@ -312,27 +313,29 @@ class RequestHandler(ABC):
             if is_first_load:
                 extra["path"] = str(adapter_path)
                 self._lg.info(
-                    "loading LoRA adapter (first use, kernel compilation may take 1-2 min)",
+                    "loading PEFT adapter (first use, kernel compilation may take 1-2 min)",
                     extra=extra,
                 )
             else:
-                self._lg.debug("using LoRA adapter", extra=extra)
+                self._lg.debug("using PEFT adapter", extra=extra)
         self._loaded_adapters.add(adapter)
 
     def _resolve_lora_request(
         self, adapter: str | None
     ) -> tuple[Any | None, str | None]:
-        """Resolve adapter key to a vLLM LoRARequest.
+        """Resolve adapter key to engine request.
+
+        For vLLM engines, returns a LoRARequest object.
+        For PEFT engine, returns the adapter path string directly.
 
         Returns:
-            Tuple of (lora_request, fallback_adapter):
-            - (LoRARequest, None) if adapter resolved successfully
+            Tuple of (request, fallback_adapter):
+            - (LoRARequest or path_str, None) if adapter resolved successfully
             - (None, None) if no adapter requested
             - (None, adapter) if adapter not found (fallback to base model)
 
         Raises:
-            AdapterError: If adapter is empty string, adapter is disabled,
-                or LoRA module unavailable.
+            AdapterError: If adapter is empty string or adapter is disabled.
         """
         if adapter is None:
             return None, None
@@ -350,12 +353,17 @@ class RequestHandler(ABC):
         self._check_adapter_enabled(adapter, adapter_path)
         self._log_and_track_adapter(adapter, adapter_path)
 
-        lora_request = self._import_lora_request_class(adapter)(
-            lora_name=adapter,
-            lora_int_id=_stable_adapter_int_id(adapter),
-            lora_path=str(adapter_path),
-        )
-        return lora_request, None
+        # Try to create vLLM LoRARequest, fall back to path string for PEFT
+        try:
+            lora_request = self._import_lora_request_class(adapter)(
+                lora_name=adapter,
+                lora_int_id=_stable_adapter_int_id(adapter),
+                lora_path=str(adapter_path),
+            )
+            return lora_request, None
+        except AdapterError:
+            # vLLM not available - return path string for PEFT engine
+            return str(adapter_path), None
 
     # Reserved model names that should not be looked up as adapters
     _RESERVED_MODEL_NAMES = frozenset({"auto", "default"})
@@ -399,8 +407,9 @@ class RequestHandler(ABC):
         """Build parameters for engine generate/stream methods from request.
 
         Returns:
-            Tuple of (params_dict, fallback_adapter). fallback_adapter is
-            set if adapter was requested but not found (fell back to base model).
+            Tuple of (params_dict, fallback_adapter):
+            - params_dict: Parameters for engine generate/stream methods
+            - fallback_adapter: Set if adapter was requested but not found
         """
         params: dict[str, Any] = {
             "prompt": request.prompt,
@@ -415,9 +424,12 @@ class RequestHandler(ABC):
             "messages": request.messages,
         }
         effective_adapter = self._resolve_effective_adapter(request)
-        lora_request, fallback_adapter = self._resolve_lora_request(effective_adapter)
-        if lora_request is not None:
-            params["lora_request"] = lora_request
+        adapter_result, fallback_adapter = self._resolve_lora_request(effective_adapter)
+
+        if adapter_result is not None:
+            # Works for both vLLM LoRARequest and PEFT path string
+            params["lora_request"] = adapter_result
+
         # Tool calling support
         if request.tools:
             params["tools"] = request.tools
