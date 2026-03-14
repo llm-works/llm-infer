@@ -121,17 +121,17 @@ jobs:
           llm-infer serve --model qwen2.5:0.5b &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
-          for i in {1..30}; do
+          for i in {1..60}; do
             if curl -s http://localhost:8000/health | grep -q '"status":"ok"'; then
               echo "Server is ready"
               break
             fi
-            echo "Waiting for server... ($i/30)"
+            echo "Waiting for server... ($i/60)"
             sleep 2
           done
           # Fail explicitly if server never became healthy
           if ! curl -s http://localhost:8000/health | grep -q '"status":"ok"'; then
-            echo "ERROR: Server failed to start within 60 seconds"
+            echo "ERROR: Server failed to start within 120 seconds"
             exit 1
           fi
 
