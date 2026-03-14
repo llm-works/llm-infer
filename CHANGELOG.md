@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-14
+
 ### Added
 
 - **PEFT engine for PROMPT_TUNING adapters**: New `peft` engine type using HuggingFace Transformers
@@ -35,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of vLLM's fraction-based `gpu_memory_utilization` (e.g., `gpu_memory_gb: 8.0` for 8GB limit)
 - vLLM added to `cuda` optional dependencies: `pip install llm-infer[cuda]` now includes vLLM
 - `make setup` now installs `dev,runtime,cuda` extras by default
+- `num_params_b` field in `ModelMetadata` for base model parameter count; used for adapter base
+  model validation
+- `--model-template` CLI flag: use another model's config as template for engine initialization
+  (useful when model lacks proper HuggingFace config)
 
 ### Breaking Changes
 
@@ -54,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waiting for backend to come up before falling back. Logs expected errors without stack traces.
 - **Internal**: Renamed `llm_infer.client.exceptions` module to `llm_infer.client.errors`. Public
   API unchanged (import from `llm_infer.client` as before)
+
+### Fixed
+
+- vLLM engines now correctly load PROMPT_TUNING adapters (previously failed with config mismatch)
 
 ## [0.1.1] - 2026-02-25
 
@@ -122,6 +132,7 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/llm-works/llm-infer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/llm-works/llm-infer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/llm-works/llm-infer/releases/tag/v0.1.0
