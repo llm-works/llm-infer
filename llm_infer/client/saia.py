@@ -63,6 +63,7 @@ class SAIAAdapter(Backend):
         tools: list[ToolDef] | None = None,
         response_schema: dict[str, Any] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> AgentResponse:
         """Send a chat completion request via the wrapped LLMClient.
 
@@ -72,6 +73,7 @@ class SAIAAdapter(Backend):
             tools: Optional tools the LLM can call.
             response_schema: Optional JSON schema for structured output.
             max_tokens: Maximum tokens to generate.
+            temperature: Sampling temperature (default 1.0).
 
         Returns:
             AgentResponse with content, tool calls, and token usage.
@@ -86,6 +88,7 @@ class SAIAAdapter(Backend):
             tools=api_tools,
             max_tokens=max_tokens,
             response_format=response_format,
+            temperature=temperature if temperature is not None else 1.0,
         )
 
         return self._convert_response(response)
