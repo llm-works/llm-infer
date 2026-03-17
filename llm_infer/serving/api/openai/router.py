@@ -234,7 +234,7 @@ async def _handle_chat_non_streaming(
 ) -> ChatCompletionResponse | JSONResponse:
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -297,7 +297,7 @@ async def _handle_completion_non_streaming(
 ) -> CompletionResponse | JSONResponse:
     """Handle non-streaming legacy completion request."""
     internal_request = completion_request_to_internal(body, request_id)
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -418,7 +418,7 @@ async def _handle_embedding_request(
     internal_request = InternalEmbeddingRequest(
         id=request_id, inputs=inputs, dimensions=body.dimensions
     )
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)

@@ -58,7 +58,7 @@ async def _handle_generate(
         use_chat_template=body.use_chat_template,
     )
 
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -76,7 +76,7 @@ async def _handle_metrics(
     """Handle metrics request submission and response."""
     request_id = str(uuid.uuid4())
     metrics_request = MetricsRequest(id=request_id, reset_peak=reset_peak)
-    response = await submit_or_timeout(lg, ipc, request_id, metrics_request)
+    response = await submit_or_timeout(lg, ipc, metrics_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
