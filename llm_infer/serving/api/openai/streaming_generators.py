@@ -110,9 +110,7 @@ class StreamingGenerator(ABC):
         tool_calls = None
         adapter: AdapterInfoResponse | None = None
         try:
-            async for chunk in self.ipc.submit_streaming(
-                self.request_id, internal_request
-            ):
+            async for chunk in self.ipc.submit_stream(internal_request):
                 if chunk.is_final:
                     finish_reason = _map_finish_reason(chunk.finish_reason)
                     tool_calls = getattr(chunk, "tool_calls", None)

@@ -71,7 +71,7 @@ async def _list_adapters(request: Request) -> AdapterListResponse | JSONResponse
     request_id = f"adapter-list-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterListRequest(id=request_id)
 
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -111,7 +111,7 @@ async def _refresh_adapters(
     request_id = f"adapter-refresh-{uuid.uuid4().hex[:16]}"
     internal_request = AdapterRefreshRequest(id=request_id, key=key)
 
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)

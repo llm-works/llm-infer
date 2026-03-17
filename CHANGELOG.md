@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `SAIAAdapter.chat()` now accepts `temperature` parameter for sampling control
 
+### Changed
+
+- Update IPC calls for appinfra 0.6.0 API: request ID now passed via `request.id` attribute
+  instead of separate argument
+- Default `enforce_eager: false` in vllm-server.yaml (enables CUDA graphs)
+
 ## [0.2.0] - 2026-03-14
 
 ### Added
