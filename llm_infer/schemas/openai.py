@@ -13,6 +13,7 @@ class Role(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
+    DEVELOPER = "developer"  # OpenAI o1/o3/GPT-5 reasoning models
 
 
 class FinishReason(StrEnum):
@@ -125,11 +126,58 @@ ResponseFormat = (
 # =============================================================================
 
 
+class TextContentPart(BaseModel):
+    """Text content part in a multi-part message."""
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ImageUrlDetail(BaseModel):
+    """Image URL with optional detail level."""
+
+    url: str
+    detail: Literal["auto", "low", "high"] | None = None
+
+
+class ImageContentPart(BaseModel):
+    """Image content part (accepted but not processed by local backends)."""
+
+    type: Literal["image_url"] = "image_url"
+    image_url: ImageUrlDetail
+
+
+# Union of content part types - text is extracted, others are ignored
+ContentPart = TextContentPart | ImageContentPart
+
+
+def _extract_text_from_content(
+    content: str | list[ContentPart] | list[dict[str, Any]] | None,
+) -> str | None:
+    """Extract text from content, handling both string and array formats.
+
+    For array format, extracts and joins all text parts. Non-text parts
+    (images, audio) are silently ignored as local backends don't support them.
+    """
+    if content is None:
+        return None
+    if isinstance(content, str):
+        return content
+    # Array format: extract text parts (handles both Pydantic models and dicts)
+    text_parts = []
+    for part in content:
+        if isinstance(part, TextContentPart):
+            text_parts.append(part.text)
+        elif isinstance(part, dict) and part.get("type") == "text":
+            text_parts.append(part.get("text", ""))
+    return "".join(text_parts) if text_parts else None
+
+
 class ChatMessage(BaseModel):
     """A single chat message."""
 
     role: Role
-    content: str | None = None  # Can be None when tool_calls present
+    content: str | list[ContentPart] | None = None  # String or array format
     name: str | None = None
     # Tool calling fields
     tool_calls: list[ToolCall] | None = Field(
@@ -164,6 +212,9 @@ class ChatCompletionRequest(BaseModel):
 
     # Generation parameters
     max_tokens: int | None = Field(None, ge=1, le=4096)
+    max_completion_tokens: int | None = Field(
+        None, ge=1, description="Max tokens for reasoning models (alias for max_tokens)"
+    )
     temperature: float = Field(1.0, ge=0.0, le=2.0)
     top_p: float = Field(1.0, ge=0.0, le=1.0)
     n: int = Field(1, ge=1, le=1)  # Only n=1 supported
@@ -195,6 +246,12 @@ class ChatCompletionRequest(BaseModel):
     top_logprobs: int | None = None
     user: str | None = None
     seed: int | None = None
+    # OpenAI reasoning model parameters (accepted but ignored)
+    reasoning_effort: str | None = None
+    store: bool | None = None
+    metadata: dict[str, str] | None = None
+    service_tier: str | None = None
+    stream_options: dict[str, Any] | None = None
 
     # llm-infer extension: LoRA adapter selection
     adapter: str | None = Field(
@@ -217,6 +274,15 @@ class ChatCompletionRequest(BaseModel):
             raise ValueError("Only n=1 is supported")
         return self
 
+    @model_validator(mode="after")
+    def validate_no_mixed_roles(self) -> "ChatCompletionRequest":
+        """Reject requests that mix system and developer roles."""
+        has_system = any(msg.role == Role.SYSTEM for msg in self.messages)
+        has_developer = any(msg.role == Role.DEVELOPER for msg in self.messages)
+        if has_system and has_developer:
+            raise ValueError("Cannot use both 'system' and 'developer' roles")
+        return self
+
 
 class ChatCompletionChoice(BaseModel):
     """A single completion choice."""
@@ -227,12 +293,27 @@ class ChatCompletionChoice(BaseModel):
     logprobs: None = None
 
 
+class CompletionTokensDetails(BaseModel):
+    """Detailed completion token breakdown (reasoning models)."""
+
+    reasoning_tokens: int = 0
+
+
+class PromptTokensDetails(BaseModel):
+    """Detailed prompt token breakdown."""
+
+    cached_tokens: int = 0
+
+
 class ChatCompletionUsage(BaseModel):
     """Token usage statistics."""
 
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    # Optional detail fields for reasoning models (None for local backends)
+    completion_tokens_details: CompletionTokensDetails | None = None
+    prompt_tokens_details: PromptTokensDetails | None = None
 
 
 class AdapterInfoResponse(BaseModel):

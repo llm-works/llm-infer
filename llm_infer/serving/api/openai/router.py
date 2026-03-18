@@ -53,6 +53,9 @@ def _build_completion_usage(response: Any) -> ChatCompletionUsage:
         prompt_tokens=response.prompt_tokens or 0,
         completion_tokens=response.completion_tokens or 0,
         total_tokens=(response.prompt_tokens or 0) + (response.completion_tokens or 0),
+        # Detail fields are None for local backends (vLLM/Ollama don't provide these)
+        completion_tokens_details=None,
+        prompt_tokens_details=None,
     )
 
 
