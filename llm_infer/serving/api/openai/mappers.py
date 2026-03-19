@@ -15,7 +15,7 @@ from ....schemas.openai import (
     Role,
     Tool,
     ToolChoice,
-    _extract_text_from_content,
+    extract_text_from_content,
 )
 from ...dispatch.types import Request as InternalRequest
 
@@ -32,7 +32,7 @@ def format_messages_as_prompt(messages: list[ChatMessage]) -> str:
     """
     parts = []
     for msg in messages:
-        content = _extract_text_from_content(msg.content)
+        content = extract_text_from_content(msg.content)
         parts.append(f"{msg.role.value}: {content}")
     return "\n".join(parts)
 
@@ -176,7 +176,7 @@ def _message_to_dict(msg: ChatMessage) -> dict[str, Any]:
     # Convert developer role to system for local backend compatibility
     role = "system" if msg.role == Role.DEVELOPER else msg.role.value
     # Extract text from content (handles both string and array formats)
-    content = _extract_text_from_content(msg.content)
+    content = extract_text_from_content(msg.content)
     result: dict[str, Any] = {"role": role, "content": content or ""}
 
     # Include tool_calls for assistant messages
@@ -219,7 +219,7 @@ def _build_messages_with_injections(
         and not _has_tool_messages(body)
         and not body.tools
     ):
-        content = _extract_text_from_content(body.messages[0].content)
+        content = extract_text_from_content(body.messages[0].content)
         prompt = (content or "") + think_suffix
         return prompt, None
 
@@ -231,7 +231,7 @@ def _build_messages_with_injections(
         messages.insert(0, {"role": "system", "content": system_prompt})
 
     # Inject think suffix and get prompt for logging/display
-    last_content = _extract_text_from_content(body.messages[-1].content)
+    last_content = extract_text_from_content(body.messages[-1].content)
     prompt = last_content or ""
     if injected_prompt := _inject_think_suffix(messages, think_suffix):
         prompt = injected_prompt

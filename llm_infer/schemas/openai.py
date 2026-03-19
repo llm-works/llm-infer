@@ -151,7 +151,7 @@ class ImageContentPart(BaseModel):
 ContentPart = TextContentPart | ImageContentPart
 
 
-def _extract_text_from_content(
+def extract_text_from_content(
     content: str | list[ContentPart] | list[dict[str, Any]] | None,
 ) -> str | None:
     """Extract text from content, handling both string and array formats.
@@ -213,7 +213,10 @@ class ChatCompletionRequest(BaseModel):
     # Generation parameters
     max_tokens: int | None = Field(None, ge=1, le=4096)
     max_completion_tokens: int | None = Field(
-        None, ge=1, description="Max tokens for reasoning models (alias for max_tokens)"
+        None,
+        ge=1,
+        le=4096,
+        description="Max tokens for reasoning models (alias for max_tokens)",
     )
     temperature: float = Field(1.0, ge=0.0, le=2.0)
     top_p: float = Field(1.0, ge=0.0, le=1.0)

@@ -178,10 +178,11 @@ def _determine_chat_finish_reason(
     response: Any, body: ChatCompletionRequest, has_tool_calls: bool
 ) -> FinishReason:
     """Determine finish reason for chat completion."""
+    effective_max_tokens = body.max_tokens or body.max_completion_tokens
     max_tokens_reached = (
         response.completion_tokens is not None
-        and body.max_tokens is not None
-        and response.completion_tokens >= body.max_tokens
+        and effective_max_tokens is not None
+        and response.completion_tokens >= effective_max_tokens
     )
     return determine_finish_reason(
         is_eos=not max_tokens_reached,

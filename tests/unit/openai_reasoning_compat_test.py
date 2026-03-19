@@ -12,7 +12,7 @@ from llm_infer.schemas.openai import (
     PromptTokensDetails,
     Role,
     TextContentPart,
-    _extract_text_from_content,
+    extract_text_from_content,
 )
 from llm_infer.serving.api.openai.mappers import (
     _has_system_message,
@@ -231,16 +231,16 @@ class TestContentArrayFormat:
 
     def test_extract_text_from_string(self) -> None:
         """String content is returned as-is."""
-        assert _extract_text_from_content("Hello") == "Hello"
+        assert extract_text_from_content("Hello") == "Hello"
 
     def test_extract_text_from_none(self) -> None:
         """None content returns None."""
-        assert _extract_text_from_content(None) is None
+        assert extract_text_from_content(None) is None
 
     def test_extract_text_from_array_single_text(self) -> None:
         """Single text part in array is extracted."""
         content = [{"type": "text", "text": "Hello world"}]
-        assert _extract_text_from_content(content) == "Hello world"
+        assert extract_text_from_content(content) == "Hello world"
 
     def test_extract_text_from_array_multiple_text(self) -> None:
         """Multiple text parts are joined."""
@@ -248,7 +248,7 @@ class TestContentArrayFormat:
             {"type": "text", "text": "Hello "},
             {"type": "text", "text": "world"},
         ]
-        assert _extract_text_from_content(content) == "Hello world"
+        assert extract_text_from_content(content) == "Hello world"
 
     def test_extract_text_ignores_image_parts(self) -> None:
         """Image parts are ignored, only text is extracted."""
@@ -256,18 +256,18 @@ class TestContentArrayFormat:
             {"type": "text", "text": "What's in this image?"},
             {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
         ]
-        assert _extract_text_from_content(content) == "What's in this image?"
+        assert extract_text_from_content(content) == "What's in this image?"
 
     def test_extract_text_empty_array(self) -> None:
         """Empty array returns None."""
-        assert _extract_text_from_content([]) is None
+        assert extract_text_from_content([]) is None
 
     def test_extract_text_only_images(self) -> None:
         """Array with only images returns None."""
         content = [
             {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}}
         ]
-        assert _extract_text_from_content(content) is None
+        assert extract_text_from_content(content) is None
 
     def test_message_with_array_content(self) -> None:
         """ChatMessage accepts array content format."""
