@@ -345,7 +345,11 @@ def _handle_chat_streaming(
     """Handle streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
     normalizer = _create_normalizer(body.think, model_config)
-    generator = ChatStreamingGenerator(lg, request_id, model_name, ipc, normalizer)
+    # Use same effective_max_tokens logic as non-streaming path
+    effective_max_tokens = body.max_tokens or body.max_completion_tokens or 256
+    generator = ChatStreamingGenerator(
+        lg, request_id, model_name, ipc, normalizer, effective_max_tokens
+    )
     return StreamingResponse(
         generator.stream(internal_request),
         media_type="text/event-stream",

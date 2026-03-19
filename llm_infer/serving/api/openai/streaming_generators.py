@@ -93,40 +93,46 @@ class StreamingGenerator(ABC):
         """Create SSE event for the final chunk with finish reason."""
         pass
 
-    def _log_timeout(self, e: TimeoutError) -> None:
-        """Log IPC timeout error."""
+    def _handle_timeout(self, e: TimeoutError) -> tuple[str, str]:
+        """Handle IPC timeout: log and return error SSE events."""
         self._lg.warning(
             "IPC timeout", extra={"request_id": self.request_id, "error": str(e)}
         )
+        return format_sse_error(str(e), code="timeout"), format_sse_done()
+
+    def _adjust_finish_reason(
+        self, finish_reason: FinishReason, completion_tokens: int | None
+    ) -> FinishReason:
+        """Adjust finish_reason based on token count. Override in subclasses."""
+        return finish_reason
 
     async def stream(self, internal_request: InternalRequest) -> AsyncIterator[str]:
         """Template method: execute the streaming algorithm."""
-        # Optional header chunk
-        header = self.create_header_chunk()
-        if header:
+        if header := self.create_header_chunk():
             yield header
 
-        finish_reason = FinishReason.STOP
-        tool_calls = None
-        adapter: AdapterInfoResponse | None = None
+        finish_reason, tool_calls, adapter, completion_tokens = (
+            FinishReason.STOP,
+            None,
+            None,
+            None,
+        )
         try:
             async for chunk in self.ipc.submit_stream(internal_request):
                 if chunk.is_final:
                     finish_reason = _map_finish_reason(chunk.finish_reason)
+                    completion_tokens = getattr(chunk, "completion_tokens", None)
                     tool_calls = getattr(chunk, "tool_calls", None)
                     adapter = _extract_adapter_info(chunk)
                     break
-                if chunk.token:
-                    content = self.create_content_chunk(chunk.token)
-                    if content:  # Skip empty chunks (e.g., normalizer buffering)
-                        yield content
+                if chunk.token and (content := self.create_content_chunk(chunk.token)):
+                    yield content
         except TimeoutError as e:
-            self._log_timeout(e)
-            yield format_sse_error(str(e), code="timeout")
-            yield format_sse_done()
+            for event in self._handle_timeout(e):
+                yield event
             return
 
-        # Final chunk with finish_reason, tool_calls, and adapter info
+        finish_reason = self._adjust_finish_reason(finish_reason, completion_tokens)
         yield self.create_final_chunk(finish_reason, tool_calls, adapter)
         yield format_sse_done()
 
@@ -146,9 +152,26 @@ class ChatStreamingGenerator(StreamingGenerator):
         model: str,
         ipc: Any,
         normalizer: ThinkTagNormalizer | None = None,
+        effective_max_tokens: int | None = None,
     ):
         super().__init__(lg, request_id, model, ipc)
         self._normalizer = normalizer
+        self._effective_max_tokens = effective_max_tokens
+
+    def _adjust_finish_reason(
+        self, finish_reason: FinishReason, completion_tokens: int | None
+    ) -> FinishReason:
+        """Override finish_reason if max tokens was reached.
+
+        Ensures streaming path uses same logic as non-streaming path.
+        """
+        if (
+            self._effective_max_tokens is not None
+            and completion_tokens is not None
+            and completion_tokens >= self._effective_max_tokens
+        ):
+            return FinishReason.LENGTH
+        return finish_reason
 
     def create_header_chunk(self) -> str:
         """Create role announcement chunk."""

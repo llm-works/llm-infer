@@ -32,8 +32,9 @@ def format_messages_as_prompt(messages: list[ChatMessage]) -> str:
     """
     parts = []
     for msg in messages:
-        content = extract_text_from_content(msg.content)
-        parts.append(f"{msg.role.value}: {content}")
+        # Use _message_to_dict for consistent role normalization and content extraction
+        normalized = _message_to_dict(msg)
+        parts.append(f"{normalized['role']}: {normalized['content']}")
     return "\n".join(parts)
 
 

@@ -177,7 +177,8 @@ class ChatMessage(BaseModel):
     """A single chat message."""
 
     role: Role
-    content: str | list[ContentPart] | None = None  # String or array format
+    # String or array format. Array accepts dicts for forward compatibility with new content types.
+    content: str | list[ContentPart] | list[dict[str, Any]] | None = None
     name: str | None = None
     # Tool calling fields
     tool_calls: list[ToolCall] | None = Field(
