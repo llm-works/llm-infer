@@ -15,6 +15,7 @@ from ....schemas.openai import (
     Role,
     Tool,
     ToolChoice,
+    extract_text_from_content,
 )
 from ...dispatch.types import Request as InternalRequest
 
@@ -31,7 +32,9 @@ def format_messages_as_prompt(messages: list[ChatMessage]) -> str:
     """
     parts = []
     for msg in messages:
-        parts.append(f"{msg.role.value}: {msg.content}")
+        # Use _message_to_dict for consistent role normalization and content extraction
+        normalized = _message_to_dict(msg)
+        parts.append(f"{normalized['role']}: {normalized['content']}")
     return "\n".join(parts)
 
 
@@ -148,8 +151,8 @@ def _get_system_prompt(
 
 
 def _has_system_message(body: ChatCompletionRequest) -> bool:
-    """Check if request already has a system message."""
-    return any(msg.role == Role.SYSTEM for msg in body.messages)
+    """Check if request already has a system message (or developer role equivalent)."""
+    return any(msg.role in (Role.SYSTEM, Role.DEVELOPER) for msg in body.messages)
 
 
 def _inject_think_suffix(messages: list[dict[str, str]], suffix: str) -> str | None:
@@ -171,7 +174,11 @@ def _inject_think_suffix(messages: list[dict[str, str]], suffix: str) -> str | N
 
 def _message_to_dict(msg: ChatMessage) -> dict[str, Any]:
     """Convert ChatMessage to dict format, including tool calling fields."""
-    result: dict[str, Any] = {"role": msg.role.value, "content": msg.content or ""}
+    # Convert developer role to system for local backend compatibility
+    role = "system" if msg.role == Role.DEVELOPER else msg.role.value
+    # Extract text from content (handles both string and array formats)
+    content = extract_text_from_content(msg.content)
+    result: dict[str, Any] = {"role": role, "content": content or ""}
 
     # Include tool_calls for assistant messages
     if msg.tool_calls:
@@ -213,7 +220,8 @@ def _build_messages_with_injections(
         and not _has_tool_messages(body)
         and not body.tools
     ):
-        prompt = (body.messages[0].content or "") + think_suffix
+        content = extract_text_from_content(body.messages[0].content)
+        prompt = (content or "") + think_suffix
         return prompt, None
 
     # Build messages list for template, including tool calling fields
@@ -224,7 +232,8 @@ def _build_messages_with_injections(
         messages.insert(0, {"role": "system", "content": system_prompt})
 
     # Inject think suffix and get prompt for logging/display
-    prompt = body.messages[-1].content or ""
+    last_content = extract_text_from_content(body.messages[-1].content)
+    prompt = last_content or ""
     if injected_prompt := _inject_think_suffix(messages, think_suffix):
         prompt = injected_prompt
 
@@ -246,7 +255,7 @@ def chat_request_to_internal(
     return InternalRequest(
         id=request_id,
         prompt=prompt,
-        max_tokens=body.max_tokens or 256,
+        max_tokens=body.max_tokens or body.max_completion_tokens or 256,
         temperature=body.temperature,
         top_p=body.top_p,
         top_k=0,  # OpenAI doesn't expose top_k
