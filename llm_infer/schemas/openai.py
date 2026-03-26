@@ -212,11 +212,10 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage] = Field(..., min_length=1)
 
     # Generation parameters
-    max_tokens: int | None = Field(None, ge=1, le=4096)
+    max_tokens: int | None = Field(None, ge=1)
     max_completion_tokens: int | None = Field(
         None,
         ge=1,
-        le=4096,
         description="Max tokens for reasoning models (alias for max_tokens)",
     )
     temperature: float = Field(1.0, ge=0.0, le=2.0)
@@ -414,7 +413,7 @@ class CompletionRequest(BaseModel):
     prompt: str | list[str] = Field(...)
 
     # Generation parameters
-    max_tokens: int = Field(16, ge=1, le=4096)
+    max_tokens: int = Field(16, ge=1)
     temperature: float = Field(1.0, ge=0.0, le=2.0)
     top_p: float = Field(1.0, ge=0.0, le=1.0)
     n: int = Field(1, ge=1, le=1)

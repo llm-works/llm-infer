@@ -94,6 +94,10 @@ models:
     task: embed
     ollama: nomic-embed-text
 
+  all-minilm:
+    task: embed
+    ollama: all-minilm:22m
+
   # ---------------------------------------------------------------------------
   # Qwen2.5 instruct models
   # ---------------------------------------------------------------------------
