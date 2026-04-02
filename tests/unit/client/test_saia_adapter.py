@@ -3,12 +3,12 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from llm_saia.core.backend import (
+from llm_saia.core import (
     AgentResponse,
     Message,
     ToolDef,
 )
-from llm_saia.core.backend import (
+from llm_saia.core import (
     ToolCall as SAIAToolCall,
 )
 

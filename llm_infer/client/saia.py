@@ -21,13 +21,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from llm_saia.core.backend import (
+from llm_saia.core import (
     AgentResponse,
     Backend,
     Message,
     ToolDef,
 )
-from llm_saia.core.backend import (
+from llm_saia.core import (
     ToolCall as SAIAToolCall,
 )
 
