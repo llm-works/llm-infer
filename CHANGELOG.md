@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `SAIAAdapter.chat()` now accepts `temperature` parameter for sampling control
 
+### Fixed
+
+- Fix `SAIAAdapter` broken import: use stable `llm_saia.core` public API instead of internal
+  submodules (`core.backend`, `core.conversation`) that broke after llm-saia refactor
+- Bump `llm-saia` dependency to `>=0.2.0,<0.3.0` (required for `core` public API re-exports)
+
 ### Changed
 
 - Update IPC calls for appinfra 0.6.0 API: request ID now passed via `request.id` attribute
