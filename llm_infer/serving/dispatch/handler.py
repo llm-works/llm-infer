@@ -437,6 +437,7 @@ class RequestHandler(ABC):
         effective_adapter = self._resolve_effective_adapter(request)
         adapter_result, fallback_adapter = self._resolve_lora_request(effective_adapter)
         if adapter_result is not None:
+            # Works for both vLLM LoRARequest and PEFT path string
             params["lora_request"] = adapter_result
 
         self._add_request_extensions(params, request)

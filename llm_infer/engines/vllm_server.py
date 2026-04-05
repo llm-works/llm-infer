@@ -106,6 +106,10 @@ class VLLMServerStreamingIterator:
         self._tool_call_chunks: dict[int, dict[str, Any]] = {}
         self.tool_calls: list[dict[str, Any]] | None = None
 
+        # Reasoning content bridging (vLLM reasoning_parser streams reasoning_content
+        # separately; we wrap it in <think> tags for the ThinkTagParser pipeline)
+        self._in_reasoning = False
+
         # Adapter verification (populated from first chunk with model field)
         self._response_model: str | None = None
         self.adapter_info: dict[str, Any] | None = None
@@ -238,8 +242,23 @@ class VLLMServerStreamingIterator:
                 self._accumulate_tool_call_delta(tc_delta)
         if choice.get("finish_reason"):
             self._handle_completion(data)
+
+        # Bridge reasoning_content from vLLM's reasoning parser into <think> tags
+        # so the ThinkTagParser pipeline handles it the same as non-streaming
+        reasoning: str = delta.get("reasoning_content") or ""
         content: str = delta.get("content") or ""
-        return content if content else None
+        result = ""
+        if reasoning:
+            if not self._in_reasoning:
+                result += "<think>"
+                self._in_reasoning = True
+            result += reasoning
+        if content:
+            if self._in_reasoning:
+                result += "</think>"
+                self._in_reasoning = False
+            result += content
+        return result if result else None
 
     def _process_sse_line(self, line: str) -> str | None:
         """Process a single SSE line, returning text chunk if present."""
