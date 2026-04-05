@@ -677,6 +677,7 @@ class VLLMServerEngine:
         tool_choice: str | dict[str, Any] | None,
         response_format: dict[str, Any] | None,
         stream: bool,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Add optional parameters to payload."""
         if stop_sequences:
@@ -689,8 +690,16 @@ class VLLMServerEngine:
             payload["response_format"] = response_format
         if stream:
             payload["stream_options"] = {"include_usage": True}
-        if self._config.chat_template_kwargs:
-            payload["chat_template_kwargs"] = self._config.chat_template_kwargs
+        # Per-request chat_template_kwargs override static config
+        effective_kwargs = chat_template_kwargs or self._config.chat_template_kwargs
+        if effective_kwargs:
+            payload["chat_template_kwargs"] = effective_kwargs
+
+    def _resolve_model_name(self, lora_request: Any | None) -> str:
+        """Resolve model name for API requests (adapter name or base model)."""
+        if lora_request and hasattr(lora_request, "lora_name"):
+            return str(lora_request.lora_name)
+        return self._model_name
 
     def _build_payload(
         self,
@@ -705,33 +714,28 @@ class VLLMServerEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build OpenAI-compatible chat completions payload."""
         api_messages = (
             list(messages) if messages else [{"role": "user", "content": prompt}]
         )
-
-        # For LoRA: use adapter name as model field (pre-registered at server startup)
-        # NOTE: Unlike vllm (Python API) which loads adapters dynamically, vllm-server
-        # requires adapters to be registered at startup via --lora-modules. Adapters
-        # created after server startup will return 404 errors until server is restarted.
-        model_name = (
-            lora_request.lora_name
-            if lora_request and hasattr(lora_request, "lora_name")
-            else self._model_name
-        )
-
         payload: dict[str, Any] = {
-            "model": model_name,
+            "model": self._resolve_model_name(lora_request),
             "messages": api_messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
             "stream": stream,
         }
-
         self._add_optional_params(
-            payload, stop_sequences, tools, tool_choice, response_format, stream
+            payload,
+            stop_sequences,
+            tools,
+            tool_choice,
+            response_format,
+            stream,
+            chat_template_kwargs,
         )
 
         return payload
@@ -829,6 +833,7 @@ class VLLMServerEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> str | dict[str, Any]:
         """Generate text completion (blocking).
 
@@ -851,6 +856,7 @@ class VLLMServerEngine:
             tools=tools,
             tool_choice=tool_choice,
             response_format=response_format,
+            chat_template_kwargs=chat_template_kwargs,
         )
         # Add optional params that vLLM supports via extra_body
         if repetition_penalty != 1.0:
@@ -877,6 +883,7 @@ class VLLMServerEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> VLLMServerStreamingIterator:
         """Generate text with streaming via SSE."""
         payload = self._build_payload(
@@ -891,6 +898,7 @@ class VLLMServerEngine:
             tools=tools,
             tool_choice=tool_choice,
             response_format=response_format,
+            chat_template_kwargs=chat_template_kwargs,
         )
         if repetition_penalty != 1.0:
             payload["repetition_penalty"] = repetition_penalty

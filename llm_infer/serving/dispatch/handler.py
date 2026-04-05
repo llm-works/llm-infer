@@ -401,6 +401,17 @@ class RequestHandler(ABC):
                     return resolved.key
         return None
 
+    def _add_request_extensions(self, params: dict[str, Any], request: Request) -> None:
+        """Add optional request extensions (tools, response format, etc.)."""
+        if request.tools:
+            params["tools"] = request.tools
+        if request.tool_choice is not None:
+            params["tool_choice"] = request.tool_choice
+        if request.response_format is not None:
+            params["response_format"] = request.response_format
+        if request.chat_template_kwargs is not None:
+            params["chat_template_kwargs"] = request.chat_template_kwargs
+
     def _build_engine_params(
         self, request: Request
     ) -> tuple[dict[str, Any], str | None]:
@@ -425,19 +436,10 @@ class RequestHandler(ABC):
         }
         effective_adapter = self._resolve_effective_adapter(request)
         adapter_result, fallback_adapter = self._resolve_lora_request(effective_adapter)
-
         if adapter_result is not None:
-            # Works for both vLLM LoRARequest and PEFT path string
             params["lora_request"] = adapter_result
 
-        # Tool calling support
-        if request.tools:
-            params["tools"] = request.tools
-        if request.tool_choice is not None:
-            params["tool_choice"] = request.tool_choice
-        # Structured output support
-        if request.response_format is not None:
-            params["response_format"] = request.response_format
+        self._add_request_extensions(params, request)
         return params, fallback_adapter
 
     def _parse_generate_result(

@@ -240,6 +240,23 @@ def _build_messages_with_injections(
     return prompt, messages
 
 
+def _get_chat_template_kwargs(
+    think: bool | None, model_config: ModelConfig | None
+) -> dict[str, Any] | None:
+    """Build per-request chat_template_kwargs from model config and think mode.
+
+    For models that use chat_template_kwargs for thinking control (e.g., Qwen 3.5),
+    dynamically set enable_thinking based on the resolved think mode.
+    """
+    if model_config is None:
+        return None
+    base_kwargs = model_config.vllm.get("chat_template_kwargs")
+    if not base_kwargs or "enable_thinking" not in base_kwargs:
+        return None
+    effective_think = resolve_think_mode(think, model_config)
+    return {**base_kwargs, "enable_thinking": effective_think}
+
+
 def chat_request_to_internal(
     body: ChatCompletionRequest,
     request_id: str,
@@ -269,6 +286,7 @@ def chat_request_to_internal(
         tools=tools_to_dict(body.tools),
         tool_choice=tool_choice_to_dict(body.tool_choice),
         response_format=response_format_to_dict(body.response_format),
+        chat_template_kwargs=_get_chat_template_kwargs(body.think, model_config),
     )
 
 
