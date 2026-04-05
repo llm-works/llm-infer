@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix `SAIAAdapter` broken import: use stable `llm_saia.core` public API instead of internal
   submodules (`core.backend`, `core.conversation`) that broke after llm-saia refactor
 - Bump `llm-saia` dependency to `>=0.2.0,<0.3.0` (required for `core` public API re-exports)
+- Set `OLLAMA_HOST` from config `host` field when auto-starting Ollama server. Previously the
+  configured host/port was used for health checks but not passed to the subprocess, so auto-started
+  instances always bound to the default `localhost:11434`
 
 ### Changed
 

@@ -311,21 +311,23 @@ class OllamaEngine:
         except httpx.HTTPError:
             return False
 
-    def _start_server(self) -> None:
-        """Start the Ollama server process."""
+    def _build_server_env(self) -> dict[str, str]:
+        """Build environment variables for the Ollama server subprocess."""
         env = os.environ.copy()
-
-        # Set models path if configured
+        env["OLLAMA_HOST"] = self._config.host
         if self._config.models_path:
             env["OLLAMA_MODELS"] = os.path.expanduser(self._config.models_path)
-            self._lg.info(
-                "starting ollama server",
-                extra={"models_path": self._config.models_path},
-            )
-        else:
-            self._lg.info("starting ollama server")
+        return env
 
-        # Start the server process
+    def _start_server(self) -> None:
+        """Start the Ollama server process."""
+        env = self._build_server_env()
+
+        extra: dict[str, str] = {"host": self._config.host}
+        if self._config.models_path:
+            extra["models_path"] = self._config.models_path
+        self._lg.info("starting ollama server", extra=extra)
+
         self._process = subprocess.Popen(
             [self._config.binary_path, "serve"],
             env=env,
@@ -336,7 +338,6 @@ class OllamaEngine:
         # Mark ownership immediately so cleanup works if _wait_for_server() fails
         self._owns_process = True
 
-        # Wait for server to be ready
         self._wait_for_server()
 
     def _wait_for_server(self, timeout: float = 30.0) -> None:
