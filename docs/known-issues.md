@@ -37,14 +37,19 @@ Prod workloads (tool calling, summarization, ratings) do not use `think: true`, 
 ### Workaround
 
 None for per-request toggle. If thinking mode is needed for all requests, start the vLLM server
-with `enable_thinking: true` as the default:
+with `enable_thinking: true` as the default and set the model's think default to match:
 
 ```yaml
 # models.yaml — override for always-think mode
+think:
+  default: true           # so per-request mapper sends enable_thinking: true
 vllm:
   chat_template_kwargs:
-    enable_thinking: true
+    enable_thinking: true  # server-level default for vLLM subprocess
 ```
+
+Both settings are needed: `chat_template_kwargs.enable_thinking` controls the vLLM server default,
+and `think.default` ensures the per-request mapper doesn't override it back to `false`.
 
 This makes all requests think by default and the reasoning parser correctly separates content.
 The downside is non-thinking requests also incur the thinking token overhead.

@@ -227,24 +227,8 @@ class VLLMServerStreamingIterator:
             if not self.finish_reason:
                 self.finish_reason = "stop"
 
-    def _process_choice_delta(self, data: dict[str, Any]) -> str | None:
-        """Process choice delta from SSE chunk, returning content if present."""
-        choices = data.get("choices", [])
-        if not choices:
-            if data.get("usage"):
-                self._handle_completion(data)
-            return None
-
-        choice = choices[0]
-        delta = choice.get("delta", {})
-        if tc_deltas := delta.get("tool_calls"):
-            for tc_delta in tc_deltas:
-                self._accumulate_tool_call_delta(tc_delta)
-        if choice.get("finish_reason"):
-            self._handle_completion(data)
-
-        # Bridge reasoning_content from vLLM's reasoning parser into <think> tags
-        # so the ThinkTagParser pipeline handles it the same as non-streaming
+    def _bridge_reasoning_content(self, delta: dict[str, Any]) -> str:
+        """Bridge vLLM reasoning_content into <think> tags for ThinkTagParser."""
         reasoning: str = delta.get("reasoning_content") or ""
         content: str = delta.get("content") or ""
         result = ""
@@ -258,6 +242,32 @@ class VLLMServerStreamingIterator:
                 result += "</think>"
                 self._in_reasoning = False
             result += content
+        return result
+
+    def _process_choice_delta(self, data: dict[str, Any]) -> str | None:
+        """Process choice delta from SSE chunk, returning content if present."""
+        choices = data.get("choices", [])
+        if not choices:
+            if data.get("usage"):
+                self._handle_completion(data)
+            return None
+
+        choice = choices[0]
+        delta = choice.get("delta", {})
+        if tc_deltas := delta.get("tool_calls"):
+            for tc_delta in tc_deltas:
+                self._accumulate_tool_call_delta(tc_delta)
+
+        result = self._bridge_reasoning_content(delta)
+
+        # Handle completion after building text so finish_reason doesn't
+        # prevent closing an open <think> tag
+        if choice.get("finish_reason"):
+            if self._in_reasoning:
+                result += "</think>"
+                self._in_reasoning = False
+            self._handle_completion(data)
+
         return result if result else None
 
     def _process_sse_line(self, line: str) -> str | None:

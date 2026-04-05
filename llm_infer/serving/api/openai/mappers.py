@@ -247,14 +247,18 @@ def _get_chat_template_kwargs(
 
     For models that use chat_template_kwargs for thinking control (e.g., Qwen 3.5),
     dynamically set enable_thinking based on the resolved think mode.
+    Non-enable_thinking keys are always preserved.
     """
     if model_config is None:
         return None
     base_kwargs = model_config.vllm.get("chat_template_kwargs")
-    if not base_kwargs or "enable_thinking" not in base_kwargs:
+    if not base_kwargs:
         return None
-    effective_think = resolve_think_mode(think, model_config)
-    return {**base_kwargs, "enable_thinking": effective_think}
+    # Override enable_thinking dynamically when present in base config
+    if "enable_thinking" in base_kwargs:
+        effective_think = resolve_think_mode(think, model_config)
+        return {**base_kwargs, "enable_thinking": effective_think}
+    return dict(base_kwargs)
 
 
 def chat_request_to_internal(
