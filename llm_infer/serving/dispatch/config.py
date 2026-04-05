@@ -315,6 +315,10 @@ class VLLMServerConfig:
     # Tool calling
     tool_call_parser: str = "hermes"  # hermes, llama, mistral, etc.
 
+    # Chat template kwargs (passed to vLLM as --default-chat-template-kwargs)
+    # e.g., {"enable_thinking": false} for Qwen 3.5 to suppress CoT output
+    chat_template_kwargs: dict[str, Any] = field(default_factory=dict)
+
     # Warmup
     warmup: bool = True
 

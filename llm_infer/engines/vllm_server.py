@@ -468,6 +468,15 @@ class VLLMServerEngine:
         cmd.append("--enable-auto-tool-choice")
         cmd.extend(["--tool-call-parser", cfg.tool_call_parser])
 
+        # Chat template kwargs (e.g., {"enable_thinking": false} for Qwen 3.5)
+        if cfg.chat_template_kwargs:
+            cmd.extend(
+                [
+                    "--default-chat-template-kwargs",
+                    json.dumps(cfg.chat_template_kwargs),
+                ]
+            )
+
         self._add_lora_flags(cmd)
 
         return cmd
@@ -680,6 +689,8 @@ class VLLMServerEngine:
             payload["response_format"] = response_format
         if stream:
             payload["stream_options"] = {"include_usage": True}
+        if self._config.chat_template_kwargs:
+            payload["chat_template_kwargs"] = self._config.chat_template_kwargs
 
     def _build_payload(
         self,
