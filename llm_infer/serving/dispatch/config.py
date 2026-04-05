@@ -315,6 +315,15 @@ class VLLMServerConfig:
     # Tool calling
     tool_call_parser: str = "hermes"  # hermes, llama, mistral, etc.
 
+    # Reasoning parser (passed as --reasoning-parser to vllm serve)
+    # Extracts thinking/reasoning into a separate field in the response.
+    # e.g., "qwen3" for Qwen 3/3.5 models. None = disabled.
+    reasoning_parser: str | None = None
+
+    # Chat template kwargs (passed to vLLM as --default-chat-template-kwargs)
+    # e.g., {"enable_thinking": false} for Qwen 3.5 to suppress CoT output
+    chat_template_kwargs: dict[str, Any] = field(default_factory=dict)
+
     # Warmup
     warmup: bool = True
 

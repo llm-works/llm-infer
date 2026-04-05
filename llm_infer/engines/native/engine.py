@@ -180,6 +180,7 @@ class InferenceEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> str:
         """Generate text from a prompt (blocking).
 
@@ -287,6 +288,7 @@ class InferenceEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> StreamingResult:
         """
         Stream generated tokens (sync version).

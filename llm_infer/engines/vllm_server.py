@@ -106,6 +106,10 @@ class VLLMServerStreamingIterator:
         self._tool_call_chunks: dict[int, dict[str, Any]] = {}
         self.tool_calls: list[dict[str, Any]] | None = None
 
+        # Reasoning content bridging (vLLM reasoning_parser streams reasoning_content
+        # separately; we wrap it in <think> tags for the ThinkTagParser pipeline)
+        self._in_reasoning = False
+
         # Adapter verification (populated from first chunk with model field)
         self._response_model: str | None = None
         self.adapter_info: dict[str, Any] | None = None
@@ -223,6 +227,23 @@ class VLLMServerStreamingIterator:
             if not self.finish_reason:
                 self.finish_reason = "stop"
 
+    def _bridge_reasoning_content(self, delta: dict[str, Any]) -> str:
+        """Bridge vLLM reasoning_content into <think> tags for ThinkTagParser."""
+        reasoning: str = delta.get("reasoning_content") or ""
+        content: str = delta.get("content") or ""
+        result = ""
+        if reasoning:
+            if not self._in_reasoning:
+                result += "<think>"
+                self._in_reasoning = True
+            result += reasoning
+        if content:
+            if self._in_reasoning:
+                result += "</think>"
+                self._in_reasoning = False
+            result += content
+        return result
+
     def _process_choice_delta(self, data: dict[str, Any]) -> str | None:
         """Process choice delta from SSE chunk, returning content if present."""
         choices = data.get("choices", [])
@@ -236,10 +257,18 @@ class VLLMServerStreamingIterator:
         if tc_deltas := delta.get("tool_calls"):
             for tc_delta in tc_deltas:
                 self._accumulate_tool_call_delta(tc_delta)
+
+        result = self._bridge_reasoning_content(delta)
+
+        # Handle completion after building text so finish_reason doesn't
+        # prevent closing an open <think> tag
         if choice.get("finish_reason"):
+            if self._in_reasoning:
+                result += "</think>"
+                self._in_reasoning = False
             self._handle_completion(data)
-        content: str = delta.get("content") or ""
-        return content if content else None
+
+        return result if result else None
 
     def _process_sse_line(self, line: str) -> str | None:
         """Process a single SSE line, returning text chunk if present."""
@@ -468,6 +497,19 @@ class VLLMServerEngine:
         cmd.append("--enable-auto-tool-choice")
         cmd.extend(["--tool-call-parser", cfg.tool_call_parser])
 
+        # Reasoning parser (e.g., "qwen3" for Qwen 3/3.5 thinking separation)
+        if cfg.reasoning_parser:
+            cmd.extend(["--reasoning-parser", cfg.reasoning_parser])
+
+        # Chat template kwargs (e.g., {"enable_thinking": false} for Qwen 3.5)
+        if cfg.chat_template_kwargs:
+            cmd.extend(
+                [
+                    "--default-chat-template-kwargs",
+                    json.dumps(cfg.chat_template_kwargs),
+                ]
+            )
+
         self._add_lora_flags(cmd)
 
         return cmd
@@ -668,6 +710,7 @@ class VLLMServerEngine:
         tool_choice: str | dict[str, Any] | None,
         response_format: dict[str, Any] | None,
         stream: bool,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Add optional parameters to payload."""
         if stop_sequences:
@@ -680,6 +723,16 @@ class VLLMServerEngine:
             payload["response_format"] = response_format
         if stream:
             payload["stream_options"] = {"include_usage": True}
+        # Per-request chat_template_kwargs override static config
+        effective_kwargs = chat_template_kwargs or self._config.chat_template_kwargs
+        if effective_kwargs:
+            payload["chat_template_kwargs"] = effective_kwargs
+
+    def _resolve_model_name(self, lora_request: Any | None) -> str:
+        """Resolve model name for API requests (adapter name or base model)."""
+        if lora_request and hasattr(lora_request, "lora_name"):
+            return str(lora_request.lora_name)
+        return self._model_name
 
     def _build_payload(
         self,
@@ -694,33 +747,28 @@ class VLLMServerEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build OpenAI-compatible chat completions payload."""
         api_messages = (
             list(messages) if messages else [{"role": "user", "content": prompt}]
         )
-
-        # For LoRA: use adapter name as model field (pre-registered at server startup)
-        # NOTE: Unlike vllm (Python API) which loads adapters dynamically, vllm-server
-        # requires adapters to be registered at startup via --lora-modules. Adapters
-        # created after server startup will return 404 errors until server is restarted.
-        model_name = (
-            lora_request.lora_name
-            if lora_request and hasattr(lora_request, "lora_name")
-            else self._model_name
-        )
-
         payload: dict[str, Any] = {
-            "model": model_name,
+            "model": self._resolve_model_name(lora_request),
             "messages": api_messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
             "stream": stream,
         }
-
         self._add_optional_params(
-            payload, stop_sequences, tools, tool_choice, response_format, stream
+            payload,
+            stop_sequences,
+            tools,
+            tool_choice,
+            response_format,
+            stream,
+            chat_template_kwargs,
         )
 
         return payload
@@ -780,6 +828,9 @@ class VLLMServerEngine:
         choice = choices[0] if choices else {}
         message = choice.get("message", {})
         content: str = message.get("content") or ""
+        reasoning: str = message.get("reasoning_content") or ""
+        if reasoning:
+            content = f"<think>{reasoning}</think>{content}"
         tool_calls = message.get("tool_calls")
         usage = data.get("usage", {})
         finish_reason = choice.get("finish_reason")
@@ -818,6 +869,7 @@ class VLLMServerEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> str | dict[str, Any]:
         """Generate text completion (blocking).
 
@@ -840,6 +892,7 @@ class VLLMServerEngine:
             tools=tools,
             tool_choice=tool_choice,
             response_format=response_format,
+            chat_template_kwargs=chat_template_kwargs,
         )
         # Add optional params that vLLM supports via extra_body
         if repetition_penalty != 1.0:
@@ -866,6 +919,7 @@ class VLLMServerEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ) -> VLLMServerStreamingIterator:
         """Generate text with streaming via SSE."""
         payload = self._build_payload(
@@ -880,6 +934,7 @@ class VLLMServerEngine:
             tools=tools,
             tool_choice=tool_choice,
             response_format=response_format,
+            chat_template_kwargs=chat_template_kwargs,
         )
         if repetition_penalty != 1.0:
             payload["repetition_penalty"] = repetition_penalty
