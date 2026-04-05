@@ -33,6 +33,11 @@ lora:
 # Tool calling
 tool_call_parser: hermes      # hermes, llama, mistral, etc.
 
+# Reasoning parser (passed as --reasoning-parser to vllm serve)
+# Extracts thinking/reasoning into a separate response field.
+# e.g., "qwen3" for Qwen 3/3.5 models. null = disabled.
+reasoning_parser: null
+
 # Chat template kwargs (passed as --default-chat-template-kwargs to vllm serve,
 # and as chat_template_kwargs in each request body)
 # e.g., {enable_thinking: false} for Qwen 3.5 to suppress chain-of-thought

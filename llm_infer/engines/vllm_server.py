@@ -468,6 +468,10 @@ class VLLMServerEngine:
         cmd.append("--enable-auto-tool-choice")
         cmd.extend(["--tool-call-parser", cfg.tool_call_parser])
 
+        # Reasoning parser (e.g., "qwen3" for Qwen 3/3.5 thinking separation)
+        if cfg.reasoning_parser:
+            cmd.extend(["--reasoning-parser", cfg.reasoning_parser])
+
         # Chat template kwargs (e.g., {"enable_thinking": false} for Qwen 3.5)
         if cfg.chat_template_kwargs:
             cmd.extend(
@@ -795,6 +799,9 @@ class VLLMServerEngine:
         choice = choices[0] if choices else {}
         message = choice.get("message", {})
         content: str = message.get("content") or ""
+        reasoning: str = message.get("reasoning_content") or ""
+        if reasoning:
+            content = f"<think>{reasoning}</think>{content}"
         tool_calls = message.get("tool_calls")
         usage = data.get("usage", {})
         finish_reason = choice.get("finish_reason")

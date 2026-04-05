@@ -45,6 +45,7 @@ templates:
         open: ["<think>", "<thinking>"]
         close: ["</think>", "</thinking>"]
     vllm:
+      reasoning_parser: qwen3
       chat_template_kwargs:
         enable_thinking: false
 
