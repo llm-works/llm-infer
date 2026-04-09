@@ -189,12 +189,13 @@ class AdapterManager:
         Returns:
             Number of enabled adapters found.
         """
-        self._adapters.clear()
-        self._versions.clear()
         if not self._is_scannable():
+            self._adapters.clear()
+            self._versions.clear()
             return 0
 
         adapters_list = self._scan_and_load_adapters()
+        self._log_changes(adapters_list)
         self._populate_indexes(adapters_list)
 
         self._lg.debug(
@@ -215,20 +216,33 @@ class AdapterManager:
             adapter = self._load_adapter(entry)
             if adapter and adapter.enabled:
                 adapters.append(adapter)
-                self._lg.info(
-                    "adapter loaded",
-                    extra={
-                        "key": adapter.key,
-                        "adapter_name": adapter.name,
-                        "path": str(adapter.path),
-                        "md5": adapter.md5,
-                        "mtime": adapter.mtime,
-                    },
-                )
         return adapters
+
+    def _log_changes(self, new_adapters: list[LoadedAdapter]) -> None:
+        """Log only adapters that were added or removed since last scan."""
+        new_keys = {a.key for a in new_adapters}
+        old_keys = set(self._adapters.keys())
+        new_by_key = {a.key: a for a in new_adapters}
+
+        for key in new_keys - old_keys:
+            a = new_by_key[key]
+            self._lg.info(
+                "adapter loaded",
+                extra={
+                    "key": a.key,
+                    "adapter_name": a.name,
+                    "path": str(a.path),
+                    "md5": a.md5,
+                    "mtime": a.mtime,
+                },
+            )
+        for key in old_keys - new_keys:
+            self._lg.info("adapter unloaded", extra={"key": key})
 
     def _populate_indexes(self, adapters: list[LoadedAdapter]) -> None:
         """Populate primary and versions indexes from adapter list."""
+        self._adapters.clear()
+        self._versions.clear()
         for adapter in adapters:
             self._adapters[adapter.key] = adapter
         self._build_versions_index(adapters)
@@ -357,9 +371,17 @@ class AdapterManager:
 
     def _load_adapter(self, path: Path, key: str | None = None) -> LoadedAdapter | None:
         """Load adapter config and compute metadata from a directory."""
-        config = self._read_config(path / self.CONFIG_FILENAME)
+        config_path = path / self.CONFIG_FILENAME
+        config = self._read_config(config_path)
         if config is None:
-            return None
+            if config_path.exists():
+                # config.yaml exists but failed to parse — treat as error
+                return None
+            # No config.yaml — accept if adapter_config.json exists (PEFT standard).
+            # Treat as enabled with no description.
+            if not (path / self.ADAPTER_CONFIG_FILENAME).exists():
+                return None
+            config = {}
         full_key = key if key is not None else path.name
         compatible, peft_type = self._check_base_model_compatibility(path, full_key)
         if not compatible:
@@ -449,45 +471,6 @@ class AdapterManager:
         """
         adapter = self.resolve(key)
         return adapter.peft_type if adapter else None
-
-    def _validate_refresh_path(self, key: str) -> Path | None:
-        """Validate key and return path for refresh, or None if invalid."""
-        if not self._base_path:
-            return None
-        path = validate_adapter_key(key, self._base_path)
-        if path is None:
-            self._lg.warning(
-                "rejected adapter key with invalid characters", extra={"key": key}
-            )
-        return path
-
-    def refresh_one(self, key: str) -> LoadedAdapter | None:
-        """Refresh a single adapter by re-reading its config and metadata.
-
-        After refreshing, rebuilds the versions index to maintain consistency.
-        """
-        path = self._validate_refresh_path(key)
-        if path is None or not path.exists() or not path.is_dir():
-            self._adapters.pop(key, None)
-            self._rebuild_versions_index()
-            return None
-
-        # Pass original key to handle symlinked adapters correctly
-        adapter = self._load_adapter(path, key=key)
-        if adapter and adapter.enabled:
-            self._adapters[key] = adapter
-            self._rebuild_versions_index()
-            self._lg.debug(
-                "adapter refreshed",
-                extra={"key": key, "md5": adapter.md5, "mtime": adapter.mtime},
-            )
-            return adapter
-
-        # Disabled or invalid - remove from loaded set
-        self._adapters.pop(key, None)
-        self._rebuild_versions_index()
-        self._lg.debug("adapter unloaded", extra={"key": key})
-        return None
 
     def _rebuild_versions_index(self) -> None:
         """Rebuild versions index from current adapters."""

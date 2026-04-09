@@ -10,9 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `SAIAAdapter.chat()` now accepts `temperature` parameter for sampling control
+- `tool_call_parser: qwen3_xml` for Qwen 3.5 models — uses vLLM's native XML parser instead of
+  Hermes, fixing tool calling when `tool_choice` is `auto` or omitted
 
 ### Fixed
 
+- Adapter scanner now accepts directories with only `adapter_config.json` (PEFT standard) when
+  the llm-infer-specific `config.yaml` is absent, treating the adapter as enabled by default.
+  Malformed `config.yaml` files are still rejected (not silently treated as missing)
+- Adapter refresh endpoint (`/v1/adapters/refresh`) now always performs a full directory rescan,
+  removing stale entries and loading new ones atomically
 - Fix `SAIAAdapter` broken import: use stable `llm_saia.core` public API instead of internal
   submodules (`core.backend`, `core.conversation`) that broke after llm-saia refactor
 - Bump `llm-saia` dependency to `>=0.2.0,<0.3.0` (required for `core` public API re-exports)
