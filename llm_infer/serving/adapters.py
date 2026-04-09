@@ -488,6 +488,8 @@ class AdapterManager:
         if not self._base_path:
             return None
         prefix = name + "-"
+        best: tuple[Path, str] | None = None
+        best_mtime: float = -1.0
         for entry in self._base_path.iterdir():
             if not entry.name.startswith(prefix):
                 continue
@@ -496,8 +498,27 @@ class AdapterManager:
             if md5 is not None and entry.is_dir():
                 resolved = entry.resolve()
                 if resolved.exists():
-                    return resolved, entry.name
-        return None
+                    mtime = resolved.stat().st_mtime
+                    if mtime > best_mtime:
+                        best = resolved, entry.name
+                        best_mtime = mtime
+        return best
+
+    def _resolve_refresh_path(self, key: str) -> tuple[Path, str] | None:
+        """Resolve a refresh key to a (path, effective_key) pair.
+
+        Validates the key, then checks the exact path.  If the exact path
+        does not exist, falls back to versioned-entry lookup.  Returns
+        ``None`` when validation fails or no matching directory is found.
+        """
+        path = self._validate_refresh_path(key)
+        if path is None:
+            return None
+        if path.exists() and path.is_dir():
+            return path, key
+        # Valid key but exact path not found — check for a versioned symlink
+        # (e.g. "my-adapter" → "my-adapter-a1b2c3d4e5f6")
+        return self._find_versioned_entry(key)
 
     def refresh_one(self, key: str) -> LoadedAdapter | None:
         """Refresh a single adapter by re-reading its config and metadata.
@@ -506,33 +527,31 @@ class AdapterManager:
         Supports both exact keys (``my-adapter-a1b2c3d4e5f6``) and base names
         (``my-adapter``) which are resolved to their versioned directory entry.
         """
-        path = self._validate_refresh_path(key)
-        effective_key = key
-        if path is None or not path.exists() or not path.is_dir():
-            # Exact path not found — check for a versioned symlink matching
-            # this base name (e.g. "my-adapter" → "my-adapter-a1b2c3d4e5f6")
-            found = self._find_versioned_entry(key)
-            if found is None:
-                self._adapters.pop(key, None)
-                self._rebuild_versions_index()
-                return None
-            path, effective_key = found
+        resolved = self._resolve_refresh_path(key)
+        if resolved is None:
+            self._adapters.pop(key, None)
+            self._rebuild_versions_index()
+            return None
+        path, effective_key = resolved
 
-        # Pass original key to handle symlinked adapters correctly
         adapter = self._load_adapter(path, key=effective_key)
         if adapter and adapter.enabled:
-            self._adapters[key] = adapter
+            self._adapters[effective_key] = adapter
             self._rebuild_versions_index()
             self._lg.debug(
                 "adapter refreshed",
-                extra={"key": key, "md5": adapter.md5, "mtime": adapter.mtime},
+                extra={
+                    "key": effective_key,
+                    "md5": adapter.md5,
+                    "mtime": adapter.mtime,
+                },
             )
             return adapter
 
         # Disabled or invalid - remove from loaded set
-        self._adapters.pop(key, None)
+        self._adapters.pop(effective_key, None)
         self._rebuild_versions_index()
-        self._lg.debug("adapter unloaded", extra={"key": key})
+        self._lg.debug("adapter unloaded", extra={"key": effective_key})
         return None
 
     def _rebuild_versions_index(self) -> None:
