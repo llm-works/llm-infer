@@ -46,6 +46,7 @@ templates:
         close: ["</think>", "</thinking>"]
     vllm:
       reasoning_parser: qwen3
+      tool_call_parser: qwen3_xml
       chat_template_kwargs:
         enable_thinking: false
 
@@ -252,7 +253,7 @@ models:
     <<: *qwen35_think
     <<: !deep *vllm_default
     vllm:
-      gpu_memory_gb: 16.0  # AWQ-4bit model ~6GB + headroom for KV cache
+      gpu_memory_gb: 24.0  # AWQ-4bit model ~6GB + headroom for KV cache
 
   qwen3.5-27b-bnb-4bit-cyberenchanter:
     <<: *qwen35_think

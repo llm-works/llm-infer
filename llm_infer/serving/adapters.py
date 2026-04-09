@@ -359,7 +359,11 @@ class AdapterManager:
         """Load adapter config and compute metadata from a directory."""
         config = self._read_config(path / self.CONFIG_FILENAME)
         if config is None:
-            return None
+            # No config.yaml — accept if adapter_config.json exists (PEFT standard).
+            # Treat as enabled with no description.
+            if not (path / self.ADAPTER_CONFIG_FILENAME).exists():
+                return None
+            config = {}
         full_key = key if key is not None else path.name
         compatible, peft_type = self._check_base_model_compatibility(path, full_key)
         if not compatible:
@@ -461,19 +465,61 @@ class AdapterManager:
             )
         return path
 
+    def _find_versioned_entry(self, name: str) -> tuple[Path, str] | None:
+        """Find a versioned directory entry for an unversioned adapter name.
+
+        llm-kelt's FileStorage deploys adapters as versioned symlinks:
+
+            base_path/
+            └── my-adapter-a1b2c3d4e5f6  →  ../adapters/my-adapter/{version}/
+
+        When a refresh is requested with the base name ("my-adapter"), the
+        exact path ``base_path/my-adapter`` won't exist. This method scans
+        base_path for an entry matching the ``{name}-{12 hex chars}`` pattern
+        and returns it so the refresh can proceed.
+
+        Only matches the versioned key pattern (see ``parse_adapter_key``).
+        Adapters deployed without the ``-{md5}`` suffix are unaffected — they
+        are found directly by the exact-path check in ``refresh_one``.
+
+        Returns:
+            Tuple of (resolved_path, full_key) if found, None otherwise.
+        """
+        if not self._base_path:
+            return None
+        prefix = name + "-"
+        for entry in self._base_path.iterdir():
+            if not entry.name.startswith(prefix):
+                continue
+            # Verify suffix is a valid 12-char hex md5 (not just any hyphenated name)
+            _, md5 = parse_adapter_key(entry.name)
+            if md5 is not None and entry.is_dir():
+                resolved = entry.resolve()
+                if resolved.exists():
+                    return resolved, entry.name
+        return None
+
     def refresh_one(self, key: str) -> LoadedAdapter | None:
         """Refresh a single adapter by re-reading its config and metadata.
 
         After refreshing, rebuilds the versions index to maintain consistency.
+        Supports both exact keys (``my-adapter-a1b2c3d4e5f6``) and base names
+        (``my-adapter``) which are resolved to their versioned directory entry.
         """
         path = self._validate_refresh_path(key)
+        effective_key = key
         if path is None or not path.exists() or not path.is_dir():
-            self._adapters.pop(key, None)
-            self._rebuild_versions_index()
-            return None
+            # Exact path not found — check for a versioned symlink matching
+            # this base name (e.g. "my-adapter" → "my-adapter-a1b2c3d4e5f6")
+            found = self._find_versioned_entry(key)
+            if found is None:
+                self._adapters.pop(key, None)
+                self._rebuild_versions_index()
+                return None
+            path, effective_key = found
 
         # Pass original key to handle symlinked adapters correctly
-        adapter = self._load_adapter(path, key=key)
+        adapter = self._load_adapter(path, key=effective_key)
         if adapter and adapter.enabled:
             self._adapters[key] = adapter
             self._rebuild_versions_index()
