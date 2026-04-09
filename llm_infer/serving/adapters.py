@@ -189,12 +189,13 @@ class AdapterManager:
         Returns:
             Number of enabled adapters found.
         """
-        self._adapters.clear()
-        self._versions.clear()
         if not self._is_scannable():
+            self._adapters.clear()
+            self._versions.clear()
             return 0
 
         adapters_list = self._scan_and_load_adapters()
+        self._log_changes(adapters_list)
         self._populate_indexes(adapters_list)
 
         self._lg.debug(
@@ -215,20 +216,33 @@ class AdapterManager:
             adapter = self._load_adapter(entry)
             if adapter and adapter.enabled:
                 adapters.append(adapter)
-                self._lg.info(
-                    "adapter loaded",
-                    extra={
-                        "key": adapter.key,
-                        "adapter_name": adapter.name,
-                        "path": str(adapter.path),
-                        "md5": adapter.md5,
-                        "mtime": adapter.mtime,
-                    },
-                )
         return adapters
+
+    def _log_changes(self, new_adapters: list[LoadedAdapter]) -> None:
+        """Log only adapters that were added or removed since last scan."""
+        new_keys = {a.key for a in new_adapters}
+        old_keys = set(self._adapters.keys())
+        new_by_key = {a.key: a for a in new_adapters}
+
+        for key in new_keys - old_keys:
+            a = new_by_key[key]
+            self._lg.info(
+                "adapter loaded",
+                extra={
+                    "key": a.key,
+                    "adapter_name": a.name,
+                    "path": str(a.path),
+                    "md5": a.md5,
+                    "mtime": a.mtime,
+                },
+            )
+        for key in old_keys - new_keys:
+            self._lg.info("adapter unloaded", extra={"key": key})
 
     def _populate_indexes(self, adapters: list[LoadedAdapter]) -> None:
         """Populate primary and versions indexes from adapter list."""
+        self._adapters.clear()
+        self._versions.clear()
         for adapter in adapters:
             self._adapters[adapter.key] = adapter
         self._build_versions_index(adapters)
