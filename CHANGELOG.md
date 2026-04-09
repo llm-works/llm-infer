@@ -16,9 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Adapter scanner now accepts directories with only `adapter_config.json` (PEFT standard) when
-  the llm-infer-specific `config.yaml` is absent, treating the adapter as enabled by default
-- `refresh_one()` now resolves unversioned adapter names (e.g. `my-adapter`) to their versioned
-  symlink (e.g. `my-adapter-a1b2c3d4e5f6`), matching the llm-kelt FileStorage deploy convention
+  the llm-infer-specific `config.yaml` is absent, treating the adapter as enabled by default.
+  Malformed `config.yaml` files are still rejected (not silently treated as missing)
+- Adapter refresh endpoint (`/v1/adapters/refresh`) now always performs a full directory rescan,
+  removing stale entries and loading new ones atomically
 - Fix `SAIAAdapter` broken import: use stable `llm_saia.core` public API instead of internal
   submodules (`core.backend`, `core.conversation`) that broke after llm-saia refactor
 - Bump `llm-saia` dependency to `>=0.2.0,<0.3.0` (required for `core` public API re-exports)

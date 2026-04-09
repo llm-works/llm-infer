@@ -357,8 +357,12 @@ class AdapterManager:
 
     def _load_adapter(self, path: Path, key: str | None = None) -> LoadedAdapter | None:
         """Load adapter config and compute metadata from a directory."""
-        config = self._read_config(path / self.CONFIG_FILENAME)
+        config_path = path / self.CONFIG_FILENAME
+        config = self._read_config(config_path)
         if config is None:
+            if config_path.exists():
+                # config.yaml exists but failed to parse — treat as error
+                return None
             # No config.yaml — accept if adapter_config.json exists (PEFT standard).
             # Treat as enabled with no description.
             if not (path / self.ADAPTER_CONFIG_FILENAME).exists():
@@ -453,106 +457,6 @@ class AdapterManager:
         """
         adapter = self.resolve(key)
         return adapter.peft_type if adapter else None
-
-    def _validate_refresh_path(self, key: str) -> Path | None:
-        """Validate key and return path for refresh, or None if invalid."""
-        if not self._base_path:
-            return None
-        path = validate_adapter_key(key, self._base_path)
-        if path is None:
-            self._lg.warning(
-                "rejected adapter key with invalid characters", extra={"key": key}
-            )
-        return path
-
-    def _find_versioned_entry(self, name: str) -> tuple[Path, str] | None:
-        """Find a versioned directory entry for an unversioned adapter name.
-
-        llm-kelt's FileStorage deploys adapters as versioned symlinks:
-
-            base_path/
-            └── my-adapter-a1b2c3d4e5f6  →  ../adapters/my-adapter/{version}/
-
-        When a refresh is requested with the base name ("my-adapter"), the
-        exact path ``base_path/my-adapter`` won't exist. This method scans
-        base_path for an entry matching the ``{name}-{12 hex chars}`` pattern
-        and returns it so the refresh can proceed.
-
-        Only matches the versioned key pattern (see ``parse_adapter_key``).
-        Adapters deployed without the ``-{md5}`` suffix are unaffected — they
-        are found directly by the exact-path check in ``refresh_one``.
-
-        Returns:
-            Tuple of (resolved_path, full_key) if found, None otherwise.
-        """
-        if not self._base_path:
-            return None
-        prefix = name + "-"
-        best: tuple[Path, str] | None = None
-        best_mtime: float = -1.0
-        for entry in self._base_path.iterdir():
-            if not entry.name.startswith(prefix):
-                continue
-            # Verify suffix is a valid 12-char hex md5 (not just any hyphenated name)
-            _, md5 = parse_adapter_key(entry.name)
-            if md5 is not None and entry.is_dir():
-                resolved = entry.resolve()
-                if resolved.exists():
-                    mtime = resolved.stat().st_mtime
-                    if mtime > best_mtime:
-                        best = resolved, entry.name
-                        best_mtime = mtime
-        return best
-
-    def _resolve_refresh_path(self, key: str) -> tuple[Path, str] | None:
-        """Resolve a refresh key to a (path, effective_key) pair.
-
-        Validates the key, then checks the exact path.  If the exact path
-        does not exist, falls back to versioned-entry lookup.  Returns
-        ``None`` when validation fails or no matching directory is found.
-        """
-        path = self._validate_refresh_path(key)
-        if path is None:
-            return None
-        if path.exists() and path.is_dir():
-            return path, key
-        # Valid key but exact path not found — check for a versioned symlink
-        # (e.g. "my-adapter" → "my-adapter-a1b2c3d4e5f6")
-        return self._find_versioned_entry(key)
-
-    def refresh_one(self, key: str) -> LoadedAdapter | None:
-        """Refresh a single adapter by re-reading its config and metadata.
-
-        After refreshing, rebuilds the versions index to maintain consistency.
-        Supports both exact keys (``my-adapter-a1b2c3d4e5f6``) and base names
-        (``my-adapter``) which are resolved to their versioned directory entry.
-        """
-        resolved = self._resolve_refresh_path(key)
-        if resolved is None:
-            self._adapters.pop(key, None)
-            self._rebuild_versions_index()
-            return None
-        path, effective_key = resolved
-
-        adapter = self._load_adapter(path, key=effective_key)
-        if adapter and adapter.enabled:
-            self._adapters[effective_key] = adapter
-            self._rebuild_versions_index()
-            self._lg.debug(
-                "adapter refreshed",
-                extra={
-                    "key": effective_key,
-                    "md5": adapter.md5,
-                    "mtime": adapter.mtime,
-                },
-            )
-            return adapter
-
-        # Disabled or invalid - remove from loaded set
-        self._adapters.pop(effective_key, None)
-        self._rebuild_versions_index()
-        self._lg.debug("adapter unloaded", extra={"key": effective_key})
-        return None
 
     def _rebuild_versions_index(self) -> None:
         """Rebuild versions index from current adapters."""

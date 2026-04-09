@@ -154,15 +154,11 @@ class AdapterProcessor(RequestProcessor):
             response_q.put(self._make_refresh_response(request, 0, "disabled"))
             return
 
-        if request.key:
-            adapter = manager.refresh_one(request.key)
-            status = "loaded" if adapter else "unloaded"
-            response_q.put(
-                self._make_refresh_response(request, len(manager.list()), status)
-            )
-        else:
-            count = manager.scan()
-            response_q.put(self._make_refresh_response(request, count, "scanned"))
+        # Always full-rescan regardless of whether a specific key was
+        # requested.  The adapter count is small (vLLM LoRA limit) so a
+        # full scan is cheap.  Revisit if selective refresh is needed.
+        count = manager.scan()
+        response_q.put(self._make_refresh_response(request, count, "scanned"))
 
     def _make_refresh_response(
         self, request: AdapterRefreshRequest, adapters_loaded: int, status: str
