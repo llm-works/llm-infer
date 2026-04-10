@@ -10,20 +10,12 @@ from llm_infer.serving.dispatch.handlers.batching import (
     ContinuousBatchingHandler,
     RunningRequest,
 )
-from llm_infer.serving.dispatch.types import Request, RequestStatus
+from llm_infer.serving.dispatch.types import RequestStatus
+
+from .._helpers import make_engine as _engine
+from .._helpers import make_request as _request
 
 pytestmark = pytest.mark.unit
-
-
-def _engine(*, generate_result: str = "out") -> MagicMock:
-    e = MagicMock()
-    e.generate.return_value = generate_result
-    e.count_tokens.return_value = 5
-    return e
-
-
-def _request(req_id: str = "r1") -> Request:
-    return Request(id=req_id, prompt="hello")
 
 
 # ---------------------------------------------------------------------------

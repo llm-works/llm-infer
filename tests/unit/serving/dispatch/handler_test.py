@@ -20,10 +20,12 @@ from llm_infer.serving.dispatch.handler import (
 )
 from llm_infer.serving.dispatch.handlers import SequentialHandler
 from llm_infer.serving.dispatch.types import (
-    Request,
     RequestStatus,
     StreamChunk,
 )
+
+from ._helpers import ResponseQueueFake
+from ._helpers import make_request as _request
 
 pytestmark = pytest.mark.unit
 
@@ -33,18 +35,8 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-class _Q:
-    """Drop-in for mp.Queue used by handlers for streaming responses."""
-
-    def __init__(self) -> None:
-        self.items: list[Any] = []
-
-    def put(self, item: Any) -> None:
-        self.items.append(item)
-
-
 def _handler(
-    *, response_q: _Q | None = None, lg: Logger | None = None
+    *, response_q: ResponseQueueFake | None = None, lg: Logger | None = None
 ) -> SequentialHandler:
     engine = MagicMock()
     engine.count_tokens.return_value = 5
@@ -54,31 +46,6 @@ def _handler(
     if lg is not None:
         h.set_logger(lg)
     return h
-
-
-def _request(
-    req_id: str = "r1",
-    *,
-    prompt: str = "hello",
-    stream: bool = False,
-    adapter: str | None = None,
-    model: str | None = None,
-    tools: list | None = None,
-    tool_choice: Any = None,
-    response_format: Any = None,
-    chat_template_kwargs: Any = None,
-) -> Request:
-    return Request(
-        id=req_id,
-        prompt=prompt,
-        stream=stream,
-        adapter=adapter,
-        model=model,
-        tools=tools,
-        tool_choice=tool_choice,
-        response_format=response_format,
-        chat_template_kwargs=chat_template_kwargs,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +88,7 @@ class TestSetters:
 
     def test_set_response_queue(self) -> None:
         h = _handler()
-        q = _Q()
+        q = ResponseQueueFake()
         h.set_response_queue(q)  # type: ignore[arg-type]
         assert h._response_q is q
 
@@ -644,7 +611,7 @@ class TestProcessStreamingRequest:
         return stream
 
     def test_streaming_success(self) -> None:
-        q = _Q()
+        q = ResponseQueueFake()
         h = _handler(response_q=q)
         h.engine.generate_stream_sync.return_value = self._make_stream()  # type: ignore[attr-defined]
         resp = h._process_streaming_request(_request("r1", stream=True))
@@ -657,7 +624,7 @@ class TestProcessStreamingRequest:
         assert any(isinstance(item, StreamChunk) and item.is_final for item in q.items)
 
     def test_streaming_adapter_error(self) -> None:
-        q = _Q()
+        q = ResponseQueueFake()
         h = _handler(response_q=q, lg=MagicMock(spec=Logger))
         h.engine.generate_stream_sync.side_effect = AdapterError("bad")  # type: ignore[attr-defined]
         resp = h._process_streaming_request(_request("r1", stream=True))
@@ -669,7 +636,7 @@ class TestProcessStreamingRequest:
         )
 
     def test_streaming_generic_exception(self) -> None:
-        q = _Q()
+        q = ResponseQueueFake()
         h = _handler(response_q=q)
         h.engine.generate_stream_sync.side_effect = RuntimeError("boom")  # type: ignore[attr-defined]
         resp = h._process_streaming_request(_request("r1", stream=True))
@@ -691,7 +658,7 @@ class TestProcessRequestDispatch:
         assert resp.status == RequestStatus.COMPLETED
 
     def test_streaming_with_response_q(self) -> None:
-        q = _Q()
+        q = ResponseQueueFake()
         h = _handler(response_q=q)
         stream = MagicMock()
         stream.__iter__ = lambda self: iter([])

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,39 +12,16 @@ from llm_infer.serving.dispatch.handlers.bounded import (
     RunningRequest,
 )
 from llm_infer.serving.dispatch.types import (
-    Request,
     RequestStatus,
     Response,
     StreamChunk,
 )
 
+from .._helpers import ResponseQueueFake as _ResponseQueue
+from .._helpers import make_engine as _engine
+from .._helpers import make_request as _request
+
 pytestmark = pytest.mark.unit
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _request(req_id: str = "r1", *, stream: bool = False) -> Request:
-    return Request(id=req_id, prompt="hello", stream=stream)
-
-
-def _engine(*, generate_result: Any = "world") -> MagicMock:
-    e = MagicMock()
-    e.generate.return_value = generate_result
-    e.count_tokens.return_value = 5
-    return e
-
-
-class _ResponseQueue:
-    """Drop-in for mp.Queue used by handlers for streaming responses."""
-
-    def __init__(self) -> None:
-        self.items: list[Any] = []
-
-    def put(self, item: Any) -> None:
-        self.items.append(item)
 
 
 # ---------------------------------------------------------------------------

@@ -16,12 +16,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from appinfra.log import Logger
 
+from llm_infer.models.config import ModelConfig
+from llm_infer.serving.dispatch.config import InferenceConfig
 from llm_infer.serving.dispatch.factories import (
     BoundedHandlerFactory,
     ConcurrentHttpHandlerFactory,
@@ -43,50 +44,27 @@ def lg() -> Logger:
     return MagicMock(spec=Logger)
 
 
-def _config(**kwargs: Any) -> SimpleNamespace:
-    """Build a minimal InferenceConfig-like object using SimpleNamespace.
+def _config(
+    *,
+    model_path: Path | None = None,
+    ollama_models: dict[str, str] | None = None,
+) -> InferenceConfig:
+    """Build a real InferenceConfig with sensible test defaults.
 
-    Pass overrides like `models=..., engines=..., backends=..., dispatch=...`.
+    Args:
+        model_path: Optional models.path. The basename is used by Ollama
+            resolution to look up per-model overrides.
+        ollama_models: Map of model basename → ollama name (e.g.,
+            {"qwen-7b": "qwen2.5:7b"}). Populates models.models so
+            cfg.models.get(name).ollama returns the mapped value.
     """
-    defaults: dict[str, Any] = {
-        "models": SimpleNamespace(
-            path=None, get=lambda name: SimpleNamespace(ollama=None)
-        ),
-        "backends": SimpleNamespace(engine="ollama", linear="pytorch"),
-        "engines": SimpleNamespace(
-            native=SimpleNamespace(
-                num_blocks=1024,
-                block_size=16,
-                max_batch_size=1,
-                attention_backend="auto",
-                torch_compile=False,
-                warmup=True,
-                device="cuda",
-                dtype="float16",
-            ),
-            vllm=SimpleNamespace(
-                warmup=True,
-                # replace() needs the dataclass; we substitute via monkeypatch
-            ),
-            vllm_server=SimpleNamespace(
-                warmup=True,
-                max_concurrent=8,
-                lora=SimpleNamespace(enabled=False, base_path=None),
-            ),
-            ollama=SimpleNamespace(
-                warmup=True,
-                model="",
-                max_concurrent=4,
-            ),
-            peft=SimpleNamespace(
-                warmup=True,
-                adapter_base_path=None,
-            ),
-        ),
-        "dispatch": SimpleNamespace(max_pending=10, batch_streaming=False),
-    }
-    defaults.update(kwargs)
-    return SimpleNamespace(**defaults)
+    cfg = InferenceConfig()
+    if model_path is not None:
+        cfg.models.path = model_path
+    if ollama_models:
+        for name, ollama_name in ollama_models.items():
+            cfg.models.models[name] = ModelConfig(name=name, ollama=ollama_name)
+    return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +95,7 @@ class TestValidateModelPath:
 
     def test_validate_passes_with_path(self) -> None:
         f = NativeEngineFactory()
-        cfg = _config(models=SimpleNamespace(path=Path("/x"), get=lambda n: None))
+        cfg = _config(model_path=Path("/x"))
         f._validate_model_path(cfg)  # No exception
 
 
@@ -223,32 +201,20 @@ class TestHandlerRegistry:
 class TestOllamaModelNameResolution:
     def test_model_yaml_field_takes_priority(self, lg: Logger) -> None:
         cfg = _config(
-            models=SimpleNamespace(
-                path=Path("/models/qwen-7b"),
-                get=lambda n: SimpleNamespace(ollama="qwen2.5:7b"),
-            )
+            model_path=Path("/models/qwen-7b"),
+            ollama_models={"qwen-7b": "qwen2.5:7b"},
         )
         f = OllamaEngineFactory()
         assert f._get_ollama_model_name(lg, cfg) == "qwen2.5:7b"
 
     def test_falls_back_to_engine_config_model(self, lg: Logger) -> None:
-        cfg = _config(
-            models=SimpleNamespace(
-                path=Path("/models/qwen-7b"),
-                get=lambda n: SimpleNamespace(ollama=None),
-            )
-        )
+        cfg = _config(model_path=Path("/models/qwen-7b"))
         cfg.engines.ollama.model = "explicit-model"
         f = OllamaEngineFactory()
         assert f._get_ollama_model_name(lg, cfg) == "explicit-model"
 
     def test_falls_back_to_path_basename(self, lg: Logger) -> None:
-        cfg = _config(
-            models=SimpleNamespace(
-                path=Path("/models/llama3"),
-                get=lambda n: SimpleNamespace(ollama=None),
-            )
-        )
+        cfg = _config(model_path=Path("/models/llama3"))
         cfg.engines.ollama.model = ""
         f = OllamaEngineFactory()
         assert f._get_ollama_model_name(lg, cfg) == "llama3"
@@ -283,9 +249,7 @@ class TestVLLMServerScanAdapters:
 
     def test_scans_when_enabled(self, lg: Logger, tmp_path: Path) -> None:
         f = VLLMServerEngineFactory()
-        cfg = _config(
-            models=SimpleNamespace(path=Path("/models/qwen"), get=lambda n: None)
-        )
+        cfg = _config(model_path=Path("/models/qwen"))
         cfg.engines.vllm_server.lora.enabled = True
         cfg.engines.vllm_server.lora.base_path = str(tmp_path)
         # Empty dir -> empty list (but scan still ran)
@@ -307,9 +271,7 @@ class TestPEFTScanAdapters:
 
     def test_scans_when_path_set(self, lg: Logger, tmp_path: Path) -> None:
         f = PEFTEngineFactory()
-        cfg = _config(
-            models=SimpleNamespace(path=Path("/models/qwen"), get=lambda n: None)
-        )
+        cfg = _config(model_path=Path("/models/qwen"))
         cfg.engines.peft.adapter_base_path = str(tmp_path)
         result = f._scan_adapters(lg, cfg)
         assert result == []
@@ -395,7 +357,7 @@ class TestNativeEngineCreate:
             "_import_native_deps",
             MagicMock(side_effect=ImportError("torch missing")),
         )
-        cfg = _config(models=SimpleNamespace(path=Path("/x"), get=lambda n: None))
+        cfg = _config(model_path=Path("/x"))
         with pytest.raises(ImportError):
             f.create(lg, cfg)
 
@@ -412,7 +374,7 @@ class TestVLLMEngineCreate:
         original = sys.modules.get("llm_infer.engines.vllm")
         sys.modules["llm_infer.engines.vllm"] = SimpleNamespace()  # type: ignore[assignment]
         try:
-            cfg = _config(models=SimpleNamespace(path=Path("/x"), get=lambda n: None))
+            cfg = _config(model_path=Path("/x"))
             with pytest.raises(ImportError):
                 f.create(lg, cfg)
         finally:

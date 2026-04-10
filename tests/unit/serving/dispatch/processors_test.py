@@ -28,17 +28,9 @@ from llm_infer.serving.dispatch.types import (
     Response,
 )
 
+from ._helpers import ResponseQueueFake
+
 pytestmark = pytest.mark.unit
-
-
-class _Q:
-    """Drop-in replacement for mp.Queue that records puts."""
-
-    def __init__(self) -> None:
-        self.items: list[Any] = []
-
-    def put(self, item: Any) -> None:
-        self.items.append(item)
 
 
 def _adapter(key: str = "k1", name: str = "n1") -> MagicMock:
@@ -78,7 +70,7 @@ def test_metrics_processor_handles(monkeypatch: pytest.MonkeyPatch) -> None:
         "llm_infer.serving.dispatch.processors.build_metrics_response", fake_build
     )
 
-    q = _Q()
+    q = ResponseQueueFake()
     handler = MagicMock()
     p = MetricsProcessor()
     p.handle(MetricsRequest(id="req1", reset_peak=True), handler, q)  # type: ignore[arg-type]
@@ -102,7 +94,7 @@ def test_adapter_processor_can_process_list_and_refresh() -> None:
 def test_adapter_list_no_manager() -> None:
     handler = MagicMock()
     handler.get_adapter_manager.return_value = None
-    q = _Q()
+    q = ResponseQueueFake()
 
     AdapterProcessor().handle(AdapterListRequest(id="r1"), handler, q)  # type: ignore[arg-type]
 
@@ -117,7 +109,7 @@ def test_adapter_list_with_adapters() -> None:
     manager = MagicMock()
     manager.list.return_value = [_adapter("a1", "n1"), _adapter("a2", "n2")]
     handler.get_adapter_manager.return_value = manager
-    q = _Q()
+    q = ResponseQueueFake()
 
     AdapterProcessor().handle(AdapterListRequest(id="r1"), handler, q)  # type: ignore[arg-type]
 
@@ -132,7 +124,7 @@ def test_adapter_list_with_adapters() -> None:
 def test_adapter_refresh_no_manager() -> None:
     handler = MagicMock()
     handler.get_adapter_manager.return_value = None
-    q = _Q()
+    q = ResponseQueueFake()
 
     AdapterProcessor().handle(AdapterRefreshRequest(id="r1", key="k"), handler, q)  # type: ignore[arg-type]
 
@@ -148,7 +140,7 @@ def test_adapter_refresh_full_scan() -> None:
     manager = MagicMock()
     manager.scan.return_value = 5
     handler.get_adapter_manager.return_value = manager
-    q = _Q()
+    q = ResponseQueueFake()
 
     AdapterProcessor().handle(AdapterRefreshRequest(id="r1"), handler, q)  # type: ignore[arg-type]
 
@@ -165,7 +157,7 @@ def test_adapter_refresh_with_key_still_full_scans() -> None:
     manager = MagicMock()
     manager.scan.return_value = 3
     handler.get_adapter_manager.return_value = manager
-    q = _Q()
+    q = ResponseQueueFake()
 
     AdapterProcessor().handle(
         AdapterRefreshRequest(id="r1", key="my-adapter"), handler, q
@@ -191,7 +183,7 @@ def test_embedding_processor_can_process() -> None:
 def test_embedding_engine_does_not_support() -> None:
     handler = MagicMock()
     handler.engine.supports_embeddings.return_value = False
-    q = _Q()
+    q = ResponseQueueFake()
 
     EmbeddingProcessor().handle(EmbeddingRequest(id="r1", inputs=["a"]), handler, q)  # type: ignore[arg-type]
 
@@ -206,7 +198,7 @@ def test_embedding_engine_missing_supports_method() -> None:
     handler = MagicMock()
     # spec=[] means no attributes; getattr fallback returns the lambda default
     handler.engine = MagicMock(spec=[])
-    q = _Q()
+    q = ResponseQueueFake()
 
     EmbeddingProcessor().handle(EmbeddingRequest(id="r1", inputs=["a"]), handler, q)  # type: ignore[arg-type]
 
@@ -218,7 +210,7 @@ def test_embedding_success() -> None:
     handler = MagicMock()
     handler.engine.supports_embeddings.return_value = True
     handler.engine.embed.return_value = ([[0.1, 0.2]], 5)
-    q = _Q()
+    q = ResponseQueueFake()
 
     EmbeddingProcessor().handle(
         EmbeddingRequest(id="r1", inputs=["a"], dimensions=2), handler, q
@@ -235,7 +227,7 @@ def test_embedding_engine_raises() -> None:
     handler = MagicMock()
     handler.engine.supports_embeddings.return_value = True
     handler.engine.embed.side_effect = RuntimeError("boom")
-    q = _Q()
+    q = ResponseQueueFake()
 
     EmbeddingProcessor().handle(EmbeddingRequest(id="r1", inputs=["a"]), handler, q)  # type: ignore[arg-type]
 
@@ -259,7 +251,7 @@ def test_inference_submit_accepted() -> None:
     """Successful submit puts no immediate response (response comes via engine loop)."""
     handler = MagicMock()
     handler.submit.return_value = True
-    q = _Q()
+    q = ResponseQueueFake()
 
     InferenceProcessor().handle(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
 
@@ -271,7 +263,7 @@ def test_inference_submit_rejected() -> None:
     """If handler rejects, processor emits a REJECTED response."""
     handler = MagicMock()
     handler.submit.return_value = False
-    q = _Q()
+    q = ResponseQueueFake()
 
     InferenceProcessor().handle(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
 
@@ -295,7 +287,7 @@ def test_chain_dispatches_metrics_to_metrics_processor(
     )
     chain = create_request_processor_chain()
     handler = MagicMock()
-    q = _Q()
+    q = ResponseQueueFake()
 
     chain.process(MetricsRequest(id="r1"), handler, q)  # type: ignore[arg-type]
 
@@ -306,7 +298,7 @@ def test_chain_dispatches_adapter_request() -> None:
     chain = create_request_processor_chain()
     handler = MagicMock()
     handler.get_adapter_manager.return_value = None
-    q = _Q()
+    q = ResponseQueueFake()
 
     chain.process(AdapterListRequest(id="r1"), handler, q)  # type: ignore[arg-type]
 
@@ -317,7 +309,7 @@ def test_chain_dispatches_inference_request() -> None:
     chain = create_request_processor_chain()
     handler = MagicMock()
     handler.submit.return_value = True
-    q = _Q()
+    q = ResponseQueueFake()
 
     chain.process(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
 
@@ -332,7 +324,7 @@ def test_chain_unhandled_request_emits_error() -> None:
 
     chain = create_request_processor_chain()
     handler = MagicMock()
-    q = _Q()
+    q = ResponseQueueFake()
 
     chain.process(UnknownRequest(), handler, q)  # type: ignore[arg-type]
 

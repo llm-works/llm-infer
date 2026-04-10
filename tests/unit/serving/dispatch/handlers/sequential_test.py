@@ -7,20 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from llm_infer.serving.dispatch.handlers import SequentialHandler
-from llm_infer.serving.dispatch.types import Request, RequestStatus
+from llm_infer.serving.dispatch.types import RequestStatus
+
+from .._helpers import make_engine as _engine
+from .._helpers import make_request as _request
 
 pytestmark = pytest.mark.unit
-
-
-def _request(req_id: str = "r1", *, stream: bool = False) -> Request:
-    return Request(id=req_id, prompt="hi", stream=stream)
-
-
-def _engine() -> MagicMock:
-    e = MagicMock()
-    e.generate.return_value = "result"
-    e.count_tokens.return_value = 5
-    return e
 
 
 class TestSubmit:
