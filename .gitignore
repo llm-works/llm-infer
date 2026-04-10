@@ -25,3 +25,5 @@ venv/
 *.log
 .data
 .models
+coverage.json
+.cover/
