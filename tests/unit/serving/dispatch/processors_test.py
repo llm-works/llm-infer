@@ -191,6 +191,7 @@ def test_embedding_engine_does_not_support() -> None:
     assert isinstance(resp, EmbeddingResponse)
     assert resp.status == RequestStatus.FAILED
     assert "does not support embeddings" in resp.error
+    handler.engine.embed.assert_not_called()
 
 
 def test_embedding_engine_missing_supports_method() -> None:
@@ -204,6 +205,8 @@ def test_embedding_engine_missing_supports_method() -> None:
 
     resp = q.items[0]
     assert resp.status == RequestStatus.FAILED
+    assert "does not support embeddings" in resp.error
+    # spec=[] means no embed attribute exists at all, so no need to assert_not_called
 
 
 def test_embedding_success() -> None:

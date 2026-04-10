@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of separate argument
 - Default `enforce_eager: false` in vllm-server.yaml (enables CUDA graphs)
 
+### Internal
+
+- Raise unit test coverage threshold from 50% to 70%; add ~8400 lines of unit tests across CLI,
+  client backends, engines, serving API, and dispatch layers
+- Exclude `if TYPE_CHECKING:` blocks from coverage report (type-only imports, never executed)
+- Extract shared dispatch test helpers (`tests/unit/serving/dispatch/_helpers.py`) to remove
+  duplicated `_request` / `_engine` / `ResponseQueueFake` definitions across handler tests
+- Replace `SimpleNamespace` config fakes in `factories_test.py` with real `InferenceConfig`
+  instances so field renames on production config types fail loudly in tests
+
 ## [0.2.0] - 2026-03-14
 
 ### Added

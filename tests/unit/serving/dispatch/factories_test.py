@@ -35,6 +35,9 @@ from llm_infer.serving.dispatch.factories import (
     get_engine_factory,
     get_handler_factory,
 )
+from llm_infer.serving.dispatch.handlers.bounded import BoundedQueueHandler
+from llm_infer.serving.dispatch.handlers.concurrent_http import ConcurrentHttpHandler
+from llm_infer.serving.dispatch.handlers.sequential import SequentialHandler
 
 pytestmark = pytest.mark.unit
 
@@ -316,8 +319,7 @@ class TestHandlerCreate:
         engine = MagicMock()
         cfg = _config()
         handler = f.create(lg, engine, cfg)
-        # SequentialHandler is created
-        assert handler is not None
+        assert isinstance(handler, SequentialHandler)
 
     def test_bounded_handler_create(self, lg: Logger) -> None:
         f = BoundedHandlerFactory()
@@ -326,7 +328,7 @@ class TestHandlerCreate:
         cfg.backends.engine = "ollama"  # bounded uses engine factory.max_batch_size
         cfg.dispatch.max_pending = 5
         handler = f.create(lg, engine, cfg)
-        assert handler is not None
+        assert isinstance(handler, BoundedQueueHandler)
 
     def test_concurrent_http_handler_create(self, lg: Logger) -> None:
         f = ConcurrentHttpHandlerFactory()
@@ -335,7 +337,7 @@ class TestHandlerCreate:
         cfg.backends.engine = "ollama"
         cfg.engines.ollama.max_concurrent = 2
         handler = f.create(lg, engine, cfg)
-        assert handler is not None
+        assert isinstance(handler, ConcurrentHttpHandler)
 
 
 # ---------------------------------------------------------------------------
@@ -348,10 +350,11 @@ class TestNativeEngineCreate:
         self, lg: Logger, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         f = NativeEngineFactory()
-        # Force ImportError on the lazy import
+        # Force ImportError on the lazy import; monkeypatch.delitem auto-restores
+        # so a test failure can't pollute sys.modules for downstream tests.
         import sys
 
-        sys.modules.pop("llm_infer.engines.native", None)
+        monkeypatch.delitem(sys.modules, "llm_infer.engines.native", raising=False)
         monkeypatch.setattr(
             f,
             "_import_native_deps",
