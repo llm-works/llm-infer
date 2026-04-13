@@ -7,9 +7,7 @@ class GenerateRequest(BaseModel):
     """Request body for text generation."""
 
     prompt: str = Field(..., description="Input text prompt")
-    max_tokens: int = Field(
-        100, ge=1, le=4096, description="Maximum tokens to generate"
-    )
+    max_tokens: int = Field(100, ge=1, description="Maximum tokens to generate")
     temperature: float = Field(1.0, ge=0.0, le=2.0, description="Sampling temperature")
     top_p: float = Field(1.0, ge=0.0, le=1.0, description="Nucleus sampling threshold")
     top_k: int = Field(0, ge=0, description="Top-k sampling (0 = disabled)")

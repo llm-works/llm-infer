@@ -1,3 +1,71 @@
+# Bugs Journal
+
+Bugs found and resolved during development and operations.
+
+---
+
+## Ollama: intermittent 500 errors on embedding endpoint — April 2026
+
+**Symptom:** `all-minilm:22m` embedding model via Ollama 0.18.0 returning intermittent
+`500 Internal Server Error` on `/api/embeddings`. 18 errors in ~20 minutes, spread throughout
+runtime (not clustered at startup). Direct curl tests always succeeded — the errors only occurred
+under concurrent load from llm-infer.
+
+**Root cause:** `max_concurrent: 4` was too aggressive for the tiny all-minilm model on Ollama.
+Ollama's embedding endpoint doesn't handle concurrent requests as gracefully as the chat endpoint,
+particularly for small models that load/unload quickly.
+
+**Fix:** Reduced `max_concurrent` from 4 to 2 in the llm-embed service's `ollama.yaml`. Errors
+stopped immediately.
+
+**Lesson:** Ollama's concurrency tolerance varies by model size and endpoint. Embedding models
+are particularly sensitive — start with `max_concurrent: 2` and only increase after load testing.
+
+---
+
+## Ollama auto-start ignores configured host/port — April 2026
+
+**Symptom:** Starting llm-infer with `ollama.yaml` configured to `host: http://localhost:11435`
+still spawned an Ollama instance on the default port 11434. Health checks connected to the right
+port but the subprocess bound to the wrong one.
+
+**Root cause:** `_start_server()` in `ollama.py` set `OLLAMA_MODELS` from config but did not set
+`OLLAMA_HOST`. Ollama uses the `OLLAMA_HOST` env var to determine its listen address.
+
+**Fix:** Set `env["OLLAMA_HOST"] = self._config.host` in `_build_server_env()`. Merged as PR #84.
+
+**Lesson:** When wrapping external processes, verify that all config values actually reach the
+subprocess. The `host` field was used for client-side connections but not passed to the server
+it was auto-starting.
+
+---
+
+## Qwen 3.5: chain-of-thought leaking into response content — April 2026
+
+**Symptom:** Qwen 3.5-9B (AWQ) outputting full reasoning traces as plain text starting with
+"Thinking Process:" instead of wrapping them in `<think>` tags. All downstream consumers
+(summaries, ratings) stored the CoT as the result. 36 articles affected in 12 hours.
+
+**Root cause:** Qwen 3.5 ignores the `/think` `/no_think` prompt suffixes that Qwen 2.5/3
+respect. Thinking is controlled via the chat template's `enable_thinking` parameter, which
+llm-infer wasn't passing through to vLLM.
+
+**Fix:** Three-part implementation:
+1. Added `chat_template_kwargs` config field on `VLLMServerConfig` — passed as
+   `--default-chat-template-kwargs` to the vLLM subprocess and per-request in the payload body
+2. Added per-request dynamic override: `_get_chat_template_kwargs()` in mappers.py sets
+   `enable_thinking` based on the resolved `think` parameter
+3. Created `qwen35_think` template in `models.yaml` with `enable_thinking: false` default and
+   `reasoning_parser: qwen3`
+4. Added `reasoning_parser` config field for vLLM's `--reasoning-parser` flag
+5. Bridge in `_parse_completion_response()`: wraps vLLM's `reasoning_content` in `<think>` tags
+   so the existing ThinkTagParser pipeline handles it transparently
+
+**Note:** Per-request `think: true` toggle has a remaining vLLM limitation — see
+`docs/known-issues.md`.
+
+---
+
 # Inference Implementation Bugs - December 2025
 
 This document captures bugs found while debugging inference output that didn't match HuggingFace's

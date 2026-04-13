@@ -66,6 +66,8 @@ class Request:
     )
     # Structured output support
     response_format: dict[str, Any] | None = None  # {"type": "json_object"} or schema
+    # Chat template kwargs (e.g., {"enable_thinking": true/false} for Qwen 3.5)
+    chat_template_kwargs: dict[str, Any] | None = None
 
 
 @dataclass

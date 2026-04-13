@@ -608,6 +608,7 @@ class VLLMEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> str:
         """Generate text completion (blocking).
 
@@ -692,6 +693,7 @@ class VLLMEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> VLLMStreamingIterator:
         """Generate text with true token-by-token streaming.
 

@@ -9,8 +9,11 @@ INFRA_DEV_INSTALL_EXTRAS := dev,runtime,cuda
 # - false: Report violations but don't fail (development mode)
 INFRA_DEV_CQ_STRICT := true
 
+# Docstring coverage threshold (percentage)
+INFRA_DEV_DOCSTRING_THRESHOLD := 90
+
 # Test coverage threshold (percentage)
-INFRA_PYTEST_COVERAGE_THRESHOLD := 50
+INFRA_PYTEST_COVERAGE_THRESHOLD := 70
 
 # Custom pip config for flashinfer index
 export PIP_CONFIG_FILE := etc/pip.conf

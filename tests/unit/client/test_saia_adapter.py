@@ -3,12 +3,12 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from llm_saia.core.backend import (
+from llm_saia.core import (
     AgentResponse,
     Message,
     ToolDef,
 )
-from llm_saia.core.backend import (
+from llm_saia.core import (
     ToolCall as SAIAToolCall,
 )
 
@@ -346,3 +346,34 @@ class TestSAIAAdapterChat:
         call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["response_format"] is not None
         assert call_kwargs["response_format"]["type"] == "json_schema"
+
+    @pytest.mark.asyncio
+    async def test_chat_with_temperature(self, mock_client: MagicMock) -> None:
+        """Test chat passes temperature to client."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client)
+
+        await adapter.chat(
+            messages=[Message(role="user", content="Hi")],
+            temperature=0.7,
+        )
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_chat_temperature_default(self, mock_client: MagicMock) -> None:
+        """Test chat uses default temperature 1.0 when not specified."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client)
+
+        await adapter.chat(messages=[Message(role="user", content="Hi")])
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["temperature"] == 1.0

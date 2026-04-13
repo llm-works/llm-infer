@@ -53,6 +53,9 @@ def _build_completion_usage(response: Any) -> ChatCompletionUsage:
         prompt_tokens=response.prompt_tokens or 0,
         completion_tokens=response.completion_tokens or 0,
         total_tokens=(response.prompt_tokens or 0) + (response.completion_tokens or 0),
+        # Detail fields are None for local backends (vLLM/Ollama don't provide these)
+        completion_tokens_details=None,
+        prompt_tokens_details=None,
     )
 
 
@@ -175,10 +178,11 @@ def _determine_chat_finish_reason(
     response: Any, body: ChatCompletionRequest, has_tool_calls: bool
 ) -> FinishReason:
     """Determine finish reason for chat completion."""
+    effective_max_tokens = body.max_tokens or body.max_completion_tokens or 256
     max_tokens_reached = (
         response.completion_tokens is not None
-        and body.max_tokens is not None
-        and response.completion_tokens >= body.max_tokens
+        and effective_max_tokens is not None
+        and response.completion_tokens >= effective_max_tokens
     )
     return determine_finish_reason(
         is_eos=not max_tokens_reached,
@@ -234,7 +238,7 @@ async def _handle_chat_non_streaming(
 ) -> ChatCompletionResponse | JSONResponse:
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -297,7 +301,7 @@ async def _handle_completion_non_streaming(
 ) -> CompletionResponse | JSONResponse:
     """Handle non-streaming legacy completion request."""
     internal_request = completion_request_to_internal(body, request_id)
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -341,7 +345,11 @@ def _handle_chat_streaming(
     """Handle streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
     normalizer = _create_normalizer(body.think, model_config)
-    generator = ChatStreamingGenerator(lg, request_id, model_name, ipc, normalizer)
+    # Use same effective_max_tokens logic as non-streaming path
+    effective_max_tokens = body.max_tokens or body.max_completion_tokens or 256
+    generator = ChatStreamingGenerator(
+        lg, request_id, model_name, ipc, normalizer, effective_max_tokens
+    )
     return StreamingResponse(
         generator.stream(internal_request),
         media_type="text/event-stream",
@@ -418,7 +426,7 @@ async def _handle_embedding_request(
     internal_request = InternalEmbeddingRequest(
         id=request_id, inputs=inputs, dimensions=body.dimensions
     )
-    response = await submit_or_timeout(lg, ipc, request_id, internal_request)
+    response = await submit_or_timeout(lg, ipc, internal_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)

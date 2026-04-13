@@ -69,6 +69,9 @@ jobs:
           # Install appinfra from GitHub (need unreleased FastAPI subprocess logger injection)
           python -m pip install "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
           # python -m pip install "appinfra>=0.4.0,<0.5.0"  # switch back after next appinfra release
+          # Install llm-saia from GitHub (need core public API re-exports)
+          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
+          # python -m pip install "llm-saia>=0.2.0,<0.3.0"  # switch back after next llm-saia release
           # Install package with dev, runtime, and saia extras
           python -m pip install -e ".[dev,runtime,saia]"
 
@@ -195,6 +198,9 @@ jobs:
           # Install appinfra from GitHub (need unreleased FastAPI subprocess logger injection)
           python -m pip install "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
           # python -m pip install "appinfra>=0.4.0,<0.5.0"  # switch back after next appinfra release
+          # Install llm-saia from GitHub (need core public API re-exports)
+          python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
+          # python -m pip install "llm-saia>=0.2.0,<0.3.0"  # switch back after next llm-saia release
           # Install package with dev, runtime, and saia extras
           python -m pip install -e ".[dev,runtime,saia]"
 

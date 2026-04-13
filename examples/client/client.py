@@ -22,10 +22,11 @@ from llm_infer.client import Factory, LLMRouter
 # Config file path (same directory as this script)
 CONFIG_FILE = Path(__file__).parent / "client.yaml"
 
-builder = (
+app = (
     AppBuilder("llm-chat")
     .with_description("Interactive LLM chat client")
     .with_config_file(str(CONFIG_FILE), from_etc_dir=False)
+    .build()
 )
 
 
@@ -102,13 +103,11 @@ def chat_interactive(
         messages.append({"role": "assistant", "content": response_text})
 
 
-@builder.tool(name="chat", help="Chat with an LLM")
-@builder.argument(
-    "question", nargs="?", help="Single question (interactive if omitted)"
-)
-@builder.argument("--backend", "-b", help="Backend to use")
-@builder.argument("--model", "-m", help="Model to use (auto-routes to backend)")
-@builder.argument("--stream", "-s", action="store_true", help="Stream responses")
+@app.tool(name="chat", help="Chat with an LLM")
+@app.argument("question", nargs="?", help="Single question (interactive if omitted)")
+@app.argument("--backend", "-b", help="Backend to use")
+@app.argument("--model", "-m", help="Model to use (auto-routes to backend)")
+@app.argument("--stream", "-s", action="store_true", help="Stream responses")
 def chat(self):
     config = get_config(self)
 
@@ -130,7 +129,7 @@ def chat(self):
     return 0
 
 
-@builder.tool(name="models", help="List available models")
+@app.tool(name="models", help="List available models")
 def models(self):
     config = get_config(self)
 
@@ -144,7 +143,7 @@ def models(self):
     return 0
 
 
-app = builder.with_main_tool("chat").build()
+app.set_main_tool("chat")
 
 if __name__ == "__main__":
     exit(app.main())

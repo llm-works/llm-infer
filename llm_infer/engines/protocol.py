@@ -7,7 +7,7 @@ These protocols define the contracts for inference engines, enabling:
 """
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ..context import RequestContext
@@ -180,6 +180,7 @@ class InferenceEngineProtocol(Protocol):
         stop_sequences: list[str] | None = None,
         context: "RequestContext | None" = None,
         messages: list[dict[str, str]] | None = None,
+        **kwargs: Any,
     ) -> str:
         """Generate text from a prompt (blocking).
 
@@ -212,6 +213,7 @@ class InferenceEngineProtocol(Protocol):
         stop_sequences: list[str] | None = None,
         context: "RequestContext | None" = None,
         messages: list[dict[str, str]] | None = None,
+        **kwargs: Any,
     ) -> "StreamingResultProtocol":
         """Stream generated tokens (sync version).
 

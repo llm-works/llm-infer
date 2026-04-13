@@ -30,7 +30,7 @@ anthropic = [
     "anthropic>=0.47.0,<1.0.0",
 ]
 saia = [
-    "llm-saia>=0.1.0,<0.2.0",
+    "llm-saia>=0.2.0,<0.3.0",
 ]
 cuda = [
     "vllm>=0.7.0,<1.0.0",
@@ -93,12 +93,14 @@ source = ["llm_infer"]
 omit = ["*/test/*", "*/tests/*", "*_test.py"]
 
 [tool.coverage.report]
+precision = 2
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
     "raise AssertionError",
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]
 
 [project.scripts]

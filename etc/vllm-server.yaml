@@ -18,7 +18,7 @@ binary_path: vllm             # Path to vllm binary
 gpu_memory_utilization: 0.95
 max_model_len: null           # Max context length (null = use model default)
 max_num_seqs: 16
-enforce_eager: true           # Skip CUDA graphs to save GPU memory
+enforce_eager: false          # Enable CUDA graphs for better performance
 dtype: auto                   # auto, float16, bfloat16, float32
 trust_remote_code: true
 enable_prefix_caching: true
@@ -32,6 +32,16 @@ lora:
 
 # Tool calling
 tool_call_parser: hermes      # hermes, llama, mistral, etc.
+
+# Reasoning parser (passed as --reasoning-parser to vllm serve)
+# Extracts thinking/reasoning into a separate response field.
+# e.g., "qwen3" for Qwen 3/3.5 models. null = disabled.
+reasoning_parser: null
+
+# Chat template kwargs (passed as --default-chat-template-kwargs to vllm serve,
+# and as chat_template_kwargs in each request body)
+# e.g., {enable_thinking: false} for Qwen 3.5 to suppress chain-of-thought
+chat_template_kwargs: {}
 
 # Warmup: Run initial query on startup to ensure model is loaded
 warmup: true
