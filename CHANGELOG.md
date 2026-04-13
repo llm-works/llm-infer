@@ -7,41 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-13
+
 ### Added
 
-- `SAIAAdapter.chat()` now accepts `temperature` parameter for sampling control
-- `tool_call_parser: qwen3_xml` for Qwen 3.5 models — uses vLLM's native XML parser instead of
-  Hermes, fixing tool calling when `tool_choice` is `auto` or omitted
+- OpenAI reasoning model compatibility: `developer` role, `max_completion_tokens`,
+  `reasoning_effort`, content array format, and `CompletionTokensDetails` in usage response
+- `chat_template_kwargs` support for vLLM-server engine — enables per-request thinking control
+  for Qwen 3.5 models via `enable_thinking` in the chat template
+- `reasoning_parser` config for vLLM-server — bridges vLLM's `reasoning_content` back into
+  `<think>` tags for transparent handling by the existing parser pipeline
+- `tool_call_parser: qwen3_xml` for Qwen 3.5 models (fixes `tool_choice: auto`)
+- `SAIAAdapter.chat()` now accepts `temperature` parameter
 
 ### Fixed
 
-- Adapter scanner now accepts directories with only `adapter_config.json` (PEFT standard) when
-  the llm-infer-specific `config.yaml` is absent, treating the adapter as enabled by default.
-  Malformed `config.yaml` files are still rejected (not silently treated as missing)
-- Adapter refresh endpoint (`/v1/adapters/refresh`) now always performs a full directory rescan,
-  removing stale entries and loading new ones atomically
-- Fix `SAIAAdapter` broken import: use stable `llm_saia.core` public API instead of internal
-  submodules (`core.backend`, `core.conversation`) that broke after llm-saia refactor
-- Bump `llm-saia` dependency to `>=0.2.0,<0.3.0` (required for `core` public API re-exports)
-- Set `OLLAMA_HOST` from config `host` field when auto-starting Ollama server. Previously the
-  configured host/port was used for health checks but not passed to the subprocess, so auto-started
-  instances always bound to the default `localhost:11434`
+- Ollama auto-start now uses configured `host` field (previously always bound to `localhost:11434`)
+- Adapter refresh always performs full rescan, removing stale entries atomically
+- Adapter scanner accepts directories with only `adapter_config.json` (no `config.yaml` required)
+- `SAIAAdapter` import fix: use stable `llm_saia.core` API; bump `llm-saia` to `>=0.2.0,<0.3.0`
 
 ### Changed
 
-- Update IPC calls for appinfra 0.6.0 API: request ID now passed via `request.id` attribute
-  instead of separate argument
+- Remove hardcoded `max_tokens` / `max_completion_tokens` 4096 limit from API schema — backends
+  now enforce limits based on actual model capabilities
+- Update IPC calls for appinfra 0.6.0 API
 - Default `enforce_eager: false` in vllm-server.yaml (enables CUDA graphs)
 
 ### Internal
 
-- Raise unit test coverage threshold from 50% to 70%; add ~8400 lines of unit tests across CLI,
-  client backends, engines, serving API, and dispatch layers
-- Exclude `if TYPE_CHECKING:` blocks from coverage report (type-only imports, never executed)
-- Extract shared dispatch test helpers (`tests/unit/serving/dispatch/_helpers.py`) to remove
-  duplicated `_request` / `_engine` / `ResponseQueueFake` definitions across handler tests
-- Replace `SimpleNamespace` config fakes in `factories_test.py` with real `InferenceConfig`
-  instances so field renames on production config types fail loudly in tests
+- Raise unit test coverage threshold from 50% to 70%
 
 ## [0.2.0] - 2026-03-14
 
@@ -168,7 +163,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/llm-works/llm-infer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-infer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/llm-works/llm-infer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/llm-works/llm-infer/releases/tag/v0.1.0
