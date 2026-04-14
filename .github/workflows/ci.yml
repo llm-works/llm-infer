@@ -140,7 +140,7 @@ jobs:
 
       - name: Run smoke test
         run: |
-          RESPONSE=$(llm-infer query "Say hello in exactly 3 words" --max-tokens 20)
+          RESPONSE=$(llm-infer --etc-dir .github/ci/ollama-e2e query "Say hello in exactly 3 words" --max-tokens 20)
           echo "Response: $RESPONSE"
           if [ -z "$RESPONSE" ]; then
             echo "ERROR: Empty response from server"
