@@ -1,0 +1,29 @@
+# CI-only config for Ollama E2E smoke test
+# Self-contained — no includes, no .env.yaml dependency.
+
+models:
+  locations: []
+  selection:
+    generate:
+      default: qwen2.5:0.5b
+
+backends:
+  engine: ollama
+
+engines:
+  ollama:
+    host: http://localhost:11434
+    model: qwen2.5:0.5b
+    auto_start: false
+    warmup: true
+    max_concurrent: 2
+
+dispatch:
+  handler:
+    primary: concurrent_http
+    fallback: bounded
+  max_pending: 10
+
+api:
+  host: 0.0.0.0
+  port: 8000
