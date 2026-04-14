@@ -115,8 +115,8 @@ jobs:
 
       - name: Pull Ollama model
         run: |
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "qwen2.5:0.5b"}'
-          sleep 5
+          # Use ollama CLI (blocking) instead of async curl to ensure model is ready
+          docker exec $(docker ps -q --filter ancestor=ollama/ollama:latest) ollama pull qwen2.5:0.5b
           curl http://localhost:11434/api/tags | jq .
 
       - name: Start llm-infer server
