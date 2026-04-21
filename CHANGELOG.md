@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `from_backend_config()` now extracts `rate_limit` and `retry` from the backend config
+  (previously ignored, always used defaults)
+
 ## [0.3.0] - 2026-04-13
 
 ### Added
