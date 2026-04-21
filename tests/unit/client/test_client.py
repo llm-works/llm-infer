@@ -1002,3 +1002,69 @@ class TestFactoryRetryConfig:
         assert default_client._rate_limiter.per_minute == 60
         assert custom_client._rate_limiter.per_minute == 30
         router.close()
+
+
+class TestFromBackendConfig:
+    """Test Factory.from_backend_config() configuration parsing."""
+
+    def test_from_backend_config_with_rate_limit(self, mock_lg: Logger) -> None:
+        """Test from_backend_config extracts rate_limit from config."""
+        factory = Factory(mock_lg)
+        config = {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:8000/v1",
+            "rate_limit": {"per_minute": 30},
+        }
+        client = factory.from_backend_config(config)
+
+        assert client._rate_limiter is not None
+        assert client._rate_limiter.per_minute == 30
+        client.close()
+
+    def test_from_backend_config_with_retry(self, mock_lg: Logger) -> None:
+        """Test from_backend_config extracts retry config."""
+        factory = Factory(mock_lg)
+        config = {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:8000/v1",
+            "retry": {"enabled": True, "backoff": {"base": 2.0, "max": 120.0}},
+        }
+        client = factory.from_backend_config(config)
+
+        assert client._backoff is not None
+        assert client._backoff.base == 2.0
+        assert client._backoff.max_delay == 120.0
+        client.close()
+
+    def test_from_backend_config_with_retry_timeout(self, mock_lg: Logger) -> None:
+        """Test from_backend_config extracts retry timeout."""
+        factory = Factory(mock_lg)
+        config = {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:8000/v1",
+            "retry": {"enabled": True, "timeout": 300, "backoff": {"base": 1.0}},
+        }
+        client = factory.from_backend_config(config)
+
+        assert client._backoff is not None
+        assert client._timeout == 300
+        client.close()
+
+    def test_from_backend_config_with_both_rate_limit_and_retry(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test from_backend_config extracts both rate_limit and retry."""
+        factory = Factory(mock_lg)
+        config = {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:8000/v1",
+            "rate_limit": {"per_minute": 45},
+            "retry": {"enabled": True, "backoff": {"base": 1.5}},
+        }
+        client = factory.from_backend_config(config)
+
+        assert client._rate_limiter is not None
+        assert client._rate_limiter.per_minute == 45
+        assert client._backoff is not None
+        assert client._backoff.base == 1.5
+        client.close()
