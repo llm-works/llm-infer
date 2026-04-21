@@ -156,9 +156,11 @@ class Factory:
             default: backend_name
             rate_limit:              # Optional: rate limiting for all backends
               per_minute: 60
+            retry:                   # Optional: retry with exponential backoff
               backoff:
                 base: 1.0
                 max: 60
+              timeout: 120           # Optional: request timeout in seconds
             backends:
               backend_name:
                 enabled: true        # Optional, defaults to true
@@ -182,12 +184,14 @@ class Factory:
             raises ValueError.
 
         Rate limiting:
-            When rate_limit is specified, each backend gets its own rate limiter
-            instance. With 2 backends at per_minute=30, total capacity is 60 req/min
-            (30 to each backend). Configuration options:
+            When rate_limit is specified, each backend gets its own rate limiter.
             - per_minute: Maximum requests per minute per backend
+
+        Retry:
+            When retry is specified, failed requests use exponential backoff.
             - backoff.base: Initial backoff delay in seconds (default: 1.0)
             - backoff.max: Maximum backoff delay in seconds (default: 60.0)
+            - timeout: Request timeout in seconds (default: 0, no timeout)
 
         Args:
             config: Configuration dictionary.
