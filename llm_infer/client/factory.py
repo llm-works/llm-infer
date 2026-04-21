@@ -443,12 +443,15 @@ class Factory:
             Configured LLMClient instance.
         """
         backend = self.create_backend(config)
-        rate_limiter = self._create_rate_limiter(None)
+        rate_limiter = self._create_rate_limiter(config.get("rate_limit"))
+        backoff, timeout = self._create_retry(config.get("retry"))
         return LLMClient(
             lg=self._lg,
             backend=backend,
             default_model=config.get("model"),
             rate_limiter=rate_limiter,
+            backoff=backoff,
+            timeout=timeout,
         )
 
     def openai(
