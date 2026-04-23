@@ -32,7 +32,7 @@ class TraceMiddleware(BaseHTTPMiddleware):
             return chunk
         if isinstance(chunk, str):
             return chunk.encode()
-        if isinstance(chunk, (memoryview, bytearray)):
+        if isinstance(chunk, memoryview | bytearray):
             return bytes(chunk)
         lg.warning(
             "unexpected chunk type in response", extra={"type": type(chunk).__name__}

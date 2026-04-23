@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from llm_saia.core import (
-    AgentResponse,
+    ChatResponse as SAIAChatResponse,
+)
+from llm_saia.core import (
     Message,
     ToolDef,
 )
@@ -150,7 +152,7 @@ class TestSAIAAdapterResponseConversion:
 
         result = adapter._convert_response(response)
 
-        assert isinstance(result, AgentResponse)
+        assert isinstance(result, SAIAChatResponse)
         assert result.content == "Hello!"
         assert result.tool_calls == []
         assert result.finish_reason == "stop"
@@ -201,6 +203,30 @@ class TestSAIAAdapterResponseConversion:
         result = adapter._convert_response(response)
 
         assert result.finish_reason is None
+
+    def test_convert_response_passes_model_and_raw(
+        self, mock_client: MagicMock
+    ) -> None:
+        """Resolved model name and raw llm-infer response are passed through.
+
+        Motivation: ``model: auto`` in config resolves server-side. Without the
+        passthrough, SAIA consumers can't attribute cost to the actual model,
+        and backend-specific fields (thinking, adapter info) are unreachable.
+        """
+        adapter = SAIAAdapter(mock_client)
+        response = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+            model="claude-haiku-4-5-20251001",
+        )
+
+        result = adapter._convert_response(response)
+
+        assert result.model == "claude-haiku-4-5-20251001"
+        assert result.raw is response
+        # raw is a live reference, not a copy: mutations are visible post-conversion.
+        response.content = "mutated"
+        assert result.raw.content == "mutated"
 
 
 class TestSAIAAdapterToolArgumentParsing:
@@ -284,7 +310,7 @@ class TestSAIAAdapterChat:
             max_tokens=100,
         )
 
-        assert isinstance(result, AgentResponse)
+        assert isinstance(result, SAIAChatResponse)
         assert result.content == "Hello!"
         mock_client.chat_async.assert_called_once()
         call_kwargs = mock_client.chat_async.call_args.kwargs
