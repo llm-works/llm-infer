@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: `SAIAAdapter.chat()` now returns `llm_saia.core.ChatResponse` instead of
+  `AgentResponse`, with the resolved `model` name and the raw llm-infer `ChatResponse` attached
+  as `raw` so consumers can reach backend-specific fields (thinking, adapter info) without
+  further adapter churn.
+
 ### Fixed
 
 - `from_backend_config()` now extracts `rate_limit` and `retry` from the backend config

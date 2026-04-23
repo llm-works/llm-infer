@@ -224,6 +224,9 @@ class TestSAIAAdapterResponseConversion:
 
         assert result.model == "claude-haiku-4-5-20251001"
         assert result.raw is response
+        # raw is a live reference, not a copy: mutations are visible post-conversion.
+        response.content = "mutated"
+        assert result.raw.content == "mutated"
 
 
 class TestSAIAAdapterToolArgumentParsing:
