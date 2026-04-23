@@ -35,6 +35,7 @@ from llm_saia.core import (
 
 if TYPE_CHECKING:
     from .client import LLMClient
+    from .types import ChatResponse as InferChatResponse
 
 
 class SAIAAdapter(Backend):
@@ -158,7 +159,7 @@ class SAIAAdapter(Backend):
             },
         }
 
-    def _convert_response(self, response: Any) -> SAIAChatResponse:
+    def _convert_response(self, response: InferChatResponse) -> SAIAChatResponse:
         """Convert llm-infer ChatResponse to SAIA ChatResponse.
 
         The full llm-infer response is attached as ``raw`` so consumers that
