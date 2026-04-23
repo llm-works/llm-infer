@@ -22,10 +22,12 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from llm_saia.core import (
-    AgentResponse,
     Backend,
     Message,
     ToolDef,
+)
+from llm_saia.core import (
+    ChatResponse as SAIAChatResponse,
 )
 from llm_saia.core import (
     ToolCall as SAIAToolCall,
@@ -44,7 +46,7 @@ class SAIAAdapter(Backend):
     The adapter handles conversion between:
     - SAIA Message types <-> llm-infer message dicts
     - SAIA ToolDef <-> llm-infer tool dicts
-    - llm-infer ChatResponse -> SAIA AgentResponse
+    - llm-infer ChatResponse -> SAIA ChatResponse
     - Tool call argument parsing (JSON string -> dict)
     """
 
@@ -64,7 +66,7 @@ class SAIAAdapter(Backend):
         response_schema: dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
-    ) -> AgentResponse:
+    ) -> SAIAChatResponse:
         """Send a chat completion request via the wrapped LLMClient.
 
         Args:
@@ -76,7 +78,8 @@ class SAIAAdapter(Backend):
             temperature: Sampling temperature (default 1.0).
 
         Returns:
-            AgentResponse with content, tool calls, and token usage.
+            SAIA ChatResponse with content, tool calls, token usage, resolved
+            model name, and the raw llm-infer response attached as ``raw``.
         """
         api_messages = self._convert_messages(messages)
         api_tools = self._convert_tools(tools) if tools else None
@@ -155,8 +158,13 @@ class SAIAAdapter(Backend):
             },
         }
 
-    def _convert_response(self, response: Any) -> AgentResponse:
-        """Convert llm-infer ChatResponse to SAIA AgentResponse."""
+    def _convert_response(self, response: Any) -> SAIAChatResponse:
+        """Convert llm-infer ChatResponse to SAIA ChatResponse.
+
+        The full llm-infer response is attached as ``raw`` so consumers that
+        need backend-specific fields (thinking, adapter info, detailed usage)
+        can reach them without another round of adapter churn.
+        """
         tool_calls: list[SAIAToolCall] = []
 
         if response.tool_calls:
@@ -178,12 +186,14 @@ class SAIAAdapter(Backend):
 
         finish_reason = response.finish_reason.value if response.finish_reason else None
 
-        return AgentResponse(
+        return SAIAChatResponse(
             content=response.content or "",
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            model=response.model,
+            raw=response,
         )
 
     def _parse_tool_arguments(self, args_str: str) -> dict[str, Any]:

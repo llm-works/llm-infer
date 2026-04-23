@@ -104,7 +104,7 @@ class AdapterProcessor(RequestProcessor):
     """Handles adapter management requests (list, refresh)."""
 
     def can_process(self, request: Any) -> bool:
-        return isinstance(request, (AdapterListRequest, AdapterRefreshRequest))
+        return isinstance(request, AdapterListRequest | AdapterRefreshRequest)
 
     def handle(
         self,
