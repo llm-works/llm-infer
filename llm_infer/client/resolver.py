@@ -86,7 +86,10 @@ class ModelResolver:
             Resolved model name, or None if no model configured.
         """
         if model is None:
-            return client.default_model
+            default = client.default_model
+            if default == "auto":
+                return self._resolve_auto_model(client, retry=retry)
+            return default
 
         if model == "default":
             default = client.default_model

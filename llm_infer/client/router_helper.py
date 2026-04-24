@@ -46,6 +46,7 @@ def prepare_routing(
     ctx = build_routing_context(request, backend, role, context)
     decision = get_initial_decision(router, ctx)
     request = decision.updated_request or request
+    ctx.request = request
     return request, ctx, decision
 
 
@@ -105,8 +106,13 @@ def get_initial_decision(
     """Get initial routing decision from strategy or legacy resolution."""
     if router.strategy is not None:
         decision = router.strategy.select(router, context)
-        if decision and decision.backend in router.clients:
-            return decision
+        if decision:
+            if decision.backend in router.clients:
+                return decision
+            router._lg.warning(
+                "strategy returned invalid backend, falling back",
+                extra={"backend": decision.backend, "available": list(router.clients)},
+            )
     resolved = router.resolve(model=context.request.model, backend=context.backend)
     return RoutingDecision(backend=resolved.backend)
 
@@ -163,8 +169,18 @@ def handle_error(
     if router.strategy:
         next_decision = router.strategy.on_error(router, result)
         if next_decision:
+            if next_decision.backend not in router.clients:
+                lg.warning(
+                    "on_error returned invalid backend, not retrying",
+                    extra={
+                        "backend": next_decision.backend,
+                        "available": list(router.clients),
+                    },
+                )
+                return None
+            same = next_decision.backend == decision.backend
             lg.warning(
-                "backend failed, trying next",
+                "backend failed, retrying" if same else "backend failed, trying next",
                 extra={
                     "backend": decision.backend,
                     "error": str(e)[:200],

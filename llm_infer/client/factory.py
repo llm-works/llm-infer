@@ -244,14 +244,14 @@ class Factory:
             clients = {name: client}
             configs = {name: config}
 
-            # Create discovery - loads model mappings from config
-            discovery = ModelDiscovery(self._lg, clients, configs)
-
+            # Always load static mappings, but only enable lazy probing if requested
+            md = ModelDiscovery(self._lg, clients, configs)
             return LLMRouter(
                 self._lg,
                 clients,
                 name,
-                discovery=discovery,
+                model_to_backend=md.models,
+                discovery=md if discover_models else None,
                 strategy=strategy,
             )
         except Exception:
@@ -286,14 +286,14 @@ class Factory:
             default_name = next(iter(clients.keys()))
 
         try:
-            # Create discovery - loads model mappings from config
-            discovery = ModelDiscovery(self._lg, clients, backend_configs)
-
+            # Always load static mappings, but only enable lazy probing if requested
+            md = ModelDiscovery(self._lg, clients, backend_configs)
             return LLMRouter(
                 self._lg,
                 clients,
                 default_name,
-                discovery=discovery,
+                model_to_backend=md.models,
+                discovery=md if discover_models else None,
                 strategy=strategy,
             )
         except Exception:
