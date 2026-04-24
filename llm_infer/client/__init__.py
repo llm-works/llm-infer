@@ -86,6 +86,7 @@ from .strategy import (
     RoutingResult,
     RoutingStrategy,
     StrategyFactory,
+    TransientAction,
     TransientDetector,
 )
 from .types import ChatRequest, ChatResponse
@@ -106,6 +107,7 @@ __all__ = [
     "RoutingDecision",
     "RoutingResult",
     "StrategyFactory",
+    "TransientAction",
     "TransientDetector",
     "DefaultTransientDetector",
     "DefaultStrategy",

@@ -18,6 +18,7 @@ from .strategy import (
     RoutingContext,
     RoutingDecision,
     RoutingResult,
+    TransientAction,
     TransientDetector,
 )
 
@@ -133,22 +134,30 @@ class FallbackStrategy(DefaultStrategy):
     def on_error(
         self, router: LLMRouter, result: RoutingResult
     ) -> RoutingDecision | None:
-        """Try next backend on transient errors."""
-        # Check if error is transient
-        if result.error and not self._detector.is_transient(result.error):
+        """Handle errors based on classification."""
+        if not result.error:
             return None
 
-        # Get state from routing context
+        action = self._detector.classify(result.error)
+
+        if action == TransientAction.FAIL:
+            return None
+
+        if action == TransientAction.RETRY_SAME:
+            return RoutingDecision(
+                backend=result.decision.backend,
+                metadata=DotDict(reason="retry_same", error_code=429),
+            )
+
+        # RETRY_NEXT: try next backend
         ctx = result.context.metadata
         order = getattr(ctx, "_fallback_order", self._order)
         tried = getattr(ctx, "_fallback_tried", [])
 
-        # Find next backend
         backend = self._next_backend(order, tried, router.clients)
         if backend is None:
             return None
 
-        # Update tried list
         tried.append(backend)
         return RoutingDecision(
             backend=backend,

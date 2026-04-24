@@ -128,10 +128,10 @@ strategy:
   type: fallback
   order: [primary, fallback]
 
-# Custom strategy from external package
+# Custom strategy from external package (expects module.Factory class)
 strategy:
-  factory: mypackage.billing:BudgetStrategyFactory
-  budget_limit: 100
+  factory: myapp.routing
+  priority_order: [fast, reliable]
 ```
 
 ```python

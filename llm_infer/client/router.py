@@ -318,7 +318,7 @@ class LLMRouter(ChatClient):
                     continue
                 raise
 
-    def chat_stream(  # cq: max-lines=35
+    def chat_stream(  # cq: max-lines=45
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -355,18 +355,23 @@ class LLMRouter(ChatClient):
             role,
             context,
         )
+        streamed = False
         while True:
             client = self._clients[decision.backend]
             start_time = time.monotonic()
             try:
                 stream = client.chat_stream(**rh.request_to_kwargs(request, **kwargs))
-                yield from stream
+                for token in stream:
+                    streamed = True
+                    yield token
                 if client.last_response:
                     rh.handle_success(
                         self, client.last_response, ctx, decision, start_time
                     )
                 return
             except BackendError as e:
+                if streamed:
+                    raise
                 next_decision = rh.handle_error(
                     self, self._lg, e, ctx, decision, start_time
                 )
@@ -436,7 +441,7 @@ class LLMRouter(ChatClient):
                     continue
                 raise
 
-    async def chat_stream_async(  # cq: max-lines=40
+    async def chat_stream_async(  # cq: max-lines=45
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -473,6 +478,7 @@ class LLMRouter(ChatClient):
             role,
             context,
         )
+        streamed = False
         while True:
             client = self._clients[decision.backend]
             start_time = time.monotonic()
@@ -481,6 +487,7 @@ class LLMRouter(ChatClient):
                     **rh.request_to_kwargs(request, **kwargs)
                 )
                 async for token in stream:
+                    streamed = True
                     yield token
                 if client.last_response:
                     rh.handle_success(
@@ -488,6 +495,8 @@ class LLMRouter(ChatClient):
                     )
                 return
             except BackendError as e:
+                if streamed:
+                    raise
                 next_decision = rh.handle_error(
                     self, self._lg, e, ctx, decision, start_time
                 )

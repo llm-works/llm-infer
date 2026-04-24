@@ -347,9 +347,9 @@ class Factory:
                   roles:
                     synthesis: [gpt4, claude]
 
-            Custom factory (loaded from package):
+            Custom factory (module must export Factory class):
                 strategy:
-                  factory: mypackage.module:MyStrategyFactory
+                  factory: mypackage.module
                   custom_option: value
 
         Args:
@@ -370,15 +370,12 @@ class Factory:
 
         config = DotDict(strategy_config)
 
-        # Custom factory from package
+        # Custom factory from package (expects module.Factory class)
         if "factory" in config:
             from .strategy import StrategyFactory
 
-            factory_path = config.factory
-            module_path, class_name = factory_path.rsplit(":", 1)
-            module = importlib.import_module(module_path)
-            factory_class = getattr(module, class_name)
-            factory = cast(StrategyFactory, factory_class())
+            module = importlib.import_module(config.factory)
+            factory = cast(StrategyFactory, module.Factory())
             return factory.create(self._lg, config)
 
         # Built-in strategies

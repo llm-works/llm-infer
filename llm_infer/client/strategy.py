@@ -9,6 +9,7 @@ Custom strategies can be loaded from external packages via StrategyFactory.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from appinfra.dot_dict import DotDict
@@ -25,8 +26,20 @@ from .types import ChatRequest, ChatResponse
 if TYPE_CHECKING:
     from .router import LLMRouter
 
-# Status codes considered transient (worth retrying on fallback)
-TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+class TransientAction(Enum):
+    """Action to take after a transient error."""
+
+    FAIL = "fail"  # Fatal error, raise immediately
+    RETRY_SAME = "retry_same"  # Retry same backend with backoff (429 rate limit)
+    RETRY_NEXT = "retry_next"  # Try different backend (5xx, timeout, unavailable)
+
+
+# Status codes that should retry on a different backend
+RETRY_NEXT_STATUS_CODES = frozenset({500, 502, 503, 504})
+
+# Status codes that should retry same backend with backoff
+RETRY_SAME_STATUS_CODES = frozenset({429})
 
 
 @dataclass
@@ -93,45 +106,45 @@ class RoutingResult:
 
 @runtime_checkable
 class TransientDetector(Protocol):
-    """Protocol for classifying errors as transient or fatal.
+    """Protocol for classifying errors by retry action.
 
-    Transient errors trigger fallback to the next backend. Fatal errors
-    are raised immediately without trying other backends.
+    Determines whether an error should fail immediately, retry the same
+    backend (with backoff), or try a different backend.
 
     Implement custom detectors to handle application-specific error patterns.
     """
 
-    def is_transient(self, error: BackendError) -> bool:
-        """Check if error should trigger fallback to next backend.
+    def classify(self, error: BackendError) -> TransientAction:
+        """Classify error to determine retry action.
 
         Args:
             error: The error that occurred.
 
         Returns:
-            True if router should try the next backend, False to raise immediately.
+            TransientAction indicating how to handle the error.
         """
         ...
 
 
 class DefaultTransientDetector:
-    """Default transient error detector.
+    """Default transient error classifier.
 
-    Considers these errors transient (worth retrying on fallback):
-    - BackendUnavailableError (connection failed)
-    - BackendTimeoutError (request timed out)
-    - BackendRequestError with status 429, 500, 502, 503, 504
+    Classification:
+    - RETRY_NEXT: BackendUnavailableError, BackendTimeoutError, 5xx errors
+    - RETRY_SAME: 429 rate limit (let client backoff handle it)
+    - FAIL: All other errors (4xx client errors)
     """
 
-    def is_transient(self, error: BackendError) -> bool:
-        """Check if error is transient."""
+    def classify(self, error: BackendError) -> TransientAction:
+        """Classify error to determine retry action."""
         if isinstance(error, BackendUnavailableError | BackendTimeoutError):
-            return True
-        if isinstance(error, BackendRequestError):
-            return (
-                error.status_code is not None
-                and error.status_code in TRANSIENT_STATUS_CODES
-            )
-        return False
+            return TransientAction.RETRY_NEXT
+        if isinstance(error, BackendRequestError) and error.status_code is not None:
+            if error.status_code in RETRY_NEXT_STATUS_CODES:
+                return TransientAction.RETRY_NEXT
+            if error.status_code in RETRY_SAME_STATUS_CODES:
+                return TransientAction.RETRY_SAME
+        return TransientAction.FAIL
 
 
 @runtime_checkable
@@ -193,21 +206,18 @@ class StrategyFactory(Protocol):
     """Protocol for strategy factories.
 
     Allows external packages to provide custom routing strategies. The factory
-    is loaded from a Python module path specified in config, then called with
-    logger and config to create the strategy.
+    module must export a `Factory` class implementing this protocol.
 
     Example config:
         strategy:
-          factory: appware.billing:BudgetStrategyFactory
-          budget_limit: 100
-          fallback_order: [gemini, grok, openai]
+          factory: myapp.routing
+          priority_order: [fast, reliable]
 
-    Example factory:
-        class BudgetStrategyFactory:
+    Example module (myapp/routing.py):
+        class Factory:
             def create(self, lg, config):
-                return BudgetAwareStrategy(
-                    budget_limit=config.get("budget_limit", 100),
-                    fallback_order=config.get("fallback_order", []),
+                return PriorityStrategy(
+                    order=config.get("priority_order", []),
                 )
     """
 
