@@ -535,16 +535,19 @@ class TestLLMRouterWithChatArgs:
         assert bound.bound_kwargs == {"role": "exploration"}
 
     def test_with_chat_args_merges_into_chat(self, mock_lg: Logger) -> None:
-        """Test bound kwargs are merged into chat calls."""
-        response = ChatResponse(content="test")
-        backend = MockBackend(responses=[response])
-        client = LLMClient(mock_lg, backend)
-        router = LLMRouter(mock_lg, {"main": client}, "main")
-        bound = router.with_chat_args(role="exploration", backend="main")
+        """Test bound kwargs are merged into chat calls (routing works)."""
+        response = ChatResponse(content="from_a")
+        backend_a = MockBackend(responses=[response])
+        backend_b = MockBackend(responses=[])
+        client_a = LLMClient(mock_lg, backend_a)
+        client_b = LLMClient(mock_lg, backend_b)
+        router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "b")
+        bound = router.with_chat_args(backend="a")
 
         result = bound.chat([{"role": "user", "content": "Hi"}])
 
-        assert result.content == "test"
+        assert result.content == "from_a"
+        assert backend_a.last_kwargs is not None
 
     @pytest.mark.asyncio
     async def test_with_chat_args_merges_into_chat_async(self, mock_lg: Logger) -> None:
@@ -553,11 +556,12 @@ class TestLLMRouterWithChatArgs:
         backend = MockBackend(responses=[response])
         client = LLMClient(mock_lg, backend)
         router = LLMRouter(mock_lg, {"main": client}, "main")
-        bound = router.with_chat_args(role="synthesis")
+        bound = router.with_chat_args(system="You are helpful")
 
         result = await bound.chat_async([{"role": "user", "content": "Hi"}])
 
         assert result.content == "test"
+        assert backend.last_kwargs["system"] == "You are helpful"
 
     def test_multiple_bound_clients_independent(self, mock_lg: Logger) -> None:
         """Test multiple bound clients from same router are independent."""
