@@ -384,7 +384,11 @@ class AnthropicBackend(Backend):
         return request_kwargs
 
     def _convert_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert messages to Anthropic format."""
+        """Convert messages to Anthropic format.
+
+        Consecutive tool messages are merged into a single user message with
+        multiple tool_result content blocks, as required by Anthropic's API.
+        """
         result: list[dict[str, Any]] = []
         for msg in messages:
             role = msg.get("role", "")
@@ -392,7 +396,23 @@ class AnthropicBackend(Backend):
                 continue  # System messages passed via system param
             converted = self._convert_single_message(msg)
             if converted:
-                result.append(converted)
+                # Merge consecutive user messages containing tool_result blocks
+                if (
+                    result
+                    and converted["role"] == "user"
+                    and result[-1]["role"] == "user"
+                    and isinstance(converted.get("content"), list)
+                    and isinstance(result[-1].get("content"), list)
+                    and all(
+                        b.get("type") == "tool_result" for b in converted["content"]
+                    )
+                    and all(
+                        b.get("type") == "tool_result" for b in result[-1]["content"]
+                    )
+                ):
+                    result[-1]["content"].extend(converted["content"])
+                else:
+                    result.append(converted)
         return result
 
     def _convert_single_message(self, msg: dict[str, Any]) -> dict[str, Any] | None:

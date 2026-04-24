@@ -109,6 +109,44 @@ class TestAnthropicBackendMocked:
             assert result[0]["content"][0]["type"] == "tool_result"
             assert result[0]["content"][0]["tool_use_id"] == "call_123"
 
+    def test_convert_messages_merges_consecutive_tool_results(
+        self, mock_anthropic: Any
+    ) -> None:
+        """Test consecutive tool results are merged into single user message."""
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+            from llm_infer.client.backends.anthropic import AnthropicBackend
+
+            backend = AnthropicBackend.__new__(AnthropicBackend)
+            backend._anthropic = mock_anthropic
+
+            messages = [
+                {"role": "user", "content": "Search for both"},
+                {
+                    "role": "assistant",
+                    "content": "Searching...",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {"name": "search", "arguments": "{}"},
+                        },
+                        {
+                            "id": "call_2",
+                            "function": {"name": "search", "arguments": "{}"},
+                        },
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "Result 1"},
+                {"role": "tool", "tool_call_id": "call_2", "content": "Result 2"},
+            ]
+            result = backend._convert_messages(messages)
+
+            assert len(result) == 3
+            tool_result_msg = result[2]
+            assert tool_result_msg["role"] == "user"
+            assert len(tool_result_msg["content"]) == 2
+            assert tool_result_msg["content"][0]["tool_use_id"] == "call_1"
+            assert tool_result_msg["content"][1]["tool_use_id"] == "call_2"
+
     def test_convert_assistant_with_tools_parses_arguments(
         self, mock_anthropic: Any
     ) -> None:
