@@ -45,6 +45,8 @@ from .router import LLMRouter
 if TYPE_CHECKING:
     from appinfra.rate_limit import Backoff, RateLimiter
 
+    from .strategy import RoutingStrategy
+
 
 class Factory:
     """Factory for creating LLMClient instances.
@@ -208,10 +210,11 @@ class Factory:
         backends_config = config.get("backends", {})
         rate_limit_config = config.get("rate_limit")
         retry_config = config.get("retry")
+        strategy = self._create_strategy(config.get("strategy"))
 
         if not backends_config:
             return self._create_single_backend_router(
-                config, discover_models, rate_limit_config, retry_config
+                config, discover_models, rate_limit_config, retry_config, strategy
             )
 
         return self._create_multi_backend_router(
@@ -220,6 +223,7 @@ class Factory:
             discover_models,
             rate_limit_config,
             retry_config,
+            strategy,
         )
 
     def _create_single_backend_router(
@@ -228,6 +232,7 @@ class Factory:
         discover_models: bool,
         rate_limit_config: dict[str, Any] | None = None,
         retry_config: dict[str, Any] | None = None,
+        strategy: RoutingStrategy | None = None,
     ) -> LLMRouter:
         """Create router wrapping a single backend config.
 
@@ -247,6 +252,7 @@ class Factory:
                 clients,
                 name,
                 discovery=discovery,
+                strategy=strategy,
             )
         except Exception:
             client.close()
@@ -259,6 +265,7 @@ class Factory:
         discover_models: bool,
         rate_limit_config: dict[str, Any] | None = None,
         retry_config: dict[str, Any] | None = None,
+        strategy: RoutingStrategy | None = None,
     ) -> LLMRouter:
         """Create router from multi-backend config.
 
@@ -287,6 +294,7 @@ class Factory:
                 clients,
                 default_name,
                 discovery=discovery,
+                strategy=strategy,
             )
         except Exception:
             self._close_clients_safely(clients)
@@ -325,6 +333,70 @@ class Factory:
                 self._lg.warning(
                     "Error closing client during cleanup", extra={"exception": e}
                 )
+
+    def _create_strategy(  # cq: max-lines=40
+        self, strategy_config: dict[str, Any] | None
+    ) -> RoutingStrategy | None:
+        """Create routing strategy from config.
+
+        Config formats:
+            Built-in strategies:
+                strategy:
+                  type: fallback
+                  order: [primary, fallback]
+                  roles:
+                    synthesis: [gpt4, claude]
+
+            Custom factory (loaded from package):
+                strategy:
+                  factory: mypackage.module:MyStrategyFactory
+                  custom_option: value
+
+        Args:
+            strategy_config: Strategy configuration dict.
+
+        Returns:
+            Configured strategy, or None if no config.
+        """
+        if not strategy_config:
+            return None
+
+        from appinfra.dot_dict import DotDict
+
+        from .strategies import (
+            DefaultStrategyFactory,
+            FallbackStrategyFactory,
+        )
+
+        config = DotDict(strategy_config)
+
+        # Custom factory from package
+        if "factory" in config:
+            from .strategy import StrategyFactory
+
+            factory_path = config.factory
+            module_path, class_name = factory_path.rsplit(":", 1)
+            module = importlib.import_module(module_path)
+            factory_class = getattr(module, class_name)
+            factory = cast(StrategyFactory, factory_class())
+            return factory.create(self._lg, config)
+
+        # Built-in strategies
+        strategy_type = config.get("type", "default")
+        factories: dict[
+            str, type[DefaultStrategyFactory] | type[FallbackStrategyFactory]
+        ] = {
+            "default": DefaultStrategyFactory,
+            "fallback": FallbackStrategyFactory,
+        }
+
+        if strategy_type not in factories:
+            raise ValueError(
+                f"Unknown strategy type '{strategy_type}'. "
+                f"Available: {list(factories.keys())}"
+            )
+
+        return factories[strategy_type]().create(self._lg, config)
 
     def _create_rate_limiter(
         self, rate_limit_config: dict[str, Any] | None
