@@ -16,9 +16,19 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
+from enum import Enum, auto
 from typing import Any, Self
 
 from .types import ChatResponse
+
+
+class _Unset(Enum):
+    """Sentinel for detecting unset parameters in BoundChatClient."""
+
+    UNSET = auto()
+
+
+_UNSET = _Unset.UNSET
 
 
 class ChatClient(ABC):
@@ -293,117 +303,137 @@ class BoundChatClient(ChatClient):
     def chat(
         self,
         messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
+        model: str | None | _Unset = _UNSET,
+        system: str | None | _Unset = _UNSET,
+        temperature: float | _Unset = _UNSET,
+        max_tokens: int | None | _Unset = _UNSET,
+        tools: list[dict[str, Any]] | None | _Unset = _UNSET,
+        tool_choice: str | dict[str, Any] | None | _Unset = _UNSET,
+        think: bool | None | _Unset = _UNSET,
+        adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request with bound kwargs merged."""
-        call_kwargs = {
-            **self._bound_kwargs,
-            "messages": messages,
-            "model": model,
-            "system": system,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "tools": tools,
-            "tool_choice": tool_choice,
-            "think": think,
-            "adapter": adapter,
-            **kwargs,
-        }
+        call_kwargs: dict[str, Any] = {**self._bound_kwargs, "messages": messages}
+        if model is not _UNSET:
+            call_kwargs["model"] = model
+        if system is not _UNSET:
+            call_kwargs["system"] = system
+        if temperature is not _UNSET:
+            call_kwargs["temperature"] = temperature
+        if max_tokens is not _UNSET:
+            call_kwargs["max_tokens"] = max_tokens
+        if tools is not _UNSET:
+            call_kwargs["tools"] = tools
+        if tool_choice is not _UNSET:
+            call_kwargs["tool_choice"] = tool_choice
+        if think is not _UNSET:
+            call_kwargs["think"] = think
+        if adapter is not _UNSET:
+            call_kwargs["adapter"] = adapter
+        call_kwargs.update(kwargs)
         return self._client.chat(**call_kwargs)
 
     def chat_stream(
         self,
         messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
+        model: str | None | _Unset = _UNSET,
+        system: str | None | _Unset = _UNSET,
+        temperature: float | _Unset = _UNSET,
+        max_tokens: int | None | _Unset = _UNSET,
+        tools: list[dict[str, Any]] | None | _Unset = _UNSET,
+        tool_choice: str | dict[str, Any] | None | _Unset = _UNSET,
+        think: bool | None | _Unset = _UNSET,
+        adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Stream chat completion tokens with bound kwargs merged."""
-        call_kwargs = {
-            **self._bound_kwargs,
-            "messages": messages,
-            "model": model,
-            "system": system,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "tools": tools,
-            "tool_choice": tool_choice,
-            "think": think,
-            "adapter": adapter,
-            **kwargs,
-        }
+        call_kwargs: dict[str, Any] = {**self._bound_kwargs, "messages": messages}
+        if model is not _UNSET:
+            call_kwargs["model"] = model
+        if system is not _UNSET:
+            call_kwargs["system"] = system
+        if temperature is not _UNSET:
+            call_kwargs["temperature"] = temperature
+        if max_tokens is not _UNSET:
+            call_kwargs["max_tokens"] = max_tokens
+        if tools is not _UNSET:
+            call_kwargs["tools"] = tools
+        if tool_choice is not _UNSET:
+            call_kwargs["tool_choice"] = tool_choice
+        if think is not _UNSET:
+            call_kwargs["think"] = think
+        if adapter is not _UNSET:
+            call_kwargs["adapter"] = adapter
+        call_kwargs.update(kwargs)
         yield from self._client.chat_stream(**call_kwargs)
 
     async def chat_async(
         self,
         messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
+        model: str | None | _Unset = _UNSET,
+        system: str | None | _Unset = _UNSET,
+        temperature: float | _Unset = _UNSET,
+        max_tokens: int | None | _Unset = _UNSET,
+        tools: list[dict[str, Any]] | None | _Unset = _UNSET,
+        tool_choice: str | dict[str, Any] | None | _Unset = _UNSET,
+        think: bool | None | _Unset = _UNSET,
+        adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request (async) with bound kwargs merged."""
-        call_kwargs = {
-            **self._bound_kwargs,
-            "messages": messages,
-            "model": model,
-            "system": system,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "tools": tools,
-            "tool_choice": tool_choice,
-            "think": think,
-            "adapter": adapter,
-            **kwargs,
-        }
+        call_kwargs: dict[str, Any] = {**self._bound_kwargs, "messages": messages}
+        if model is not _UNSET:
+            call_kwargs["model"] = model
+        if system is not _UNSET:
+            call_kwargs["system"] = system
+        if temperature is not _UNSET:
+            call_kwargs["temperature"] = temperature
+        if max_tokens is not _UNSET:
+            call_kwargs["max_tokens"] = max_tokens
+        if tools is not _UNSET:
+            call_kwargs["tools"] = tools
+        if tool_choice is not _UNSET:
+            call_kwargs["tool_choice"] = tool_choice
+        if think is not _UNSET:
+            call_kwargs["think"] = think
+        if adapter is not _UNSET:
+            call_kwargs["adapter"] = adapter
+        call_kwargs.update(kwargs)
         return await self._client.chat_async(**call_kwargs)
 
     async def chat_stream_async(
         self,
         messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
+        model: str | None | _Unset = _UNSET,
+        system: str | None | _Unset = _UNSET,
+        temperature: float | _Unset = _UNSET,
+        max_tokens: int | None | _Unset = _UNSET,
+        tools: list[dict[str, Any]] | None | _Unset = _UNSET,
+        tool_choice: str | dict[str, Any] | None | _Unset = _UNSET,
+        think: bool | None | _Unset = _UNSET,
+        adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream chat completion tokens (async) with bound kwargs merged."""
-        call_kwargs = {
-            **self._bound_kwargs,
-            "messages": messages,
-            "model": model,
-            "system": system,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "tools": tools,
-            "tool_choice": tool_choice,
-            "think": think,
-            "adapter": adapter,
-            **kwargs,
-        }
+        call_kwargs: dict[str, Any] = {**self._bound_kwargs, "messages": messages}
+        if model is not _UNSET:
+            call_kwargs["model"] = model
+        if system is not _UNSET:
+            call_kwargs["system"] = system
+        if temperature is not _UNSET:
+            call_kwargs["temperature"] = temperature
+        if max_tokens is not _UNSET:
+            call_kwargs["max_tokens"] = max_tokens
+        if tools is not _UNSET:
+            call_kwargs["tools"] = tools
+        if tool_choice is not _UNSET:
+            call_kwargs["tool_choice"] = tool_choice
+        if think is not _UNSET:
+            call_kwargs["think"] = think
+        if adapter is not _UNSET:
+            call_kwargs["adapter"] = adapter
+        call_kwargs.update(kwargs)
         async for token in self._client.chat_stream_async(**call_kwargs):
             yield token
 

@@ -490,3 +490,22 @@ class TestSAIAAdapterChat:
         call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["temperature"] == 0.9
         assert call_kwargs["max_tokens"] == 200
+
+    @pytest.mark.asyncio
+    async def test_chat_uses_bound_args_when_not_passed(
+        self, mock_client: MagicMock
+    ) -> None:
+        """Test bound chat_args are used when explicit args are omitted."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client).with_chat_args(
+            temperature=0.5, max_tokens=123
+        )
+
+        await adapter.chat(messages=[Message(role="user", content="Hi")])
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["max_tokens"] == 123

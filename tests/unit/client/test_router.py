@@ -27,6 +27,7 @@ class MockBackend(Backend):
         self._lg = lg
         self._responses = iter(responses or [])
         self._last_response: ChatResponse | None = None
+        self._last_kwargs: dict[str, Any] = {}
         self._closed = False
         self._aclosed = False
 
@@ -34,13 +35,19 @@ class MockBackend(Backend):
     def last_response(self) -> ChatResponse | None:
         return self._last_response
 
+    @property
+    def last_kwargs(self) -> dict[str, Any]:
+        return self._last_kwargs
+
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> ChatResponse:
         response = next(self._responses)
         self._last_response = response
+        self._last_kwargs = kwargs
         return response
 
     def chat_stream(self, messages: list[dict[str, Any]], **kwargs: Any):
         response = next(self._responses)
+        self._last_kwargs = kwargs
         yield from response.content
         self._last_response = response
 
@@ -49,10 +56,12 @@ class MockBackend(Backend):
     ) -> ChatResponse:
         response = next(self._responses)
         self._last_response = response
+        self._last_kwargs = kwargs
         return response
 
     async def chat_stream_async(self, messages: list[dict[str, Any]], **kwargs: Any):
         response = next(self._responses)
+        self._last_kwargs = kwargs
         for char in response.content:
             yield char
         self._last_response = response
@@ -586,6 +595,21 @@ class TestLLMRouterWithChatArgs:
         bound = router.with_chat_args(temperature=0.5)
 
         bound.chat([{"role": "user", "content": "Hi"}], temperature=0.9)
+
+        assert backend.last_kwargs["temperature"] == 0.9
+
+    def test_bound_args_preserved_when_not_overridden(self, mock_lg: Logger) -> None:
+        """Test bound args are used when not explicitly passed."""
+        response = ChatResponse(content="test")
+        backend = MockBackend(responses=[response])
+        client = LLMClient(mock_lg, backend)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+        bound = router.with_chat_args(temperature=0.5, max_tokens=100)
+
+        bound.chat([{"role": "user", "content": "Hi"}])
+
+        assert backend.last_kwargs["temperature"] == 0.5
+        assert backend.last_kwargs["max_tokens"] == 100
 
     def test_bound_client_can_call_delegates(self, mock_lg: Logger) -> None:
         """Test can_call() delegates to wrapped client."""
