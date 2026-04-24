@@ -467,3 +467,26 @@ class TestSAIAAdapterChat:
         call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["role"] == "exploration"
         assert call_kwargs["backend"] == "openai"
+
+    @pytest.mark.asyncio
+    async def test_chat_explicit_args_override_bound_args(
+        self, mock_client: MagicMock
+    ) -> None:
+        """Test explicit chat args override bound chat_args."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client).with_chat_args(
+            temperature=0.5, max_tokens=100
+        )
+
+        await adapter.chat(
+            messages=[Message(role="user", content="Hi")],
+            temperature=0.9,
+            max_tokens=200,
+        )
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.9
+        assert call_kwargs["max_tokens"] == 200

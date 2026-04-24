@@ -105,15 +105,16 @@ class SAIAAdapter(Backend):
         api_tools = self._convert_tools(tools) if tools else None
         response_format = self._build_response_format(response_schema)
 
-        response = await self._client.chat_async(
-            messages=api_messages,
-            system=system,
-            tools=api_tools,
-            max_tokens=max_tokens,
-            response_format=response_format,
-            temperature=temperature if temperature is not None else 1.0,
+        call_kwargs = {
             **self._chat_args,
-        )
+            "messages": api_messages,
+            "system": system,
+            "tools": api_tools,
+            "max_tokens": max_tokens,
+            "response_format": response_format,
+            "temperature": temperature if temperature is not None else 1.0,
+        }
+        response = await self._client.chat_async(**call_kwargs)
 
         return self._convert_response(response)
 
