@@ -6,6 +6,10 @@ for both LLMClient (single-backend) and LLMRouter (multi-backend).
 Use ChatClient as a type hint when your code works with either:
     def run_inference(client: ChatClient, messages: list[dict]) -> str:
         return client.chat(messages).content
+
+Also provides BoundChatClient for binding kwargs to any ChatClient:
+    bound = BoundChatClient(router, role="exploration")
+    bound.chat(messages)  # role="exploration" merged automatically
 """
 
 from __future__ import annotations
@@ -228,3 +232,213 @@ class ChatClient(ABC):
     ) -> None:
         """Exit async context manager."""
         ...
+
+
+class BoundChatClient(ChatClient):
+    """ChatClient wrapper that binds kwargs to every call.
+
+    Creates a view of a ChatClient with pre-bound arguments that are merged
+    into every chat call. Useful for binding routing parameters (role, backend)
+    without modifying the underlying client.
+
+    The bound client delegates resource management to the wrapped client.
+    Closing the bound client closes the underlying client.
+
+    Example:
+        router = Factory(lg).from_config(config)
+        exploration = BoundChatClient(router, role="exploration")
+        synthesis = BoundChatClient(router, role="synthesis")
+
+        # Both use the same router, different roles
+        exploration.chat(messages)  # role="exploration" merged
+        synthesis.chat(messages)    # role="synthesis" merged
+    """
+
+    def __init__(self, client: ChatClient, **kwargs: Any) -> None:
+        """Create a bound view of a ChatClient.
+
+        Args:
+            client: The ChatClient to wrap.
+            **kwargs: Arguments to merge into every chat call.
+        """
+        self._client = client
+        self._bound_kwargs = kwargs
+
+    @property
+    def client(self) -> ChatClient:
+        """The underlying ChatClient."""
+        return self._client
+
+    @property
+    def bound_kwargs(self) -> dict[str, Any]:
+        """The bound kwargs (read-only copy)."""
+        return dict(self._bound_kwargs)
+
+    def with_chat_args(self, **kwargs: Any) -> BoundChatClient:
+        """Create a new BoundChatClient with additional bound kwargs.
+
+        Args:
+            **kwargs: Additional arguments to merge.
+
+        Returns:
+            New BoundChatClient with merged kwargs.
+        """
+        merged = {**self._bound_kwargs, **kwargs}
+        return BoundChatClient(self._client, **merged)
+
+    def can_call(self) -> bool:
+        """Check if a call is allowed (delegates to wrapped client)."""
+        return self._client.can_call()
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        """Send a chat completion request with bound kwargs merged."""
+        call_kwargs = {
+            **self._bound_kwargs,
+            "messages": messages,
+            "model": model,
+            "system": system,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "think": think,
+            "adapter": adapter,
+            **kwargs,
+        }
+        return self._client.chat(**call_kwargs)
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Stream chat completion tokens with bound kwargs merged."""
+        call_kwargs = {
+            **self._bound_kwargs,
+            "messages": messages,
+            "model": model,
+            "system": system,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "think": think,
+            "adapter": adapter,
+            **kwargs,
+        }
+        yield from self._client.chat_stream(**call_kwargs)
+
+    async def chat_async(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        """Send a chat completion request (async) with bound kwargs merged."""
+        call_kwargs = {
+            **self._bound_kwargs,
+            "messages": messages,
+            "model": model,
+            "system": system,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "think": think,
+            "adapter": adapter,
+            **kwargs,
+        }
+        return await self._client.chat_async(**call_kwargs)
+
+    async def chat_stream_async(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        system: str | None = None,
+        temperature: float = 1.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        think: bool | None = None,
+        adapter: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream chat completion tokens (async) with bound kwargs merged."""
+        call_kwargs = {
+            **self._bound_kwargs,
+            "messages": messages,
+            "model": model,
+            "system": system,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "think": think,
+            "adapter": adapter,
+            **kwargs,
+        }
+        async for token in self._client.chat_stream_async(**call_kwargs):
+            yield token
+
+    def close(self) -> None:
+        """Close the wrapped client."""
+        self._client.close()
+
+    async def aclose(self) -> None:
+        """Close the wrapped client (async)."""
+        await self._client.aclose()
+
+    def __enter__(self) -> Self:
+        """Enter sync context manager."""
+        self._client.__enter__()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Exit sync context manager."""
+        self._client.__exit__(exc_type, exc_val, exc_tb)
+
+    async def __aenter__(self) -> Self:
+        """Enter async context manager."""
+        await self._client.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Exit async context manager."""
+        await self._client.__aexit__(exc_type, exc_val, exc_tb)
