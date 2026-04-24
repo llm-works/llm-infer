@@ -1,18 +1,49 @@
 """Type definitions for the LLM client.
 
-This module defines the response types returned by the client, including
+This module defines the request/response types for the client, including
 llm-infer specific extensions like thinking content and tool calls.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..schemas.openai import (
     ChatCompletionUsage,
     FinishReason,
     ToolCall,
 )
+
+
+@dataclass
+class ChatRequest:
+    """Request for a chat completion.
+
+    Captures the parameters sent to a chat endpoint. Used for logging,
+    debugging, and strategy inspection.
+
+    Attributes:
+        messages: List of chat messages.
+        model: Model to use.
+        system: System prompt.
+        temperature: Sampling temperature.
+        max_tokens: Maximum tokens to generate.
+        tools: Tool definitions for function calling.
+        tool_choice: Control tool use.
+        think: Enable thinking mode.
+        adapter: LoRA adapter name.
+    """
+
+    messages: list[dict[str, Any]]
+    model: str | None = None
+    system: str | None = None
+    temperature: float = 1.0
+    max_tokens: int | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    think: bool | None = None
+    adapter: str | None = None
 
 
 @dataclass
