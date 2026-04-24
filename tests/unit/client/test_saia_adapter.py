@@ -81,6 +81,23 @@ class TestSAIAAdapterMessageConversion:
             "content": '{"result": 42}',
         }
 
+    def test_convert_tool_message(self, mock_client: MagicMock) -> None:
+        """Test tool message conversion (SAIA uses role='tool', not 'tool_result')."""
+        adapter = SAIAAdapter(mock_client)
+        msg = Message(
+            role="tool",
+            content="Search results...",
+            tool_call_id="toolu_01ABC123",
+        )
+
+        result = adapter._convert_message(msg)
+
+        assert result == {
+            "role": "tool",
+            "tool_call_id": "toolu_01ABC123",
+            "content": "Search results...",
+        }
+
     def test_convert_assistant_message_with_tool_calls(
         self, mock_client: MagicMock
     ) -> None:

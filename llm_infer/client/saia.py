@@ -103,7 +103,9 @@ class SAIAAdapter(Backend):
 
     def _convert_message(self, msg: Message) -> dict[str, Any]:
         """Convert a single SAIA message to llm-infer format."""
-        if msg.role == "tool_result":
+        # OpenAI uses "tool" for tool results, Anthropic convention uses "tool_result".
+        # SAIA's Role.TOOL is "tool", so we accept both for compatibility.
+        if msg.role in ("tool", "tool_result"):
             return {
                 "role": "tool",
                 "tool_call_id": msg.tool_call_id,
