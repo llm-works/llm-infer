@@ -73,7 +73,23 @@ from .errors import (
 )
 from .factory import Factory
 from .router import LLMRouter, ResolvedTarget
-from .types import ChatResponse
+from .strategies import (
+    DefaultStrategy,
+    DefaultStrategyFactory,
+    FallbackStrategy,
+    FallbackStrategyFactory,
+)
+from .strategy import (
+    DefaultTransientDetector,
+    RoutingContext,
+    RoutingDecision,
+    RoutingResult,
+    RoutingStrategy,
+    StrategyFactory,
+    TransientAction,
+    TransientDetector,
+)
+from .types import ChatRequest, ChatResponse
 
 __all__ = [
     # Factory (primary entry point)
@@ -85,7 +101,21 @@ __all__ = [
     "LLMRouter",
     "ResolvedTarget",
     "ModelDiscovery",
-    # Response types
+    # Routing strategies
+    "RoutingStrategy",
+    "RoutingContext",
+    "RoutingDecision",
+    "RoutingResult",
+    "StrategyFactory",
+    "TransientAction",
+    "TransientDetector",
+    "DefaultTransientDetector",
+    "DefaultStrategy",
+    "DefaultStrategyFactory",
+    "FallbackStrategy",
+    "FallbackStrategyFactory",
+    # Request/Response types
+    "ChatRequest",
     "ChatResponse",
     # Backend base class
     "Backend",
