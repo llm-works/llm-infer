@@ -19,7 +19,7 @@ Requires: pip install llm-infer[saia]
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from llm_saia.core import (
     Backend,
@@ -58,6 +58,25 @@ class SAIAAdapter(Backend):
             client: The LLMClient instance to wrap. Can be any subclass.
         """
         self._client = client
+        self._chat_args: dict[str, Any] = {}
+
+    def with_chat_args(self, **kwargs: Any) -> Self:
+        """Bind kwargs to be merged into every chat call.
+
+        Useful for binding routing parameters when using LLMRouter with
+        role-based strategies.
+
+        Args:
+            **kwargs: Arguments to merge into chat calls (e.g., role, backend).
+
+        Returns:
+            Self for fluent chaining.
+
+        Example:
+            adapter = SAIAAdapter(router).with_chat_args(role="exploration")
+        """
+        self._chat_args = {**self._chat_args, **kwargs}
+        return self
 
     async def chat(
         self,
@@ -93,6 +112,7 @@ class SAIAAdapter(Backend):
             max_tokens=max_tokens,
             response_format=response_format,
             temperature=temperature if temperature is not None else 1.0,
+            **self._chat_args,
         )
 
         return self._convert_response(response)
