@@ -33,13 +33,13 @@ from ..errors import (
     BackendUnavailableError,
 )
 from ..types import ChatRequest, ChatResponse
-from .base import Backend, BackendContext
+from .base import AsyncRequestTrackingMixin, Backend, BackendContext
 
 if TYPE_CHECKING:
     import anthropic
 
 
-class AnthropicBackend(Backend):
+class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
     """Backend for Anthropic Claude API.
 
     This backend uses the official Anthropic SDK. It translates between
@@ -109,6 +109,7 @@ class AnthropicBackend(Backend):
         )
         # Async client created lazily
         self._async_client: anthropic.AsyncAnthropic | None = None
+        self._init_async_tracking()
 
     @property
     def last_response(self) -> ChatResponse | None:
@@ -153,29 +154,37 @@ class AnthropicBackend(Backend):
         """Send a non-streaming chat completion request (async)."""
         request_kwargs = self._prepare_request(request)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
-        client = self._get_async_client()
-        async with self._handle_errors_async():
-            response = await client.messages.create(**request_kwargs)
-        result = self._parse_response(
-            response, request.model or self.default_model, structured_output_tool
-        )
-        self._last_response = result
-        return result
+        self._acquire_async_request()
+        try:
+            client = self._get_async_client()
+            async with self._handle_errors_async():
+                response = await client.messages.create(**request_kwargs)
+            result = self._parse_response(
+                response, request.model or self.default_model, structured_output_tool
+            )
+            self._last_response = result
+            return result
+        finally:
+            self._release_async_request()
 
     async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async)."""
         request_kwargs = self._prepare_request(request, stream=True)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         state = _StreamState(structured_output_tool)
-        client = self._get_async_client()
-        async with self._handle_errors_async():
-            async with client.messages.stream(**request_kwargs) as stream:
-                async for event in stream:
-                    token = self._process_stream_event(event, state)
-                    if token:
-                        yield token
-                self._finalize_stream_state(state, await stream.get_final_message())
-        self._last_response = state.to_response(request.model or self.default_model)
+        self._acquire_async_request()
+        try:
+            client = self._get_async_client()
+            async with self._handle_errors_async():
+                async with client.messages.stream(**request_kwargs) as stream:
+                    async for event in stream:
+                        token = self._process_stream_event(event, state)
+                        if token:
+                            yield token
+                    self._finalize_stream_state(state, await stream.get_final_message())
+            self._last_response = state.to_response(request.model or self.default_model)
+        finally:
+            self._release_async_request()
 
     # =========================================================================
     # Resource management
@@ -196,7 +205,12 @@ class AnthropicBackend(Backend):
         self._client.close()
 
     async def aclose(self) -> None:
-        """Close all clients (sync and async)."""
+        """Close all clients (sync and async).
+
+        Waits for any in-flight async requests to complete before closing.
+        New requests will fail immediately once close is requested.
+        """
+        await self._drain_async_requests()
         self._client.close()
         if self._async_client is not None:
             await self._async_client.close()

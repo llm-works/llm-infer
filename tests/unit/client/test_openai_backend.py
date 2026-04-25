@@ -464,3 +464,159 @@ async def _async_iter(items: list[str]) -> AsyncIterator[str]:
     """Create an async iterator from a list."""
     for item in items:
         yield item
+
+
+class TestOpenAICompatibleBackendConcurrentClose:
+    """Test concurrent request handling during close."""
+
+    @pytest.mark.asyncio
+    async def test_aclose_waits_for_active_requests(self, mock_lg: Logger) -> None:
+        """Test aclose() waits for in-flight requests to complete."""
+        import asyncio
+
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+        request_started = asyncio.Event()
+        allow_response = asyncio.Event()
+
+        async def slow_post(*args: object, **kwargs: object) -> MagicMock:
+            request_started.set()
+            await allow_response.wait()
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "model": "test",
+                "choices": [{"message": {"content": "done"}, "finish_reason": "stop"}],
+            }
+            mock_response.raise_for_status = MagicMock()
+            return mock_response
+
+        async_client = backend._get_async_client()
+        request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+
+        with patch.object(async_client, "post", new=slow_post):
+            # Start async request
+            chat_task = asyncio.create_task(backend.chat_async(request))
+            await request_started.wait()
+
+            # Start close while request is in flight
+            close_task = asyncio.create_task(backend.aclose())
+
+            # Close should be waiting (active request count > 0)
+            await asyncio.sleep(0.01)
+            assert not close_task.done()
+            assert backend._active_async_requests == 1
+
+            # Allow the request to complete
+            allow_response.set()
+            response = await chat_task
+
+            # Now close should complete
+            await close_task
+
+        assert response.content == "done"
+        assert backend._async_client is None
+
+    @pytest.mark.asyncio
+    async def test_new_requests_fail_during_close(self, mock_lg: Logger) -> None:
+        """Test new requests fail immediately after close is requested."""
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+
+        # Request close
+        backend._close_requested = True
+
+        # New request should fail
+        request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+        with pytest.raises(BackendUnavailableError, match="Backend is closing"):
+            await backend.chat_async(request)
+
+        # Clean up
+        backend._close_requested = False
+        await backend.aclose()
+
+    @pytest.mark.asyncio
+    async def test_multiple_concurrent_requests(self, mock_lg: Logger) -> None:
+        """Test multiple concurrent requests complete successfully."""
+        import asyncio
+
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+
+        async def mock_post(*args: object, **kwargs: object) -> MagicMock:
+            await asyncio.sleep(0.01)  # Small delay to ensure concurrency
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "model": "test",
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            }
+            mock_response.raise_for_status = MagicMock()
+            return mock_response
+
+        async_client = backend._get_async_client()
+        request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+
+        with patch.object(async_client, "post", new=mock_post):
+            # Start multiple concurrent requests
+            tasks = [asyncio.create_task(backend.chat_async(request)) for _ in range(5)]
+
+            # Verify active count increases
+            await asyncio.sleep(0.001)
+            assert backend._active_async_requests > 0
+
+            # Wait for all to complete
+            responses = await asyncio.gather(*tasks)
+
+        assert len(responses) == 5
+        assert all(r.content == "ok" for r in responses)
+        assert backend._active_async_requests == 0
+
+        await backend.aclose()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_close_with_multiple_requests(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test aclose() waits for all concurrent requests."""
+        import asyncio
+
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+        requests_started = 0
+        allow_responses = asyncio.Event()
+
+        async def slow_post(*args: object, **kwargs: object) -> MagicMock:
+            nonlocal requests_started
+            requests_started += 1
+            await allow_responses.wait()
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "model": "test",
+                "choices": [{"message": {"content": "done"}, "finish_reason": "stop"}],
+            }
+            mock_response.raise_for_status = MagicMock()
+            return mock_response
+
+        async_client = backend._get_async_client()
+        request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+
+        with patch.object(async_client, "post", new=slow_post):
+            # Start multiple concurrent requests
+            tasks = [asyncio.create_task(backend.chat_async(request)) for _ in range(3)]
+
+            # Wait for all requests to start
+            while requests_started < 3:
+                await asyncio.sleep(0.001)
+
+            # Start close
+            close_task = asyncio.create_task(backend.aclose())
+            await asyncio.sleep(0.01)
+
+            # Close should be waiting
+            assert not close_task.done()
+            assert backend._active_async_requests == 3
+
+            # Allow responses
+            allow_responses.set()
+
+            # All tasks should complete
+            responses = await asyncio.gather(*tasks)
+            await close_task
+
+        assert len(responses) == 3
+        assert backend._async_client is None
