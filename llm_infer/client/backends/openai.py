@@ -37,10 +37,10 @@ from ..errors import (
     BackendUnavailableError,
 )
 from ..types import AdapterInfo, ChatRequest, ChatResponse
-from .base import Backend, BackendContext
+from .base import AsyncRequestTrackingMixin, Backend, BackendContext
 
 
-class OpenAICompatibleBackend(Backend):
+class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     """Backend for OpenAI-compatible APIs."""
 
     def __init__(
@@ -68,6 +68,7 @@ class OpenAICompatibleBackend(Backend):
         self._last_response: ChatResponse | None = None
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
+        self._init_async_tracking()
 
     @property
     def last_response(self) -> ChatResponse | None:
@@ -214,6 +215,7 @@ class OpenAICompatibleBackend(Backend):
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
         client = self._get_async_client()
+        self._acquire_async_request()
         try:
             resp = await client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
@@ -235,6 +237,8 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(f"Transport error: {e}") from e
         except json.JSONDecodeError as e:
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        finally:
+            self._release_async_request()
 
     async def _execute_stream_async(
         self, url: str, payload: dict[str, Any]
@@ -243,6 +247,7 @@ class OpenAICompatibleBackend(Backend):
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
         client = self._get_async_client()
+        self._acquire_async_request()
         try:
             async with client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
@@ -266,13 +271,20 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(f"Transport error: {e}") from e
         except json.JSONDecodeError as e:
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        finally:
+            self._release_async_request()
 
     # =========================================================================
     # Resource management
     # =========================================================================
 
     def _get_async_client(self) -> httpx.AsyncClient:
-        """Get or create the async HTTP client (lazy initialization)."""
+        """Get or create the async HTTP client (lazy initialization).
+
+        Raises:
+            BackendUnavailableError: If close has been requested.
+        """
+        self._check_not_closing()
         if self._async_client is None:
             self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
         return self._async_client
@@ -286,7 +298,12 @@ class OpenAICompatibleBackend(Backend):
         self._client.close()
 
     async def aclose(self) -> None:
-        """Close all HTTP clients (sync and async)."""
+        """Close all HTTP clients (sync and async).
+
+        Waits for any in-flight async requests to complete before closing.
+        New requests will fail immediately once close is requested.
+        """
+        await self._drain_async_requests()
         self._client.close()
         if self._async_client is not None:
             await self._async_client.aclose()

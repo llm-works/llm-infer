@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `from_backend_config()` now extracts `rate_limit` and `retry` from the backend config
   (previously ignored, always used defaults)
+- `aclose()` now waits for in-flight async requests before closing the httpx client, preventing
+  `RuntimeError: Cannot send a request, as the client has been closed` during concurrent calls
 
 ## [0.3.0] - 2026-04-13
 

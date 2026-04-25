@@ -570,3 +570,151 @@ class TestAnthropicStructuredOutput:
             }
 
             assert "response_format" not in kwargs
+
+
+class TestAnthropicBackendConcurrentClose:
+    """Test concurrent request handling during close."""
+
+    @pytest.fixture
+    def mock_anthropic(self) -> Any:
+        """Create mock anthropic module."""
+        from unittest.mock import AsyncMock
+
+        mock_module = MagicMock()
+        mock_client = MagicMock()
+        mock_async_client = MagicMock()
+        mock_async_client.close = AsyncMock()
+
+        mock_module.Anthropic.return_value = mock_client
+        mock_module.AsyncAnthropic.return_value = mock_async_client
+
+        mock_module.APIConnectionError = type(
+            "APIConnectionError", (Exception,), {"message": "connection error"}
+        )
+        mock_module.APITimeoutError = type(
+            "APITimeoutError", (Exception,), {"message": "timeout"}
+        )
+        mock_module.APIStatusError = type(
+            "APIStatusError",
+            (Exception,),
+            {"message": "error", "status_code": 500},
+        )
+
+        return mock_module
+
+    @pytest.mark.asyncio
+    async def test_aclose_waits_for_active_requests(
+        self, mock_lg: Logger, mock_anthropic: Any
+    ) -> None:
+        """Test aclose() waits for in-flight requests to complete."""
+        import asyncio
+
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+            from llm_infer.client.backends.anthropic import AnthropicBackend
+
+            backend = AnthropicBackend(mock_lg, "test", default_model="claude-3")
+
+            request_started = asyncio.Event()
+            allow_response = asyncio.Event()
+
+            async def slow_create(**kwargs: Any) -> MagicMock:
+                request_started.set()
+                await allow_response.wait()
+                mock_response = MagicMock()
+                mock_response.content = [MagicMock(type="text", text="done")]
+                mock_response.stop_reason = "end_turn"
+                mock_response.model = "claude-3"
+                mock_response.usage = None
+                return mock_response
+
+            async_client = backend._get_async_client()
+            async_client.messages.create = slow_create
+
+            request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+
+            # Start async request
+            chat_task = asyncio.create_task(backend.chat_async(request))
+            await request_started.wait()
+
+            # Start close while request is in flight
+            close_task = asyncio.create_task(backend.aclose())
+
+            # Close should be waiting (active request count > 0)
+            await asyncio.sleep(0.01)
+            assert not close_task.done()
+            assert backend._active_async_requests == 1
+
+            # Allow the request to complete
+            allow_response.set()
+            response = await chat_task
+
+            # Now close should complete
+            await close_task
+
+            assert response.content == "done"
+            assert backend._async_client is None
+
+    @pytest.mark.asyncio
+    async def test_new_requests_fail_during_close(
+        self, mock_lg: Logger, mock_anthropic: Any
+    ) -> None:
+        """Test new requests fail immediately after close is requested."""
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.errors import BackendUnavailableError
+
+            backend = AnthropicBackend(mock_lg, "test", default_model="claude-3")
+
+            # Request close
+            backend._close_requested = True
+
+            # New request should fail
+            request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+            with pytest.raises(BackendUnavailableError, match="Backend is closing"):
+                await backend.chat_async(request)
+
+            # Clean up
+            backend._close_requested = False
+            await backend.aclose()
+
+    @pytest.mark.asyncio
+    async def test_multiple_concurrent_requests(
+        self, mock_lg: Logger, mock_anthropic: Any
+    ) -> None:
+        """Test multiple concurrent requests complete successfully."""
+        import asyncio
+
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+            from llm_infer.client.backends.anthropic import AnthropicBackend
+
+            backend = AnthropicBackend(mock_lg, "test", default_model="claude-3")
+
+            async def mock_create(**kwargs: Any) -> MagicMock:
+                await asyncio.sleep(0.01)
+                mock_response = MagicMock()
+                mock_response.content = [MagicMock(type="text", text="ok")]
+                mock_response.stop_reason = "end_turn"
+                mock_response.model = "claude-3"
+                mock_response.usage = None
+                return mock_response
+
+            async_client = backend._get_async_client()
+            async_client.messages.create = mock_create
+
+            request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+
+            # Start multiple concurrent requests
+            tasks = [asyncio.create_task(backend.chat_async(request)) for _ in range(5)]
+
+            # Verify active count increases
+            await asyncio.sleep(0.001)
+            assert backend._active_async_requests > 0
+
+            # Wait for all to complete
+            responses = await asyncio.gather(*tasks)
+
+            assert len(responses) == 5
+            assert all(r.content == "ok" for r in responses)
+            assert backend._active_async_requests == 0
+
+            await backend.aclose()

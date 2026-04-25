@@ -65,7 +65,9 @@ class HuggingFaceTokenizer:
 
     def decode(self, tokens: list[int], skip_special_tokens: bool = True) -> str:
         """Decode token IDs to text."""
-        result: str = self._hf.decode(tokens, skip_special_tokens=skip_special_tokens)
+        # HF decode() returns str for single sequence input (list[int])
+        result = self._hf.decode(tokens, skip_special_tokens=skip_special_tokens)
+        assert isinstance(result, str)
         return result
 
     @property
@@ -104,9 +106,11 @@ class HuggingFaceTokenizer:
             messages = [{"role": "user", "content": message}]
         else:
             messages = message
-        result: list[int] = self._hf.apply_chat_template(
+        # With tokenize=True and single conversation, returns list[int]
+        result = self._hf.apply_chat_template(
             messages,
             add_generation_prompt=add_generation_prompt,
             tokenize=True,
         )
-        return result
+        assert isinstance(result, list)
+        return result  # type: ignore[return-value]
