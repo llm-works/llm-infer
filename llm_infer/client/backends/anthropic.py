@@ -185,7 +185,9 @@ class AnthropicBackend(Backend):
         """Get or create the async client (lazy initialization)."""
         if self._async_client is None:
             self._async_client = self._anthropic.AsyncAnthropic(
-                api_key=self._api_key, timeout=self._ctx.request_timeout
+                api_key=self._api_key,
+                base_url=self._base_url,
+                timeout=self._ctx.request_timeout,
             )
         return self._async_client
 

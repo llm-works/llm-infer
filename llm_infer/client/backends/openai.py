@@ -348,7 +348,15 @@ class OpenAICompatibleBackend(Backend):
         self._add_optional_params(payload, request)
         # Add extra params, filtering out reserved keys to prevent override
         if request.extra:
+            # Extract extra_body contents as top-level keys (OpenAI SDK convention)
+            extra_body = request.extra.get("extra_body")
+            if extra_body:
+                for key, value in extra_body.items():
+                    if value is not None and key not in self._RESERVED_KEYS:
+                        payload[key] = value
             for key, value in request.extra.items():
+                if key == "extra_body":
+                    continue
                 if value is not None and key not in self._RESERVED_KEYS:
                     payload[key] = value
         return payload

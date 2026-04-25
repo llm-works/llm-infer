@@ -113,7 +113,7 @@ class LLMClient(ChatClient):
         """Model discovery for 'auto'/'default' resolution, if configured."""
         return self._discovery
 
-    def _resolve_model(self, model: str | None) -> str | None:
+    def resolve_model(self, model: str | None) -> str | None:
         """Resolve model name using discovery or fallback to default_model.
 
         Args:
@@ -178,7 +178,7 @@ class LLMClient(ChatClient):
         """
         request = ChatRequest(
             messages=messages,
-            model=self._resolve_model(model),
+            model=self.resolve_model(model),
             system=system,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -228,7 +228,7 @@ class LLMClient(ChatClient):
         """
         request = ChatRequest(
             messages=messages,
-            model=self._resolve_model(model),
+            model=self.resolve_model(model),
             system=system,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -279,7 +279,7 @@ class LLMClient(ChatClient):
         """
         request = ChatRequest(
             messages=messages,
-            model=self._resolve_model(model),
+            model=self.resolve_model(model),
             system=system,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -329,7 +329,7 @@ class LLMClient(ChatClient):
         """
         request = ChatRequest(
             messages=messages,
-            model=self._resolve_model(model),
+            model=self.resolve_model(model),
             system=system,
             temperature=temperature,
             max_tokens=max_tokens,

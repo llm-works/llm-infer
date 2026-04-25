@@ -195,7 +195,7 @@ class LLMRouter(ChatClient):
         client = self._clients[backend_name]
 
         # Use client's resolver to resolve "auto"/"default"
-        resolved_model = client._resolve_model(model)
+        resolved_model = client.resolve_model(model)
 
         return ResolvedTarget(backend=backend_name, model=resolved_model)
 

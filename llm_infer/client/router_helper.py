@@ -6,6 +6,7 @@ streaming/non-streaming chat methods.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -100,7 +101,8 @@ def get_initial_decision(
                 extra={"backend": decision.backend, "available": list(router.clients)},
             )
     resolved = router.resolve(model=context.request.model, backend=context.backend)
-    return RoutingDecision(backend=resolved.backend)
+    updated_request = dataclasses.replace(context.request, model=resolved.model)
+    return RoutingDecision(backend=resolved.backend, updated_request=updated_request)
 
 
 def make_result(
