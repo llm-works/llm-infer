@@ -155,6 +155,19 @@ class TestFactory:
         assert "remote" in router.clients
         router.close()
 
+    def test_from_config_model_alias_for_default_model(self, mock_lg: Logger) -> None:
+        """Test from_config accepts 'model' as alias for 'default_model'."""
+        factory = Factory(mock_lg)
+        config = {
+            "type": "openai_compatible",
+            "base_url": "http://test:8000/v1",
+            "model": "test-model",  # Using 'model' instead of 'default_model'
+        }
+        router = factory.from_config(config)
+        # Access through the client for the default backend
+        assert router.clients["default"].default_model == "test-model"
+        router.close()
+
     def test_from_config_uses_first_backend_if_no_default(
         self, mock_lg: Logger
     ) -> None:
