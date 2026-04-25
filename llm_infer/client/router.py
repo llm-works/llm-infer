@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, Self
 from appinfra.log import Logger
 
 from . import router_helper as rh
-from .base import ChatClient
+from .base import BoundChatClient, ChatClient
 from .client import LLMClient
 from .errors import BackendError
 from .resolver import ModelResolver
@@ -157,6 +157,31 @@ class LLMRouter(ChatClient):
     def strategy(self) -> RoutingStrategy | None:
         """Routing strategy, if configured."""
         return self._strategy
+
+    def with_chat_args(self, **kwargs: Any) -> BoundChatClient:
+        """Create a bound ChatClient with kwargs merged into every call.
+
+        Returns a BoundChatClient that wraps this router and merges the
+        provided kwargs into every chat call. Useful for binding routing
+        parameters (role, backend) without passing them each time.
+
+        Args:
+            **kwargs: Arguments to merge into every chat call (e.g., role,
+                backend, model, temperature).
+
+        Returns:
+            BoundChatClient wrapping this router with bound kwargs.
+
+        Example:
+            router = Factory(lg).from_config(config)
+            exploration = router.with_chat_args(role="exploration")
+            synthesis = router.with_chat_args(role="synthesis")
+
+            # Both implement ChatClient, can be used interchangeably
+            exploration.chat(messages)  # role="exploration" merged
+            synthesis.chat(messages)    # role="synthesis" merged
+        """
+        return BoundChatClient(self, **kwargs)
 
     def resolve(
         self,

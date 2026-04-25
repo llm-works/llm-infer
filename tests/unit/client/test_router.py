@@ -27,6 +27,7 @@ class MockBackend(Backend):
         self._lg = lg
         self._responses = iter(responses or [])
         self._last_response: ChatResponse | None = None
+        self._last_kwargs: dict[str, Any] = {}
         self._closed = False
         self._aclosed = False
 
@@ -34,13 +35,19 @@ class MockBackend(Backend):
     def last_response(self) -> ChatResponse | None:
         return self._last_response
 
+    @property
+    def last_kwargs(self) -> dict[str, Any]:
+        return self._last_kwargs
+
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> ChatResponse:
         response = next(self._responses)
         self._last_response = response
+        self._last_kwargs = kwargs
         return response
 
     def chat_stream(self, messages: list[dict[str, Any]], **kwargs: Any):
         response = next(self._responses)
+        self._last_kwargs = kwargs
         yield from response.content
         self._last_response = response
 
@@ -49,10 +56,12 @@ class MockBackend(Backend):
     ) -> ChatResponse:
         response = next(self._responses)
         self._last_response = response
+        self._last_kwargs = kwargs
         return response
 
     async def chat_stream_async(self, messages: list[dict[str, Any]], **kwargs: Any):
         response = next(self._responses)
+        self._last_kwargs = kwargs
         for char in response.content:
             yield char
         self._last_response = response
@@ -507,3 +516,120 @@ class TestLLMClientDefaultModel:
         client = LLMClient(lg=mock_lg, backend=backend)
 
         assert client.default_model is None
+
+
+class TestLLMRouterWithChatArgs:
+    """Test LLMRouter.with_chat_args() method."""
+
+    def test_with_chat_args_returns_bound_client(self, mock_lg: Logger) -> None:
+        """Test with_chat_args returns a BoundChatClient."""
+        from llm_infer.client import BoundChatClient
+
+        client = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        bound = router.with_chat_args(role="exploration")
+
+        assert isinstance(bound, BoundChatClient)
+        assert bound.client is router
+        assert bound.bound_kwargs == {"role": "exploration"}
+
+    def test_with_chat_args_merges_into_chat(self, mock_lg: Logger) -> None:
+        """Test bound kwargs are merged into chat calls (routing works)."""
+        response = ChatResponse(content="from_a")
+        backend_a = MockBackend(responses=[response])
+        backend_b = MockBackend(responses=[])
+        client_a = LLMClient(mock_lg, backend_a)
+        client_b = LLMClient(mock_lg, backend_b)
+        router = LLMRouter(mock_lg, {"a": client_a, "b": client_b}, "b")
+        bound = router.with_chat_args(backend="a")
+
+        result = bound.chat([{"role": "user", "content": "Hi"}])
+
+        assert result.content == "from_a"
+        assert backend_a.last_kwargs is not None
+
+    @pytest.mark.asyncio
+    async def test_with_chat_args_merges_into_chat_async(self, mock_lg: Logger) -> None:
+        """Test bound kwargs are merged into async chat calls."""
+        response = ChatResponse(content="test")
+        backend = MockBackend(responses=[response])
+        client = LLMClient(mock_lg, backend)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+        bound = router.with_chat_args(system="You are helpful")
+
+        result = await bound.chat_async([{"role": "user", "content": "Hi"}])
+
+        assert result.content == "test"
+        assert backend.last_kwargs["system"] == "You are helpful"
+
+    def test_multiple_bound_clients_independent(self, mock_lg: Logger) -> None:
+        """Test multiple bound clients from same router are independent."""
+        from llm_infer.client import BoundChatClient
+
+        client = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        exploration = router.with_chat_args(role="exploration")
+        synthesis = router.with_chat_args(role="synthesis")
+
+        assert isinstance(exploration, BoundChatClient)
+        assert isinstance(synthesis, BoundChatClient)
+        assert exploration.bound_kwargs == {"role": "exploration"}
+        assert synthesis.bound_kwargs == {"role": "synthesis"}
+        assert exploration is not synthesis
+
+    def test_bound_client_chaining(self, mock_lg: Logger) -> None:
+        """Test bound clients can be chained with additional args."""
+        client = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        bound1 = router.with_chat_args(role="exploration")
+        bound2 = bound1.with_chat_args(backend="main")
+
+        assert bound1.bound_kwargs == {"role": "exploration"}
+        assert bound2.bound_kwargs == {"role": "exploration", "backend": "main"}
+
+    def test_explicit_args_override_bound_args(self, mock_lg: Logger) -> None:
+        """Test explicit call args override bound args."""
+        response = ChatResponse(content="test")
+        backend = MockBackend(responses=[response])
+        client = LLMClient(mock_lg, backend)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+        bound = router.with_chat_args(temperature=0.5)
+
+        bound.chat([{"role": "user", "content": "Hi"}], temperature=0.9)
+
+        assert backend.last_kwargs["temperature"] == 0.9
+
+    def test_bound_args_preserved_when_not_overridden(self, mock_lg: Logger) -> None:
+        """Test bound args are used when not explicitly passed."""
+        response = ChatResponse(content="test")
+        backend = MockBackend(responses=[response])
+        client = LLMClient(mock_lg, backend)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+        bound = router.with_chat_args(temperature=0.5, max_tokens=100)
+
+        bound.chat([{"role": "user", "content": "Hi"}])
+
+        assert backend.last_kwargs["temperature"] == 0.5
+        assert backend.last_kwargs["max_tokens"] == 100
+
+    def test_bound_client_can_call_delegates(self, mock_lg: Logger) -> None:
+        """Test can_call() delegates to wrapped client."""
+        client = make_client(mock_lg)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+        bound = router.with_chat_args(role="exploration")
+
+        assert bound.can_call() is True
+
+    def test_bound_client_context_manager(self, mock_lg: Logger) -> None:
+        """Test bound client works as context manager."""
+        response = ChatResponse(content="test")
+        backend = MockBackend(responses=[response])
+        client = LLMClient(mock_lg, backend)
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        with router.with_chat_args(role="exploration") as bound:
+            result = bound.chat([{"role": "user", "content": "Hi"}])
+            assert result.content == "test"

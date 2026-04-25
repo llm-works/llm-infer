@@ -19,7 +19,7 @@ Requires: pip install llm-infer[saia]
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from llm_saia.core import (
     Backend,
@@ -34,15 +34,15 @@ from llm_saia.core import (
 )
 
 if TYPE_CHECKING:
-    from .client import LLMClient
+    from .base import ChatClient
     from .types import ChatResponse as InferChatResponse
 
 
 class SAIAAdapter(Backend):
-    """Adapter that wraps LLMClient to implement llm-saia Backend.
+    """Adapter that wraps a ChatClient to implement llm-saia Backend.
 
-    This allows any LLMClient (or subclass like LearnClient) to be used
-    with the llm-saia verb vocabulary.
+    This allows any ChatClient (LLMClient, LLMRouter, BoundChatClient) to be
+    used with the llm-saia verb vocabulary.
 
     The adapter handles conversion between:
     - SAIA Message types <-> llm-infer message dicts
@@ -51,13 +51,32 @@ class SAIAAdapter(Backend):
     - Tool call argument parsing (JSON string -> dict)
     """
 
-    def __init__(self, client: LLMClient) -> None:
-        """Initialize the adapter with an LLMClient.
+    def __init__(self, client: ChatClient) -> None:
+        """Initialize the adapter with a ChatClient.
 
         Args:
-            client: The LLMClient instance to wrap. Can be any subclass.
+            client: The ChatClient to wrap (LLMClient, LLMRouter, etc.).
         """
         self._client = client
+        self._chat_args: dict[str, Any] = {}
+
+    def with_chat_args(self, **kwargs: Any) -> Self:
+        """Bind kwargs to be merged into every chat call.
+
+        Useful for binding routing parameters when using LLMRouter with
+        role-based strategies.
+
+        Args:
+            **kwargs: Arguments to merge into chat calls (e.g., role, backend).
+
+        Returns:
+            Self for fluent chaining.
+
+        Example:
+            adapter = SAIAAdapter(router).with_chat_args(role="exploration")
+        """
+        self._chat_args = {**self._chat_args, **kwargs}
+        return self
 
     async def chat(
         self,
@@ -86,14 +105,20 @@ class SAIAAdapter(Backend):
         api_tools = self._convert_tools(tools) if tools else None
         response_format = self._build_response_format(response_schema)
 
-        response = await self._client.chat_async(
-            messages=api_messages,
-            system=system,
-            tools=api_tools,
-            max_tokens=max_tokens,
-            response_format=response_format,
-            temperature=temperature if temperature is not None else 1.0,
-        )
+        call_kwargs: dict[str, Any] = {**self._chat_args, "messages": api_messages}
+        if system is not None:
+            call_kwargs["system"] = system
+        if api_tools is not None:
+            call_kwargs["tools"] = api_tools
+        if max_tokens is not None:
+            call_kwargs["max_tokens"] = max_tokens
+        if response_format is not None:
+            call_kwargs["response_format"] = response_format
+        if temperature is not None:
+            call_kwargs["temperature"] = temperature
+        elif "temperature" not in call_kwargs:
+            call_kwargs["temperature"] = 1.0
+        response = await self._client.chat_async(**call_kwargs)
 
         return self._convert_response(response)
 
