@@ -37,19 +37,20 @@ class AsyncRequestTrackingMixin:
     provides reference counting for active requests and graceful drain
     on close.
 
+    Note: This mixin assumes single-threaded asyncio. The counter and
+    close flag are not thread-safe. Do not share backend instances
+    across multiple event loops or OS threads.
+
     Usage:
         class MyBackend(AsyncRequestTrackingMixin, Backend):
             def __init__(self, ...):
                 super().__init__(...)
                 self._init_async_tracking()
 
-            def _get_async_client(self):
-                self._check_not_closing()
-                # ... create/return client
-
             async def _execute_async(self, ...):
-                self._acquire_async_request()
+                self._acquire_async_request()  # raises if closing
                 try:
+                    client = self._get_async_client()
                     # ... do request
                 finally:
                     self._release_async_request()
@@ -69,15 +70,19 @@ class AsyncRequestTrackingMixin:
         self._close_requested = False
         self._drain_event = None
 
-    def _check_not_closing(self) -> None:
-        """Raise if close has been requested. Call before starting new requests."""
+    def _acquire_async_request(self) -> None:
+        """Acquire a request slot, raising if backend is closing.
+
+        This atomically checks the close flag and increments the counter,
+        preventing races between new requests and close.
+
+        Raises:
+            BackendUnavailableError: If close has been requested.
+        """
         if self._close_requested:
             raise BackendUnavailableError(
                 "Backend is closing, cannot accept new requests"
             )
-
-    def _acquire_async_request(self) -> None:
-        """Track start of an async request. Call before making request."""
         self._active_async_requests += 1
 
     def _release_async_request(self) -> None:

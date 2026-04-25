@@ -214,9 +214,9 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """Execute async request with error translation."""
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
-        client = self._get_async_client()
         self._acquire_async_request()
         try:
+            client = self._get_async_client()
             resp = await client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
@@ -246,9 +246,9 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """Execute async streaming request with error translation."""
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
-        client = self._get_async_client()
         self._acquire_async_request()
         try:
+            client = self._get_async_client()
             async with client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
             ) as resp:
@@ -279,12 +279,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # =========================================================================
 
     def _get_async_client(self) -> httpx.AsyncClient:
-        """Get or create the async HTTP client (lazy initialization).
-
-        Raises:
-            BackendUnavailableError: If close has been requested.
-        """
-        self._check_not_closing()
+        """Get or create the async HTTP client (lazy initialization)."""
         if self._async_client is None:
             self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
         return self._async_client

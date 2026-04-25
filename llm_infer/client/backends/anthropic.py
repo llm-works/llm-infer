@@ -154,9 +154,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         """Send a non-streaming chat completion request (async)."""
         request_kwargs = self._prepare_request(request)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
-        client = self._get_async_client()
         self._acquire_async_request()
         try:
+            client = self._get_async_client()
             async with self._handle_errors_async():
                 response = await client.messages.create(**request_kwargs)
             result = self._parse_response(
@@ -172,9 +172,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         request_kwargs = self._prepare_request(request, stream=True)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         state = _StreamState(structured_output_tool)
-        client = self._get_async_client()
         self._acquire_async_request()
         try:
+            client = self._get_async_client()
             async with self._handle_errors_async():
                 async with client.messages.stream(**request_kwargs) as stream:
                     async for event in stream:
@@ -191,12 +191,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
     # =========================================================================
 
     def _get_async_client(self) -> anthropic.AsyncAnthropic:
-        """Get or create the async client (lazy initialization).
-
-        Raises:
-            BackendUnavailableError: If close has been requested.
-        """
-        self._check_not_closing()
+        """Get or create the async client (lazy initialization)."""
         if self._async_client is None:
             self._async_client = self._anthropic.AsyncAnthropic(
                 api_key=self._api_key,
