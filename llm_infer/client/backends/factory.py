@@ -8,7 +8,8 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
 
-from .base import Backend, BackendContext, RetryConfig
+from .base import Backend
+from .context import BackendContext, RetryConfig
 
 
 class BackendFactory:

@@ -34,7 +34,9 @@ from ...errors import (
     BackendUnavailableError,
 )
 from ...types import ChatRequest, ChatResponse
-from ..base import AsyncRequestTrackingMixin, Backend, BackendContext
+from ..base import Backend
+from ..context import BackendContext
+from ..mixins import AsyncRequestTrackingMixin
 from ..provider import Provider
 
 if TYPE_CHECKING:
