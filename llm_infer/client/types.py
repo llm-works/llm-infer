@@ -33,6 +33,7 @@ class ChatRequest:
         tool_choice: Control tool use.
         think: Enable thinking mode.
         adapter: LoRA adapter name.
+        extra: Backend-specific parameters.
     """
 
     messages: list[dict[str, Any]]
@@ -44,6 +45,7 @@ class ChatRequest:
     tool_choice: str | dict[str, Any] | None = None
     think: bool | None = None
     adapter: str | None = None
+    extra: dict[str, Any] | None = None
 
 
 @dataclass

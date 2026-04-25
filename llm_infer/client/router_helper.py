@@ -6,12 +6,13 @@ streaming/non-streaming chat methods.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from typing import TYPE_CHECKING, Any
 
 from appinfra.dot_dict import DotDict
-from appinfra.log import Logger
 
+from .client import LLMClient
 from .errors import BackendError
 from .strategy import RoutingContext, RoutingDecision, RoutingResult
 from .types import ChatRequest, ChatResponse
@@ -64,6 +65,7 @@ def setup_routing(  # cq: max-lines=35
     backend: str | None,
     role: str | None,
     context: RoutingContext | None,
+    **kwargs: Any,
 ) -> tuple[ChatRequest, RoutingContext, RoutingDecision]:
     """Build ChatRequest, routing context, and get initial decision.
 
@@ -79,24 +81,29 @@ def setup_routing(  # cq: max-lines=35
         tool_choice=tool_choice,
         think=think,
         adapter=adapter,
+        extra=kwargs or None,
     )
     return prepare_routing(router, request, backend, role, context)
 
 
-def request_to_kwargs(request: ChatRequest, **extra: Any) -> dict[str, Any]:
-    """Convert ChatRequest to kwargs dict for client calls."""
-    return {
-        "messages": request.messages,
-        "model": request.model,
-        "system": request.system,
-        "temperature": request.temperature,
-        "max_tokens": request.max_tokens,
-        "tools": request.tools,
-        "tool_choice": request.tool_choice,
-        "think": request.think,
-        "adapter": request.adapter,
-        **extra,
-    }
+def _normalize_decision(
+    router: LLMRouter,
+    request: ChatRequest,
+    decision: RoutingDecision,
+) -> RoutingDecision:
+    """Ensure decision has model resolved for target backend.
+
+    Strategy may return backend-only decisions; this resolves the model
+    so "auto"/"default" aliases work correctly for any backend.
+    """
+    base_request = decision.updated_request or request
+    resolved = router.resolve(model=base_request.model, backend=decision.backend)
+    updated = dataclasses.replace(base_request, model=resolved.model)
+    return RoutingDecision(
+        backend=resolved.backend,
+        updated_request=updated,
+        metadata=decision.metadata,
+    )
 
 
 def get_initial_decision(
@@ -108,13 +115,14 @@ def get_initial_decision(
         decision = router.strategy.select(router, context)
         if decision:
             if decision.backend in router.clients:
-                return decision
+                return _normalize_decision(router, context.request, decision)
             router._lg.warning(
                 "strategy returned invalid backend, falling back",
                 extra={"backend": decision.backend, "available": list(router.clients)},
             )
     resolved = router.resolve(model=context.request.model, backend=context.backend)
-    return RoutingDecision(backend=resolved.backend)
+    updated_request = dataclasses.replace(context.request, model=resolved.model)
+    return RoutingDecision(backend=resolved.backend, updated_request=updated_request)
 
 
 def make_result(
@@ -153,9 +161,8 @@ def handle_success(
         router.strategy.on_result(router, result)
 
 
-def handle_error(
+def _handle_error(
     router: LLMRouter,
-    lg: Logger,
     e: BackendError,
     ctx: RoutingContext,
     decision: RoutingDecision,
@@ -165,6 +172,7 @@ def handle_error(
 
     Returns next decision if strategy wants to retry, None to raise the error.
     """
+    lg = router._lg
     result = make_result(decision.backend, ctx, decision, start_time, error=e)
     if router.strategy:
         next_decision = router.strategy.on_error(router, result)
@@ -189,3 +197,64 @@ def handle_error(
             )
             return next_decision
     return None
+
+
+class FallbackLoop:
+    """Iterator for fallback retry loop.
+
+    Handles timing, success notification, and retry decisions. Use in a for loop:
+
+        for attempt in FallbackLoop(router, request, ctx, decision):
+            try:
+                response = attempt.client._chat(attempt.request)
+                return attempt.success(response)
+            except BackendError as e:
+                attempt.fail(e)  # continues loop or re-raises
+    """
+
+    def __init__(
+        self,
+        router: LLMRouter,
+        request: ChatRequest,
+        ctx: RoutingContext,
+        decision: RoutingDecision,
+    ) -> None:
+        self.router = router
+        self.request = request
+        self.ctx = ctx
+        self.decision = decision
+        self._done = False
+        self._start_time = 0.0
+
+    def __iter__(self) -> FallbackLoop:
+        return self
+
+    def __next__(self) -> FallbackLoop:
+        if self._done:
+            raise StopIteration
+        self._start_time = time.monotonic()
+        return self
+
+    @property
+    def client(self) -> LLMClient:
+        return self.router._clients[self.decision.backend]
+
+    def success(self, response: ChatResponse) -> ChatResponse:
+        """Mark attempt as successful and notify strategy."""
+        handle_success(self.router, response, self.ctx, self.decision, self._start_time)
+        self._done = True
+        return response
+
+    def fail(self, e: BackendError) -> None:
+        """Handle failure - either continues loop or re-raises."""
+        next_decision = _handle_error(
+            self.router, e, self.ctx, self.decision, self._start_time
+        )
+        if next_decision:
+            self.decision = _normalize_decision(
+                self.router, self.request, next_decision
+            )
+            self.request = self.decision.updated_request or self.request
+            self.ctx.request = self.request
+        else:
+            raise e

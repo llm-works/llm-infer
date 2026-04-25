@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from appinfra.log import Logger
 
+from llm_infer.client import ChatRequest
+
 pytestmark = pytest.mark.unit
 
 
@@ -21,40 +23,29 @@ class TestAnthropicBackendImport:
     def test_import_error_when_package_missing(self, mock_lg: Logger) -> None:
         """Test ImportError raised when anthropic package not installed."""
         with patch.dict("sys.modules", {"anthropic": None}):
-            # Need to reimport to trigger the check
             import importlib
 
             import llm_infer.client.backends.anthropic as anthropic_backend
 
-            # Force reimport
             importlib.reload(anthropic_backend)
 
-            # The import itself won't fail, but instantiation will
-            # This is because we do lazy import in __init__
             with pytest.raises(ImportError, match="anthropic"):
-                anthropic_backend.AnthropicBackend(mock_lg)
+                anthropic_backend.AnthropicBackend(mock_lg, "test")
 
 
 class TestAnthropicBackendMocked:
-    """Test Anthropic backend with mocked SDK.
-
-    These tests mock the anthropic package to test the backend logic
-    without requiring the actual package to be installed.
-    """
+    """Test Anthropic backend with mocked SDK."""
 
     @pytest.fixture
     def mock_anthropic(self) -> Any:
         """Create mock anthropic module."""
         mock_module = MagicMock()
-
-        # Create mock client classes
         mock_client = MagicMock()
         mock_async_client = MagicMock()
 
         mock_module.Anthropic.return_value = mock_client
         mock_module.AsyncAnthropic.return_value = mock_async_client
 
-        # Create exception classes
         mock_module.APIConnectionError = type(
             "APIConnectionError", (Exception,), {"message": "connection error"}
         )
@@ -83,7 +74,6 @@ class TestAnthropicBackendMocked:
             ]
             result = backend._convert_messages(messages)
 
-            # System message should be filtered
             assert len(result) == 1
             assert result[0]["role"] == "user"
 
@@ -182,7 +172,7 @@ class TestAnthropicBackendMocked:
             assert converted is not None
             tool_uses = [b for b in converted["content"] if b["type"] == "tool_use"]
             assert tool_uses[0]["input"] == {"city": "SF"}
-            assert tool_uses[1]["input"] == {}  # Malformed JSON defaults to empty dict
+            assert tool_uses[1]["input"] == {}
 
     def test_prepare_request_basic(self, mock_anthropic: Any) -> None:
         """Test basic request kwargs construction."""
@@ -191,19 +181,17 @@ class TestAnthropicBackendMocked:
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[{"role": "user", "content": "Hello"}],
                 model="claude-3-opus",
                 temperature=0.7,
                 max_tokens=1000,
                 system="Be helpful",
-                think=None,
-                tools=None,
-                tool_choice=None,
             )
+            kwargs = backend._prepare_request(request)
 
             assert kwargs["model"] == "claude-3-opus"
             assert kwargs["max_tokens"] == 1000
@@ -217,7 +205,7 @@ class TestAnthropicBackendMocked:
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
             openai_tools = [
@@ -231,16 +219,14 @@ class TestAnthropicBackendMocked:
                 }
             ]
 
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[],
                 model="claude-3",
                 temperature=1.0,
                 max_tokens=100,
-                system=None,
-                think=None,
                 tools=openai_tools,
-                tool_choice=None,
             )
+            kwargs = backend._prepare_request(request)
 
             assert "tools" in kwargs
             assert len(kwargs["tools"]) == 1
@@ -254,19 +240,17 @@ class TestAnthropicBackendMocked:
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[],
                 model="claude-3",
                 temperature=1.0,
                 max_tokens=100,
-                system=None,
-                think=None,
-                tools=None,
                 tool_choice="auto",
             )
+            kwargs = backend._prepare_request(request)
 
             assert kwargs["tool_choice"] == {"type": "auto"}
 
@@ -277,19 +261,17 @@ class TestAnthropicBackendMocked:
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[],
                 model="claude-3",
                 temperature=1.0,
                 max_tokens=100,
-                system=None,
-                think=None,
-                tools=None,
                 tool_choice="required",
             )
+            kwargs = backend._prepare_request(request)
 
             assert kwargs["tool_choice"] == {"type": "any"}
 
@@ -308,24 +290,6 @@ class TestAnthropicBackendMocked:
             assert backend._map_stop_reason("tool_use") == FinishReason.TOOL_CALLS
             assert backend._map_stop_reason(None) is None
             assert backend._map_stop_reason("unknown") is None
-
-    def test_from_config(self, mock_anthropic: Any, mock_lg: Logger) -> None:
-        """Test creating backend from config."""
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
-
-            config = {
-                "model": "claude-3-opus",
-                "api_key": "test-key",
-                "max_tokens": 2000,
-                "timeout": 60.0,
-            }
-
-            backend = AnthropicBackend.from_config(mock_lg, config)
-
-            assert backend._model == "claude-3-opus"
-            assert backend._max_tokens == 2000
-            assert backend._timeout == 60.0
 
 
 class TestAnthropicStructuredOutput:
@@ -409,58 +373,48 @@ class TestAnthropicStructuredOutput:
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[{"role": "user", "content": "Hello"}],
                 model="claude-3",
                 temperature=1.0,
                 max_tokens=100,
-                system=None,
-                think=None,
-                tools=None,
-                tool_choice=None,
-                response_format={"type": "json_object"},
+                extra={"response_format": {"type": "json_object"}},
             )
+            kwargs = backend._prepare_request(request)
 
-            # Should have tools with structured output tool
             assert "tools" in kwargs
             assert len(kwargs["tools"]) == 1
             assert kwargs["tools"][0]["name"] == "__structured_output__"
 
-            # Should force tool choice
             assert kwargs["tool_choice"] == {
                 "type": "tool",
                 "name": "__structured_output__",
             }
 
-            # Should have internal marker
             assert kwargs["_structured_output_tool"] == "__structured_output__"
 
     def test_prepare_request_strips_response_format(self, mock_anthropic: Any) -> None:
-        """Test response_format is not passed to API (not in final kwargs)."""
+        """Test response_format is not passed to API."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from llm_infer.client.backends.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[{"role": "user", "content": "Hello"}],
                 model="claude-3",
                 temperature=1.0,
                 max_tokens=100,
-                system=None,
-                think=None,
-                tools=None,
-                tool_choice=None,
-                response_format={"type": "json_object"},
+                extra={"response_format": {"type": "json_object"}},
             )
+            kwargs = backend._prepare_request(request)
 
-            # response_format should not be in kwargs
             assert "response_format" not in kwargs
 
     def test_prepare_request_merges_with_existing_tools(
@@ -472,7 +426,7 @@ class TestAnthropicStructuredOutput:
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
             user_tools = [
@@ -486,19 +440,16 @@ class TestAnthropicStructuredOutput:
                 }
             ]
 
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[{"role": "user", "content": "Hello"}],
                 model="claude-3",
                 temperature=1.0,
                 max_tokens=100,
-                system=None,
-                think=None,
                 tools=user_tools,
-                tool_choice=None,
-                response_format={"type": "json_object"},
+                extra={"response_format": {"type": "json_object"}},
             )
+            kwargs = backend._prepare_request(request)
 
-            # Should have both tools
             assert len(kwargs["tools"]) == 2
             assert kwargs["tools"][0]["name"] == "get_weather"
             assert kwargs["tools"][1]["name"] == "__structured_output__"
@@ -511,7 +462,6 @@ class TestAnthropicStructuredOutput:
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
 
-            # Create mock response with tool_use block
             mock_block = MagicMock()
             mock_block.type = "tool_use"
             mock_block.name = "__structured_output__"
@@ -529,9 +479,7 @@ class TestAnthropicStructuredOutput:
                 structured_output_tool="__structured_output__",
             )
 
-            # Content should be JSON string
             assert result.content == '{"name": "Alice", "age": 30}'
-            # tool_calls should be empty (not a real tool call)
             assert result.tool_calls is None
 
     def test_structured_output_finish_reason(self, mock_anthropic: Any) -> None:
@@ -560,7 +508,6 @@ class TestAnthropicStructuredOutput:
                 structured_output_tool="__structured_output__",
             )
 
-            # Should be STOP, not TOOL_CALLS
             assert result.finish_reason == FinishReason.STOP
 
     def test_parse_response_regular_tool_call_unaffected(
@@ -573,7 +520,6 @@ class TestAnthropicStructuredOutput:
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
 
-            # Regular tool call, not the structured output tool
             mock_block = MagicMock()
             mock_block.type = "tool_use"
             mock_block.name = "get_weather"
@@ -586,51 +532,41 @@ class TestAnthropicStructuredOutput:
             mock_response.model = "claude-3"
             mock_response.usage = None
 
-            # No structured output tool set
             result = backend._parse_response(mock_response, "claude-3", None)
 
-            # Should be a regular tool call
             assert result.tool_calls is not None
             assert len(result.tool_calls) == 1
             assert result.tool_calls[0].function.name == "get_weather"
             assert result.content == ""
 
-    def test_prepare_request_extracts_response_format_from_extra_body(
+    def test_prepare_request_extracts_response_format_from_extra(
         self, mock_anthropic: Any
     ) -> None:
-        """Test response_format nested in extra_body is extracted and handled."""
+        """Test response_format in extra is extracted and handled."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from llm_infer.client.backends.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
-            backend._model = "default-model"
+            backend._default_model = "default-model"
             backend._max_tokens = 4096
 
-            # Simulate how llm-agent passes response_format via extra_body
-            kwargs = backend._prepare_request(
+            request = ChatRequest(
                 messages=[{"role": "user", "content": "Hello"}],
                 model="claude-3",
                 temperature=1.0,
                 max_tokens=100,
-                system=None,
-                think=None,
-                tools=None,
-                tool_choice=None,
-                extra_body={"response_format": {"type": "json_object"}},
+                extra={"response_format": {"type": "json_object"}},
             )
+            kwargs = backend._prepare_request(request)
 
-            # Should have tools with structured output tool
             assert "tools" in kwargs
             assert len(kwargs["tools"]) == 1
             assert kwargs["tools"][0]["name"] == "__structured_output__"
 
-            # Should force tool choice
             assert kwargs["tool_choice"] == {
                 "type": "tool",
                 "name": "__structured_output__",
             }
 
-            # extra_body and response_format should NOT be in final kwargs
-            assert "extra_body" not in kwargs
             assert "response_format" not in kwargs
