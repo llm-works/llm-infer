@@ -390,7 +390,7 @@ class Factory:
         config: dict[str, Any] = {
             "type": "openai_compatible",
             "base_url": base_url,
-            "default_model": default_model,
+            "model": default_model,
             "api_key": api_key,
             "timeout": timeout,
         }
@@ -425,7 +425,7 @@ class Factory:
         """
         config: dict[str, Any] = {
             "type": "anthropic",
-            "default_model": default_model,
+            "model": default_model,
             "api_key": api_key,
             "max_tokens": max_tokens,
             "timeout": timeout,

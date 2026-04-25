@@ -32,7 +32,7 @@ class BackendFactory:
         """
         ctx = self._create_context(config)
         backend_type = config.get("type", "openai_compatible")
-        default_model = config.get("default_model") or config.get("model")
+        default_model = config.get("model")
 
         if backend_type in ("openai_compatible", "openai"):
             return self._create_openai(name, ctx, default_model, config)

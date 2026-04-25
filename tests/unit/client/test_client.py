@@ -122,7 +122,7 @@ class TestFactory:
         config = {
             "type": "openai_compatible",
             "base_url": "http://test:8000/v1",
-            "default_model": "test-model",
+            "model": "test-model",
         }
         router = factory.from_config(config)
         assert isinstance(router, LLMRouter)
@@ -139,12 +139,12 @@ class TestFactory:
                 "local": {
                     "type": "openai_compatible",
                     "base_url": "http://localhost:8000/v1",
-                    "default_model": "local-model",
+                    "model": "local-model",
                 },
                 "remote": {
                     "type": "openai_compatible",
                     "base_url": "http://remote:8000/v1",
-                    "default_model": "remote-model",
+                    "model": "remote-model",
                 },
             },
         }
@@ -155,16 +155,15 @@ class TestFactory:
         assert "remote" in router.clients
         router.close()
 
-    def test_from_config_model_alias_for_default_model(self, mock_lg: Logger) -> None:
-        """Test from_config accepts 'model' as alias for 'default_model'."""
+    def test_from_config_model_key(self, mock_lg: Logger) -> None:
+        """Test from_config reads 'model' config key."""
         factory = Factory(mock_lg)
         config = {
             "type": "openai_compatible",
             "base_url": "http://test:8000/v1",
-            "model": "test-model",  # Using 'model' instead of 'default_model'
+            "model": "test-model",
         }
         router = factory.from_config(config)
-        # Access through the client for the default backend
         assert router.clients["default"].default_model == "test-model"
         router.close()
 
