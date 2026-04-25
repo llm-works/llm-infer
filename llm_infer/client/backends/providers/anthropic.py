@@ -21,19 +21,21 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
-from ...schemas.openai import (
+from ....schemas.openai import (
     ChatCompletionUsage,
     FinishReason,
     FunctionCall,
+    PromptTokensDetails,
     ToolCall,
 )
-from ..errors import (
+from ...errors import (
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
 )
-from ..types import ChatRequest, ChatResponse
-from .base import AsyncRequestTrackingMixin, Backend, BackendContext
+from ...types import ChatRequest, ChatResponse
+from ..base import AsyncRequestTrackingMixin, Backend, BackendContext
+from ..provider import Provider
 
 if TYPE_CHECKING:
     import anthropic
@@ -116,6 +118,11 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         """Last response with usage stats."""
         return self._last_response
 
+    @property
+    def provider(self) -> str:
+        """Provider for this backend (always anthropic)."""
+        return Provider.ANTHROPIC.value
+
     # =========================================================================
     # Sync methods
     # =========================================================================
@@ -144,7 +151,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                     if token:
                         yield token
                 self._finalize_stream_state(state, stream.get_final_message())
-        self._last_response = state.to_response(request.model or self.default_model)
+        self._last_response = state.to_response(
+            request.model or self.default_model, self.provider
+        )
 
     # =========================================================================
     # Async methods
@@ -182,7 +191,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                         if token:
                             yield token
                     self._finalize_stream_state(state, await stream.get_final_message())
-            self._last_response = state.to_response(request.model or self.default_model)
+            self._last_response = state.to_response(
+                request.model or self.default_model, self.provider
+            )
         finally:
             self._release_async_request()
 
@@ -269,9 +280,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         }
 
         if request.system:
-            request_kwargs["system"] = request.system
+            request_kwargs["system"] = self._make_cached_system(request.system)
         if request.tools:
-            request_kwargs["tools"] = self._convert_tools(request.tools)
+            request_kwargs["tools"] = self._convert_tools_with_cache(request.tools)
         if request.tool_choice:
             self._apply_tool_choice(request_kwargs, request.tool_choice)
 
@@ -388,6 +399,25 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                 )
         return result
 
+    def _make_cached_system(self, system: str) -> list[dict[str, Any]]:
+        """Convert system prompt to content block list with cache_control."""
+        return [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+    def _convert_tools_with_cache(
+        self, tools: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Convert tools to Anthropic format with cache_control on last tool."""
+        result = self._convert_tools(tools)
+        if result:
+            result[-1]["cache_control"] = {"type": "ephemeral"}
+        return result
+
     def _apply_tool_choice(
         self, request_kwargs: dict[str, Any], tool_choice: str | dict[str, Any]
     ) -> None:
@@ -500,11 +530,17 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         if structured_output_tool and finish_reason == FinishReason.TOOL_CALLS:
             finish_reason = FinishReason.STOP
 
+        raw = None
+        if hasattr(response, "model_dump"):
+            raw = response.model_dump()
+
         return ChatResponse(
             content="".join(content_parts),
             usage=self._create_usage(getattr(response, "usage", None)),
             finish_reason=finish_reason,
             model=response.model or model,
+            provider=self.provider,
+            raw=raw,
             thinking="".join(thinking_parts) if thinking_parts else None,
             tool_calls=tool_calls if tool_calls else None,
         )
@@ -562,10 +598,17 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         """Create ChatCompletionUsage from Anthropic usage."""
         if usage is None:
             return None
+
+        prompt_details = None
+        cache_read = getattr(usage, "cache_read_input_tokens", None)
+        if isinstance(cache_read, int) and cache_read > 0:
+            prompt_details = PromptTokensDetails(cached_tokens=cache_read)
+
         return ChatCompletionUsage(
             prompt_tokens=usage.input_tokens,
             completion_tokens=usage.output_tokens,
             total_tokens=usage.input_tokens + usage.output_tokens,
+            prompt_tokens_details=prompt_details,
         )
 
     # =========================================================================
@@ -628,6 +671,8 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             if state.usage is None:
                 state.usage = self._create_usage(getattr(final_message, "usage", None))
             state.finish_reason = self._map_stop_reason(final_message.stop_reason)
+            if hasattr(final_message, "model_dump"):
+                state.raw = final_message.model_dump()
 
     def _map_stop_reason(self, stop_reason: str | None) -> FinishReason | None:
         """Map Anthropic stop_reason to FinishReason."""
@@ -652,8 +697,11 @@ class _StreamState:
         self.usage: ChatCompletionUsage | None = None
         self.finish_reason: FinishReason | None = None
         self.structured_output_tool = structured_output_tool
+        self.raw: dict[str, Any] | None = None
 
-    def to_response(self, model: str | None) -> ChatResponse:
+    def to_response(
+        self, model: str | None, provider: str | None = None
+    ) -> ChatResponse:
         """Convert accumulated state to ChatResponse."""
         # If structured output was used, finish_reason should be STOP not TOOL_CALLS
         finish_reason = self.finish_reason
@@ -665,6 +713,8 @@ class _StreamState:
             usage=self.usage,
             finish_reason=finish_reason,
             model=model,
+            provider=provider,
+            raw=self.raw,
             thinking="".join(self.thinking_parts) if self.thinking_parts else None,
             tool_calls=self.tool_calls if self.tool_calls else None,
         )

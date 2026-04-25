@@ -14,6 +14,14 @@ from ..schemas.openai import (
     FinishReason,
     ToolCall,
 )
+from .backends.provider import Provider
+
+__all__ = [
+    "AdapterInfo",
+    "ChatRequest",
+    "ChatResponse",
+    "Provider",
+]
 
 
 @dataclass
@@ -84,6 +92,9 @@ class ChatResponse:
         usage: Token usage statistics (prompt, completion, total).
         finish_reason: Why generation stopped (stop, length, tool_calls, etc).
         model: The model that generated the response.
+        provider: Backend/provider that generated the response (see Provider enum).
+        raw: Raw response from the provider API. Contains provider-specific
+            fields not normalized into the standard response (e.g., cost_in_usd_ticks).
 
     llm-infer Extensions:
         thinking: Extracted thinking/reasoning content from <think> blocks.
@@ -98,10 +109,12 @@ class ChatResponse:
     usage: ChatCompletionUsage | None = None
     finish_reason: FinishReason | None = None
     model: str | None = None
+    provider: str | None = None
+    raw: dict[str, Any] | None = None
     # llm-infer extensions
     thinking: str | None = None
     tool_calls: list[ToolCall] | None = field(default=None)
-    adapter: AdapterInfo | None = None  # Present if adapter was requested
+    adapter: AdapterInfo | None = None
 
     def has_tool_calls(self) -> bool:
         """Check if the response contains tool calls."""

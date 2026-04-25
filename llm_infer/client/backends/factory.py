@@ -79,7 +79,7 @@ class BackendFactory:
         config: DotDict,
     ) -> Backend:
         """Create OpenAI-compatible backend."""
-        from .openai import OpenAICompatibleBackend
+        from .providers.openai import OpenAICompatibleBackend
 
         return OpenAICompatibleBackend(
             lg=self._lg,
@@ -98,7 +98,7 @@ class BackendFactory:
         config: DotDict,
     ) -> Backend:
         """Create Anthropic backend."""
-        from .anthropic import AnthropicBackend
+        from .providers.anthropic import AnthropicBackend
 
         kwargs: dict[str, Any] = {
             "lg": self._lg,

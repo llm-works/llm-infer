@@ -6,12 +6,16 @@ For client creation, use Factory from llm_infer.client.
 
 from .base import Backend, BackendContext, RetryConfig
 from .factory import BackendFactory
-from .openai import OpenAICompatibleBackend
+from .provider import Provider, ProviderDetector
+from .providers import AnthropicBackend, OpenAICompatibleBackend
 
 __all__ = [
+    "AnthropicBackend",
     "Backend",
     "BackendContext",
     "BackendFactory",
     "OpenAICompatibleBackend",
+    "Provider",
+    "ProviderDetector",
     "RetryConfig",
 ]
