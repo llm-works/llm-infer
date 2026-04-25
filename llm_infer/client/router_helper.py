@@ -86,6 +86,26 @@ def setup_routing(  # cq: max-lines=35
     return prepare_routing(router, request, backend, role, context)
 
 
+def _normalize_decision(
+    router: LLMRouter,
+    request: ChatRequest,
+    decision: RoutingDecision,
+) -> RoutingDecision:
+    """Ensure decision has model resolved for target backend.
+
+    Strategy may return backend-only decisions; this resolves the model
+    so "auto"/"default" aliases work correctly for any backend.
+    """
+    base_request = decision.updated_request or request
+    resolved = router.resolve(model=base_request.model, backend=decision.backend)
+    updated = dataclasses.replace(base_request, model=resolved.model)
+    return RoutingDecision(
+        backend=resolved.backend,
+        updated_request=updated,
+        metadata=decision.metadata,
+    )
+
+
 def get_initial_decision(
     router: LLMRouter,
     context: RoutingContext,
@@ -95,7 +115,7 @@ def get_initial_decision(
         decision = router.strategy.select(router, context)
         if decision:
             if decision.backend in router.clients:
-                return decision
+                return _normalize_decision(router, context.request, decision)
             router._lg.warning(
                 "strategy returned invalid backend, falling back",
                 extra={"backend": decision.backend, "available": list(router.clients)},
@@ -231,8 +251,10 @@ class FallbackLoop:
             self.router, e, self.ctx, self.decision, self._start_time
         )
         if next_decision:
-            self.decision = next_decision
-            self.request = next_decision.updated_request or self.request
+            self.decision = _normalize_decision(
+                self.router, self.request, next_decision
+            )
+            self.request = self.decision.updated_request or self.request
             self.ctx.request = self.request
         else:
             raise e
