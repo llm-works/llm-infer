@@ -8,8 +8,19 @@ from appinfra.log import Logger
 
 from llm_infer.client import ChatResponse, LLMClient, LLMRouter, ResolvedTarget
 from llm_infer.client.backends import Backend
+from llm_infer.client.discovery import ModelDiscovery
 
 pytestmark = pytest.mark.unit
+
+
+def make_discovery(
+    lg: Logger, backends: dict[str, Backend], model_to_backend: dict[str, str]
+) -> ModelDiscovery:
+    """Create a ModelDiscovery with pre-populated model routing."""
+    configs = {name: {"models": []} for name in backends}
+    for model, backend_name in model_to_backend.items():
+        configs[backend_name]["models"].append(model)
+    return ModelDiscovery(lg, backends, configs)
 
 
 @pytest.fixture
@@ -102,17 +113,6 @@ class TestLLMRouterInit:
             ValueError, match="Default backend 'missing' not in clients"
         ):
             LLMRouter(mock_lg, {"a": client_a}, "missing")
-
-    def test_init_raises_if_model_routes_to_unknown_backend(
-        self, mock_lg: Logger
-    ) -> None:
-        """Test router raises if model routing references unknown backend."""
-        client_a = make_client(mock_lg)
-        model_to_backend = {"model-x": "unknown"}
-        with pytest.raises(
-            ValueError, match="Model 'model-x' routes to unknown backend 'unknown'"
-        ):
-            LLMRouter(mock_lg, {"a": client_a}, "a", model_to_backend)
 
 
 class TestLLMRouterRouting:

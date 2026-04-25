@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client import Factory, LLMClient, ModelConflictError, ModelDiscovery
+from llm_infer.client import Factory, ModelConflictError, ModelDiscovery
 from llm_infer.client.backends import Backend
 from llm_infer.client.types import ChatResponse
 
@@ -60,11 +60,10 @@ class TestModelDiscovery:
     def test_loads_models_from_config(self, mock_lg: Logger) -> None:
         """Test that models from config are loaded immediately."""
         backend = MockBackend(models=["discovered-model"])
-        client = LLMClient(lg=mock_lg, backend=backend)
 
         discovery = ModelDiscovery(
             mock_lg,
-            clients={"test": client},
+            backends={"test": backend},
             configs={"test": {"models": ["config-model-1", "config-model-2"]}},
         )
 
@@ -79,11 +78,10 @@ class TestModelDiscovery:
     def test_unknown_model_returns_none(self, mock_lg: Logger) -> None:
         """Test that unknown models return None without probing."""
         backend = MockBackend(models=["discovered-model"])
-        client = LLMClient(lg=mock_lg, backend=backend)
 
         discovery = ModelDiscovery(
             mock_lg,
-            clients={"test": client},
+            backends={"test": backend},
             configs={"test": {}},
         )
 
@@ -96,11 +94,10 @@ class TestModelDiscovery:
     def test_no_probe_for_config_models(self, mock_lg: Logger) -> None:
         """Test that config models don't require backend probing."""
         backend = MockBackend(models=["other-model"])
-        client = LLMClient(lg=mock_lg, backend=backend)
 
         discovery = ModelDiscovery(
             mock_lg,
-            clients={"test": client},
+            backends={"test": backend},
             configs={"test": {"models": ["config-model"]}},
         )
 
@@ -110,40 +107,37 @@ class TestModelDiscovery:
         assert result == "test"
         assert not backend._list_models_called
 
-    def test_explicit_discover_only_probes_once(self, mock_lg: Logger) -> None:
-        """Test that discover_backend() only probes once per backend."""
-        backend = MockBackend(models=["model-1"])
-        client = LLMClient(lg=mock_lg, backend=backend)
+    def test_get_models_for_backend_probes_lazily(self, mock_lg: Logger) -> None:
+        """Test that get_models_for_backend probes on first call."""
+        backend = MockBackend(models=["model-1", "model-2"])
 
         discovery = ModelDiscovery(
             mock_lg,
-            clients={"test": client},
+            backends={"test": backend},
             configs={"test": {}},
         )
 
-        # First explicit discovery
-        discovery.discover_backend("test")
+        # First call should probe
+        models = discovery.get_models_for_backend("test")
         assert backend._list_models_called
-        assert "model-1" in discovery.models
+        assert models == ["model-1", "model-2"]
 
         # Reset call tracking
         backend._list_models_called = False
 
         # Second call should not probe again
-        discovery.discover_backend("test")
+        models = discovery.get_models_for_backend("test")
         assert not backend._list_models_called
 
     def test_config_model_conflict_raises(self, mock_lg: Logger) -> None:
         """Test that conflicting models in config raise ModelConflictError."""
         backend1 = MockBackend()
         backend2 = MockBackend()
-        client1 = LLMClient(lg=mock_lg, backend=backend1)
-        client2 = LLMClient(lg=mock_lg, backend=backend2)
 
         with pytest.raises(ModelConflictError) as exc_info:
             ModelDiscovery(
                 mock_lg,
-                clients={"backend1": client1, "backend2": client2},
+                backends={"backend1": backend1, "backend2": backend2},
                 configs={
                     "backend1": {"models": ["shared"]},
                     "backend2": {"models": ["shared"]},
@@ -157,17 +151,17 @@ class TestModelDiscovery:
     def test_discovered_backends_tracked(self, mock_lg: Logger) -> None:
         """Test that discovered backends are tracked."""
         backend = MockBackend(models=["model"])
-        client = LLMClient(lg=mock_lg, backend=backend)
 
         discovery = ModelDiscovery(
             mock_lg,
-            clients={"test": client},
+            backends={"test": backend},
             configs={"test": {}},
         )
 
+        # Config models mark backend as discovered
         assert discovery.discovered_backends == set()
 
-        discovery.discover_backend("test")
+        discovery.get_models_for_backend("test")
 
         assert discovery.discovered_backends == {"test"}
 
@@ -175,12 +169,10 @@ class TestModelDiscovery:
         """Test discover_all probes all backends."""
         backend1 = MockBackend(models=["model-1"])
         backend2 = MockBackend(models=["model-2"])
-        client1 = LLMClient(lg=mock_lg, backend=backend1)
-        client2 = LLMClient(lg=mock_lg, backend=backend2)
 
         discovery = ModelDiscovery(
             mock_lg,
-            clients={"backend1": client1, "backend2": client2},
+            backends={"backend1": backend1, "backend2": backend2},
             configs={"backend1": {}, "backend2": {}},
         )
 

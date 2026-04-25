@@ -60,7 +60,8 @@ llm-infer Extensions:
 """
 
 from .backends import Backend, OpenAICompatibleBackend
-from .base import BoundChatClient, ChatClient
+from .base import ChatClient
+from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
 from .errors import (
@@ -101,6 +102,7 @@ __all__ = [
     # Router (multi-backend)
     "LLMRouter",
     "ResolvedTarget",
+    # Model discovery and resolution
     "ModelDiscovery",
     # Routing strategies
     "RoutingStrategy",

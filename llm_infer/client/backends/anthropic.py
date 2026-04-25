@@ -32,8 +32,8 @@ from ..errors import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
-from ..types import ChatResponse
-from .base import Backend
+from ..types import ChatRequest, ChatResponse
+from .base import Backend, BackendContext
 
 if TYPE_CHECKING:
     import anthropic
@@ -68,12 +68,25 @@ class AnthropicBackend(Backend):
     def __init__(
         self,
         lg: Logger,
-        model: str = "claude-sonnet-4-20250514",
+        name: str,
+        ctx: BackendContext | None = None,
+        default_model: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
         max_tokens: int = 4096,
-        timeout: float = 120.0,
     ) -> None:
-        """Initialize the backend."""
+        """Initialize the backend.
+
+        Args:
+            lg: Logger instance.
+            name: Backend name (for discovery/routing).
+            ctx: Backend context with rate limiter, backoff, and timeouts.
+            default_model: Default model if not specified per-request.
+            api_key: API key for authentication.
+            base_url: Base URL override (for proxies).
+            max_tokens: Default max tokens for responses.
+        """
+        super().__init__(lg, name, ctx, default_model)
         try:
             import anthropic as anthropic_module
         except ImportError as e:
@@ -82,20 +95,20 @@ class AnthropicBackend(Backend):
                 "Install with: pip install llm-infer[anthropic]"
             ) from e
 
-        self._lg = lg
         self._anthropic = anthropic_module
-        self._model = model
         self._max_tokens = max_tokens
-        self._timeout = timeout
         self._last_response: ChatResponse | None = None
+        self._api_key = api_key
+        self._base_url = base_url
 
         # Sync client created eagerly
         self._client: anthropic.Anthropic = anthropic_module.Anthropic(
-            api_key=api_key, timeout=timeout
+            api_key=api_key,
+            base_url=base_url,
+            timeout=self._ctx.request_timeout,
         )
         # Async client created lazily
         self._async_client: anthropic.AsyncAnthropic | None = None
-        self._api_key = api_key
 
     @property
     def last_response(self) -> ChatResponse | None:
@@ -106,70 +119,21 @@ class AnthropicBackend(Backend):
     # Sync methods
     # =========================================================================
 
-    def chat(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> ChatResponse:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (sync)."""
-        _ = adapter  # Not supported for Anthropic
-        request_kwargs = self._prepare_request(
-            messages,
-            model,
-            temperature,
-            max_tokens,
-            system,
-            think,
-            tools,
-            tool_choice,
-            **kwargs,
-        )
-        # Pop internal marker before API call
+        request_kwargs = self._prepare_request(request)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         with self._handle_errors():
             response = self._client.messages.create(**request_kwargs)
         result = self._parse_response(
-            response, model or self._model, structured_output_tool
+            response, request.model or self.default_model, structured_output_tool
         )
         self._last_response = result
         return result
 
-    def chat_stream(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> Iterator[str]:
+    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
         """Send a streaming chat completion request (sync)."""
-        _ = adapter
-        request_kwargs = self._prepare_request(
-            messages,
-            model,
-            temperature,
-            max_tokens,
-            system,
-            think,
-            tools,
-            tool_choice,
-            stream=True,
-            **kwargs,
-        )
-        # Pop internal marker before API call
+        request_kwargs = self._prepare_request(request, stream=True)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         state = _StreamState(structured_output_tool)
         with self._handle_errors():
@@ -179,77 +143,28 @@ class AnthropicBackend(Backend):
                     if token:
                         yield token
                 self._finalize_stream_state(state, stream.get_final_message())
-        self._last_response = state.to_response(model or self._model)
+        self._last_response = state.to_response(request.model or self.default_model)
 
     # =========================================================================
     # Async methods
     # =========================================================================
 
-    async def chat_async(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> ChatResponse:
+    async def chat_async(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (async)."""
-        _ = adapter
-        request_kwargs = self._prepare_request(
-            messages,
-            model,
-            temperature,
-            max_tokens,
-            system,
-            think,
-            tools,
-            tool_choice,
-            **kwargs,
-        )
-        # Pop internal marker before API call
+        request_kwargs = self._prepare_request(request)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         client = self._get_async_client()
         async with self._handle_errors_async():
             response = await client.messages.create(**request_kwargs)
         result = self._parse_response(
-            response, model or self._model, structured_output_tool
+            response, request.model or self.default_model, structured_output_tool
         )
         self._last_response = result
         return result
 
-    async def chat_stream_async(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async)."""
-        _ = adapter
-        request_kwargs = self._prepare_request(
-            messages,
-            model,
-            temperature,
-            max_tokens,
-            system,
-            think,
-            tools,
-            tool_choice,
-            stream=True,
-            **kwargs,
-        )
-        # Pop internal marker before API call
+        request_kwargs = self._prepare_request(request, stream=True)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         state = _StreamState(structured_output_tool)
         client = self._get_async_client()
@@ -260,7 +175,7 @@ class AnthropicBackend(Backend):
                     if token:
                         yield token
                 self._finalize_stream_state(state, await stream.get_final_message())
-        self._last_response = state.to_response(model or self._model)
+        self._last_response = state.to_response(request.model or self.default_model)
 
     # =========================================================================
     # Resource management
@@ -270,7 +185,7 @@ class AnthropicBackend(Backend):
         """Get or create the async client (lazy initialization)."""
         if self._async_client is None:
             self._async_client = self._anthropic.AsyncAnthropic(
-                api_key=self._api_key, timeout=self._timeout
+                api_key=self._api_key, timeout=self._ctx.request_timeout
             )
         return self._async_client
 
@@ -288,15 +203,15 @@ class AnthropicBackend(Backend):
     @contextmanager
     def _handle_errors(self) -> Generator[None, None, None]:
         """Context manager to translate Anthropic exceptions to backend errors."""
-        if self._rate_limiter is not None:
-            self._rate_limiter.next()
+        if self._ctx.rate_limiter is not None:
+            self._ctx.rate_limiter.next()
         try:
             yield
         except self._anthropic.APIConnectionError as e:
             raise BackendUnavailableError("Failed to connect to Anthropic API") from e
         except self._anthropic.APITimeoutError as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except self._anthropic.APIStatusError as e:
             raise BackendRequestError(
@@ -306,15 +221,15 @@ class AnthropicBackend(Backend):
     @asynccontextmanager
     async def _handle_errors_async(self) -> AsyncGenerator[None, None]:
         """Async context manager to translate Anthropic exceptions to backend errors."""
-        if self._rate_limiter is not None:
-            await asyncio.to_thread(self._rate_limiter.next)
+        if self._ctx.rate_limiter is not None:
+            await asyncio.to_thread(self._ctx.rate_limiter.next)
         try:
             yield
         except self._anthropic.APIConnectionError as e:
             raise BackendUnavailableError("Failed to connect to Anthropic API") from e
         except self._anthropic.APITimeoutError as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except self._anthropic.APIStatusError as e:
             raise BackendRequestError(
@@ -322,62 +237,38 @@ class AnthropicBackend(Backend):
             ) from e
 
     # =========================================================================
-    # Factory
-    # =========================================================================
-
-    @classmethod
-    def from_config(cls, lg: Logger, config: dict[str, Any]) -> AnthropicBackend:
-        """Create backend from configuration dict."""
-        return cls(
-            lg=lg,
-            model=config.get("model", "claude-sonnet-4-20250514"),
-            api_key=config.get("api_key"),
-            max_tokens=config.get("max_tokens", 4096),
-            timeout=config.get("timeout", 120.0),
-        )
-
-    # =========================================================================
     # Request preparation
     # =========================================================================
 
     def _prepare_request(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None,
-        temperature: float,
-        max_tokens: int | None,
-        system: str | None,
-        think: bool | None,
-        tools: list[dict[str, Any]] | None,
-        tool_choice: str | dict[str, Any] | None,
-        stream: bool = False,
-        **kwargs: Any,
+        self, request: ChatRequest, stream: bool = False
     ) -> dict[str, Any]:
         """Prepare request kwargs for Anthropic API."""
-        converted_messages = self._convert_messages(messages)
+        converted_messages = self._convert_messages(request.messages)
         request_kwargs: dict[str, Any] = {
-            "model": model or self._model,
+            "model": request.model or self.default_model,
             "messages": converted_messages,
-            "max_tokens": max_tokens or self._max_tokens,
-            "temperature": temperature,
+            "max_tokens": request.max_tokens or self._max_tokens,
+            "temperature": request.temperature,
         }
 
-        if system:
-            request_kwargs["system"] = system
-        if tools:
-            request_kwargs["tools"] = self._convert_tools(tools)
-        if tool_choice:
-            self._apply_tool_choice(request_kwargs, tool_choice)
+        if request.system:
+            request_kwargs["system"] = request.system
+        if request.tools:
+            request_kwargs["tools"] = self._convert_tools(request.tools)
+        if request.tool_choice:
+            self._apply_tool_choice(request_kwargs, request.tool_choice)
 
-        if think:
+        if request.think:
             raise NotImplementedError(
                 "think mode is not yet supported for Anthropic backend; "
                 "extended_thinking requires different API structure"
             )
 
-        self._apply_response_format(request_kwargs, kwargs)
+        extra = request.extra or {}
+        self._apply_response_format(request_kwargs, extra)
 
-        for key, value in kwargs.items():
+        for key, value in extra.items():
             if value is not None and key not in ("stream",):
                 request_kwargs[key] = value
 
@@ -566,7 +457,10 @@ class AnthropicBackend(Backend):
     # =========================================================================
 
     def _parse_response(
-        self, response: Any, model: str, structured_output_tool: str | None = None
+        self,
+        response: Any,
+        model: str | None,
+        structured_output_tool: str | None = None,
     ) -> ChatResponse:
         """Parse Anthropic response to ChatResponse.
 
@@ -743,7 +637,7 @@ class _StreamState:
         self.finish_reason: FinishReason | None = None
         self.structured_output_tool = structured_output_tool
 
-    def to_response(self, model: str) -> ChatResponse:
+    def to_response(self, model: str | None) -> ChatResponse:
         """Convert accumulated state to ChatResponse."""
         # If structured output was used, finish_reason should be STOP not TOOL_CALLS
         finish_reason = self.finish_reason

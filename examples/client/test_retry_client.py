@@ -42,7 +42,7 @@ router = factory.from_config(
 
 # Verify retry is configured
 client = router.get_client()
-print(f"Retry configured: {client._backoff is not None}")
+print(f"Retry configured: {client.backend.ctx.retry is not None}")
 print("Sending request (server will return 429 twice, then success)...")
 print()
 

@@ -29,27 +29,21 @@ Example:
 
 from __future__ import annotations
 
-import time
 import types
 from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 
 from appinfra.log import Logger
 
 from . import router_helper as rh
-from .base import BoundChatClient, ChatClient
+from .base import ChatClient
+from .bound import BoundChatClient
 from .client import LLMClient
+from .discovery import RESERVED_MODEL_NAMES, ModelDiscovery
 from .errors import BackendError
-from .resolver import ModelResolver
 from .strategy import RoutingContext, RoutingStrategy
 from .types import ChatResponse
-
-if TYPE_CHECKING:
-    from .discovery import ModelDiscovery
-
-# Reserved model names that trigger special resolution logic
-RESERVED_MODEL_NAMES = frozenset({"auto", "default"})
 
 
 @dataclass(frozen=True)
@@ -85,7 +79,6 @@ class LLMRouter(ChatClient):
         lg: Logger,
         clients: dict[str, LLMClient],
         default: str,
-        model_to_backend: dict[str, str] | None = None,
         discovery: ModelDiscovery | None = None,
         strategy: RoutingStrategy | None = None,
     ) -> None:
@@ -95,11 +88,8 @@ class LLMRouter(ChatClient):
             lg: Logger instance.
             clients: Dictionary mapping backend names to LLMClient instances.
             default: Name of the default backend to use when not specified.
-            model_to_backend: Optional mapping from model ID to backend name
-                for intelligent model-based routing. If discovery is provided,
-                this is ignored (discovery manages the routing table).
-            discovery: Optional ModelDiscovery for lazy model discovery.
-                If provided, backends will be probed for models on first use.
+            discovery: Optional ModelDiscovery for model→backend routing.
+                If provided, enables model-based routing to backends.
             strategy: Optional routing strategy for fallback/ordering logic.
 
         Raises:
@@ -111,23 +101,8 @@ class LLMRouter(ChatClient):
         self._discovery = discovery
         self._strategy = strategy
 
-        # Use discovery's routing table if available, otherwise use provided mapping
-        if discovery is not None:
-            model_map = dict(discovery.models)
-        else:
-            model_map = dict(model_to_backend) if model_to_backend else {}
-
         if default not in clients:
             raise ValueError(f"Default backend '{default}' not in clients")
-
-        # Validate model routing references valid backends
-        for model, backend_name in model_map.items():
-            if backend_name not in clients:
-                raise ValueError(
-                    f"Model '{model}' routes to unknown backend '{backend_name}'"
-                )
-
-        self._resolver = ModelResolver(lg, model_map, default, discovery)
 
     @property
     def clients(self) -> Mapping[str, LLMClient]:
@@ -146,7 +121,9 @@ class LLMRouter(ChatClient):
         Note: This returns the current known mappings. If lazy discovery is
         enabled, additional models may be discovered on first use.
         """
-        return types.MappingProxyType(self._resolver.models)
+        if self._discovery is not None:
+            return types.MappingProxyType(self._discovery.models)
+        return types.MappingProxyType({})
 
     @property
     def discovery(self) -> ModelDiscovery | None:
@@ -187,8 +164,6 @@ class LLMRouter(ChatClient):
         self,
         model: str | None = None,
         backend: str | None = None,
-        *,
-        retry: bool = True,
     ) -> ResolvedTarget:
         """Resolve which backend and model will be used for a request.
 
@@ -203,19 +178,12 @@ class LLMRouter(ChatClient):
             2. Model-based lookup (if model is in the routing table)
             3. Default backend
 
-        Reserved model names:
-            - "auto": Probe the target backend, pick an available model
-            - "default": Use the backend's configured default_model
-              (if default_model="auto", falls back to auto logic)
-
-        These reserved names skip routing lookup and are resolved on
-        the target backend.
+        Reserved model names ('auto', 'default') are resolved by the target
+        client's ModelResolver. This method will probe the backend if needed.
 
         Args:
             model: Model to use (for routing and as the resolved model).
             backend: Explicit backend name (highest priority).
-            retry: If True (default) and client has backoff configured,
-                retry on backend unavailable. Set to False to fail fast.
 
         Returns:
             ResolvedTarget with resolved backend name and model.
@@ -223,24 +191,45 @@ class LLMRouter(ChatClient):
         Raises:
             ValueError: If explicit backend is not found.
         """
-        # Resolve backend name
+        backend_name = self._resolve_backend(model, backend)
+        client = self._clients[backend_name]
+
+        # Use client's resolver to resolve "auto"/"default"
+        resolved_model = client._resolve_model(model)
+
+        return ResolvedTarget(backend=backend_name, model=resolved_model)
+
+    def _resolve_backend(self, model: str | None, backend: str | None) -> str:
+        """Resolve which backend to use for a request.
+
+        Args:
+            model: Model name (used for model-based routing).
+            backend: Explicit backend name (highest priority).
+
+        Returns:
+            Backend name to use.
+
+        Raises:
+            ValueError: If explicit backend is not found.
+        """
+        # Explicit backend takes priority
         if backend is not None:
             if backend not in self._clients:
                 available = list(self._clients.keys())
                 raise ValueError(
                     f"Backend '{backend}' not found. Available: {available}"
                 )
-            backend_name = backend
-        elif model is not None and model not in RESERVED_MODEL_NAMES:
-            backend_name = self._resolver.resolve_backend(model)
-        else:
-            backend_name = self._default
+            return backend
 
-        # Resolve model on target backend
-        client = self._clients[backend_name]
-        resolved_model = self._resolver.resolve_model(client, model, retry=retry)
+        # Model-based routing (skip reserved names)
+        if model is not None and model not in RESERVED_MODEL_NAMES:
+            if self._discovery is not None:
+                found = self._discovery.get_backend_for_model(model)
+                if found is not None:
+                    return found
 
-        return ResolvedTarget(backend=backend_name, model=resolved_model)
+        # Fall back to default
+        return self._default
 
     def get_client(
         self, model: str | None = None, backend: str | None = None
@@ -324,26 +313,16 @@ class LLMRouter(ChatClient):
             backend,
             role,
             context,
+            **kwargs,
         )
-        while True:
-            start_time = time.monotonic()
+        for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                response = self._clients[decision.backend].chat(
-                    **rh.request_to_kwargs(request, **kwargs)
-                )
-                rh.handle_success(self, response, ctx, decision, start_time)
-                return response
+                return attempt.success(attempt.client._chat(attempt.request))
             except BackendError as e:
-                next_decision = rh.handle_error(
-                    self, self._lg, e, ctx, decision, start_time
-                )
-                if next_decision:
-                    decision = next_decision
-                    request = decision.updated_request or request
-                    continue
-                raise
+                attempt.fail(e)
+        raise RuntimeError("FallbackLoop exhausted without result")
 
-    def chat_stream(  # cq: max-lines=45
+    def chat_stream(  # cq: max-lines=35
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -379,32 +358,21 @@ class LLMRouter(ChatClient):
             backend,
             role,
             context,
+            **kwargs,
         )
         streamed = False
-        while True:
-            client = self._clients[decision.backend]
-            start_time = time.monotonic()
+        for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                stream = client.chat_stream(**rh.request_to_kwargs(request, **kwargs))
-                for token in stream:
+                for token in attempt.client._chat_stream(attempt.request):
                     streamed = True
                     yield token
-                if client.last_response:
-                    rh.handle_success(
-                        self, client.last_response, ctx, decision, start_time
-                    )
+                if attempt.client.last_response:
+                    attempt.success(attempt.client.last_response)
                 return
             except BackendError as e:
                 if streamed:
                     raise
-                next_decision = rh.handle_error(
-                    self, self._lg, e, ctx, decision, start_time
-                )
-                if next_decision:
-                    decision = next_decision
-                    request = decision.updated_request or request
-                    continue
-                raise
+                attempt.fail(e)
 
     # =========================================================================
     # Async API
@@ -447,26 +415,18 @@ class LLMRouter(ChatClient):
             backend,
             role,
             context,
+            **kwargs,
         )
-        while True:
-            start_time = time.monotonic()
+        for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                response = await self._clients[decision.backend].chat_async(
-                    **rh.request_to_kwargs(request, **kwargs)
+                return attempt.success(
+                    await attempt.client._chat_async(attempt.request)
                 )
-                rh.handle_success(self, response, ctx, decision, start_time)
-                return response
             except BackendError as e:
-                next_decision = rh.handle_error(
-                    self, self._lg, e, ctx, decision, start_time
-                )
-                if next_decision:
-                    decision = next_decision
-                    request = decision.updated_request or request
-                    continue
-                raise
+                attempt.fail(e)
+        raise RuntimeError("FallbackLoop exhausted without result")
 
-    async def chat_stream_async(  # cq: max-lines=45
+    async def chat_stream_async(  # cq: max-lines=35
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -502,34 +462,21 @@ class LLMRouter(ChatClient):
             backend,
             role,
             context,
+            **kwargs,
         )
         streamed = False
-        while True:
-            client = self._clients[decision.backend]
-            start_time = time.monotonic()
+        for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                stream = client.chat_stream_async(
-                    **rh.request_to_kwargs(request, **kwargs)
-                )
-                async for token in stream:
+                async for token in attempt.client._chat_stream_async(attempt.request):
                     streamed = True
                     yield token
-                if client.last_response:
-                    rh.handle_success(
-                        self, client.last_response, ctx, decision, start_time
-                    )
+                if attempt.client.last_response:
+                    attempt.success(attempt.client.last_response)
                 return
             except BackendError as e:
                 if streamed:
                     raise
-                next_decision = rh.handle_error(
-                    self, self._lg, e, ctx, decision, start_time
-                )
-                if next_decision:
-                    decision = next_decision
-                    request = decision.updated_request or request
-                    continue
-                raise
+                attempt.fail(e)
 
     # =========================================================================
     # Resource management
