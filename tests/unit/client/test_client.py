@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest

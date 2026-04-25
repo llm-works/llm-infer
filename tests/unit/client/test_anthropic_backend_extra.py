@@ -26,6 +26,7 @@ from llm_infer.client.errors import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
+from llm_infer.client.types import ChatRequest
 from llm_infer.schemas.openai import FinishReason
 
 pytestmark = pytest.mark.unit
@@ -61,7 +62,7 @@ def _make_backend(mock_anthropic: Any, mock_lg: Logger) -> Any:
     with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
         from llm_infer.client.backends.anthropic import AnthropicBackend
 
-        return AnthropicBackend(lg=mock_lg, api_key="test-key")
+        return AnthropicBackend(lg=mock_lg, name="test", api_key="test-key")
 
 
 def _content_block(block_type: str, **fields: Any) -> Any:
@@ -110,7 +111,8 @@ def test_last_response_initially_none(mock_anthropic: Any, mock_lg: Logger) -> N
 def test_chat_success(mock_anthropic: Any, mock_lg: Logger) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
     backend._client.messages.create.return_value = _mock_response()
-    result = backend.chat([{"role": "user", "content": "hi"}])
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+    result = backend.chat(request)
     assert result.content == "hello"
     assert result.usage.prompt_tokens == 5
     assert result.usage.completion_tokens == 3
@@ -123,7 +125,8 @@ def test_chat_with_tool_calls(mock_anthropic: Any, mock_lg: Logger) -> None:
     backend._client.messages.create.return_value = _mock_response(
         content=[tool_block], stop_reason="tool_use"
     )
-    result = backend.chat([{"role": "user", "content": "hi"}])
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+    result = backend.chat(request)
     assert result.tool_calls is not None
     assert result.tool_calls[0].function.name == "my_func"
     assert result.finish_reason == FinishReason.TOOL_CALLS
@@ -136,15 +139,17 @@ def test_chat_with_thinking(mock_anthropic: Any, mock_lg: Logger) -> None:
         _content_block("text", text="answer"),
     ]
     backend._client.messages.create.return_value = _mock_response(content=blocks)
-    result = backend.chat([{"role": "user", "content": "hi"}])
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+    result = backend.chat(request)
     assert result.content == "answer"
     assert result.thinking == "reasoning"
 
 
 def test_chat_think_mode_raises(mock_anthropic: Any, mock_lg: Logger) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}], think=True)
     with pytest.raises(NotImplementedError, match="think mode"):
-        backend.chat([{"role": "user", "content": "hi"}], think=True)
+        backend.chat(request)
 
 
 def test_chat_adapter_param_ignored(mock_anthropic: Any, mock_lg: Logger) -> None:
@@ -152,7 +157,10 @@ def test_chat_adapter_param_ignored(mock_anthropic: Any, mock_lg: Logger) -> Non
     backend = _make_backend(mock_anthropic, mock_lg)
     backend._client.messages.create.return_value = _mock_response()
     # Should not raise even though Anthropic doesn't support adapters
-    result = backend.chat([{"role": "user", "content": "hi"}], adapter="my-adapter")
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "hi"}], adapter="my-adapter"
+    )
+    result = backend.chat(request)
     assert result.content == "hello"
 
 
@@ -161,8 +169,9 @@ def test_chat_propagates_connection_error(mock_anthropic: Any, mock_lg: Logger) 
     backend._client.messages.create.side_effect = mock_anthropic.APIConnectionError(
         "boom"
     )
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
     with pytest.raises(BackendUnavailableError):
-        backend.chat([{"role": "user", "content": "hi"}])
+        backend.chat(request)
 
 
 def test_chat_propagates_timeout_error(mock_anthropic: Any, mock_lg: Logger) -> None:
@@ -170,8 +179,9 @@ def test_chat_propagates_timeout_error(mock_anthropic: Any, mock_lg: Logger) -> 
     backend._client.messages.create.side_effect = mock_anthropic.APITimeoutError(
         "timeout"
     )
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
     with pytest.raises(BackendTimeoutError):
-        backend.chat([{"role": "user", "content": "hi"}])
+        backend.chat(request)
 
 
 def test_chat_propagates_status_error(mock_anthropic: Any, mock_lg: Logger) -> None:
@@ -180,8 +190,9 @@ def test_chat_propagates_status_error(mock_anthropic: Any, mock_lg: Logger) -> N
     err.message = "boom"
     err.status_code = 503
     backend._client.messages.create.side_effect = err
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
     with pytest.raises(BackendRequestError) as exc_info:
-        backend.chat([{"role": "user", "content": "hi"}])
+        backend.chat(request)
     assert exc_info.value.status_code == 503
 
 
@@ -199,7 +210,8 @@ def test_chat_async_success(mock_anthropic: Any, mock_lg: Logger) -> None:
     async_client = mock_anthropic.AsyncAnthropic.return_value
     async_client.messages.create = fake_create
 
-    result = asyncio.run(backend.chat_async([{"role": "user", "content": "hi"}]))
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+    result = asyncio.run(backend.chat_async(request))
     assert result.content == "hello"
 
 
@@ -214,8 +226,9 @@ def test_chat_async_propagates_connection_error(
     async_client = mock_anthropic.AsyncAnthropic.return_value
     async_client.messages.create = fake_create
 
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
     with pytest.raises(BackendUnavailableError):
-        asyncio.run(backend.chat_async([{"role": "user", "content": "hi"}]))
+        asyncio.run(backend.chat_async(request))
 
 
 def test_chat_async_propagates_timeout(mock_anthropic: Any, mock_lg: Logger) -> None:
@@ -227,8 +240,9 @@ def test_chat_async_propagates_timeout(mock_anthropic: Any, mock_lg: Logger) -> 
     async_client = mock_anthropic.AsyncAnthropic.return_value
     async_client.messages.create = fake_create
 
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
     with pytest.raises(BackendTimeoutError):
-        asyncio.run(backend.chat_async([{"role": "user", "content": "hi"}]))
+        asyncio.run(backend.chat_async(request))
 
 
 def test_chat_async_propagates_status_error(
@@ -245,8 +259,9 @@ def test_chat_async_propagates_status_error(
     async_client = mock_anthropic.AsyncAnthropic.return_value
     async_client.messages.create = fake_create
 
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
     with pytest.raises(BackendRequestError):
-        asyncio.run(backend.chat_async([{"role": "user", "content": "hi"}]))
+        asyncio.run(backend.chat_async(request))
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +305,8 @@ def test_chat_stream_yields_text(mock_anthropic: Any, mock_lg: Logger) -> None:
     final = _mock_response(stop_reason="end_turn")
     backend._client.messages.stream.return_value = _FakeSyncStream(events, final)
 
-    tokens = list(backend.chat_stream([{"role": "user", "content": "hi"}]))
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+    tokens = list(backend.chat_stream(request))
     assert tokens == ["hello ", "world"]
     assert backend.last_response is not None
     assert backend.last_response.content == "hello world"
@@ -334,13 +350,10 @@ def test_chat_stream_async_yields_text(mock_anthropic: Any, mock_lg: Logger) -> 
     async_client = mock_anthropic.AsyncAnthropic.return_value
     async_client.messages.stream.return_value = _FakeAsyncStream(events, final)
 
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+
     async def collect() -> list[str]:
-        return [
-            t
-            async for t in backend.chat_stream_async(
-                [{"role": "user", "content": "hi"}]
-            )
-        ]
+        return [t async for t in backend.chat_stream_async(request)]
 
     tokens = asyncio.run(collect())
     assert tokens == ["hi", " there"]

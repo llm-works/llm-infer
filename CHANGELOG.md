@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AgentResponse`, with the resolved `model` name and the raw llm-infer `ChatResponse` attached
   as `raw` so consumers can reach backend-specific fields (thinking, adapter info) without
   further adapter churn.
+- **BREAKING**: `Backend.chat()` and related methods now take `ChatRequest` instead of individual
+  parameters. Backend implementations must update their signatures accordingly.
+- **BREAKING**: `Backend.__init__()` now requires a `name` parameter for backend identification
+  in routing and discovery.
 
 ### Fixed
 

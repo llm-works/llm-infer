@@ -35,6 +35,7 @@ from llm_infer.client.errors import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
+from llm_infer.client.types import ChatRequest
 from llm_infer.schemas.openai import FinishReason
 
 pytestmark = pytest.mark.unit
@@ -46,7 +47,7 @@ def mock_lg() -> Logger:
 
 
 def _backend(mock_lg: Logger, **kwargs: Any) -> OpenAICompatibleBackend:
-    backend = OpenAICompatibleBackend(mock_lg, **kwargs)
+    backend = OpenAICompatibleBackend(mock_lg, "test", **kwargs)
     return backend
 
 
@@ -456,13 +457,10 @@ def test_chat_stream_async(mock_lg: Logger) -> None:
     ]
     async_client.stream = MagicMock(return_value=_FakeStreamCM(lines))
 
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+
     async def collect() -> list[str]:
-        return [
-            t
-            async for t in backend.chat_stream_async(
-                [{"role": "user", "content": "hi"}]
-            )
-        ]
+        return [t async for t in backend.chat_stream_async(request)]
 
     tokens = asyncio.run(collect())
     assert tokens == ["hi", " there"]
@@ -475,13 +473,10 @@ def test_chat_stream_async_connection_error(mock_lg: Logger) -> None:
         return_value=_FakeStreamCM(raise_exc=httpx.ConnectError("boom"))
     )
 
+    request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+
     async def collect() -> list[str]:
-        return [
-            t
-            async for t in backend.chat_stream_async(
-                [{"role": "user", "content": "hi"}]
-            )
-        ]
+        return [t async for t in backend.chat_stream_async(request)]
 
     with pytest.raises(BackendUnavailableError):
         asyncio.run(collect())

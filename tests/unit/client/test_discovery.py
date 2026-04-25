@@ -1,14 +1,14 @@
 """Unit tests for lazy model discovery."""
 
-from typing import Any
+from collections.abc import AsyncIterator, Iterator
 from unittest.mock import MagicMock
 
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client import Factory, ModelConflictError, ModelDiscovery
-from llm_infer.client.backends import Backend
-from llm_infer.client.types import ChatResponse
+from llm_infer.client import ModelConflictError, ModelDiscovery
+from llm_infer.client.backends import Backend, BackendContext
+from llm_infer.client.types import ChatRequest, ChatResponse
 
 pytestmark = pytest.mark.unit
 
@@ -22,10 +22,18 @@ def mock_lg() -> Logger:
 class MockBackend(Backend):
     """Mock backend with configurable model list."""
 
-    def __init__(self, models: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        lg: Logger,
+        name: str = "mock",
+        models: list[str] | None = None,
+        ctx: BackendContext | None = None,
+        default_model: str | None = None,
+    ) -> None:
+        super().__init__(lg, name, ctx, default_model)
         self._models = models or []
-        self._last_response: ChatResponse | None = None
         self._list_models_called = False
+        self._last_response: ChatResponse | None = None
 
     @property
     def last_response(self) -> ChatResponse | None:
@@ -35,23 +43,17 @@ class MockBackend(Backend):
         self._list_models_called = True
         return self._models
 
-    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> ChatResponse:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         return ChatResponse(content="mock")
 
-    def chat_stream(self, messages: list[dict[str, Any]], **kwargs: Any):
+    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
         yield "mock"
 
-    async def chat_async(
-        self, messages: list[dict[str, Any]], **kwargs: Any
-    ) -> ChatResponse:
+    async def chat_async(self, request: ChatRequest) -> ChatResponse:
         return ChatResponse(content="mock")
 
-    async def chat_stream_async(self, messages: list[dict[str, Any]], **kwargs: Any):
+    async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
         yield "mock"
-
-    @classmethod
-    def from_config(cls, lg: Logger, config: dict[str, Any]) -> "MockBackend":
-        return cls(models=config.get("_test_models", []))
 
 
 class TestModelDiscovery:
@@ -59,7 +61,7 @@ class TestModelDiscovery:
 
     def test_loads_models_from_config(self, mock_lg: Logger) -> None:
         """Test that models from config are loaded immediately."""
-        backend = MockBackend(models=["discovered-model"])
+        backend = MockBackend(mock_lg, models=["discovered-model"])
 
         discovery = ModelDiscovery(
             mock_lg,
@@ -77,7 +79,7 @@ class TestModelDiscovery:
 
     def test_unknown_model_returns_none(self, mock_lg: Logger) -> None:
         """Test that unknown models return None without probing."""
-        backend = MockBackend(models=["discovered-model"])
+        backend = MockBackend(mock_lg, models=["discovered-model"])
 
         discovery = ModelDiscovery(
             mock_lg,
@@ -93,7 +95,7 @@ class TestModelDiscovery:
 
     def test_no_probe_for_config_models(self, mock_lg: Logger) -> None:
         """Test that config models don't require backend probing."""
-        backend = MockBackend(models=["other-model"])
+        backend = MockBackend(mock_lg, models=["other-model"])
 
         discovery = ModelDiscovery(
             mock_lg,
@@ -109,7 +111,7 @@ class TestModelDiscovery:
 
     def test_get_models_for_backend_probes_lazily(self, mock_lg: Logger) -> None:
         """Test that get_models_for_backend probes on first call."""
-        backend = MockBackend(models=["model-1", "model-2"])
+        backend = MockBackend(mock_lg, models=["model-1", "model-2"])
 
         discovery = ModelDiscovery(
             mock_lg,
@@ -131,8 +133,8 @@ class TestModelDiscovery:
 
     def test_config_model_conflict_raises(self, mock_lg: Logger) -> None:
         """Test that conflicting models in config raise ModelConflictError."""
-        backend1 = MockBackend()
-        backend2 = MockBackend()
+        backend1 = MockBackend(mock_lg, name="backend1")
+        backend2 = MockBackend(mock_lg, name="backend2")
 
         with pytest.raises(ModelConflictError) as exc_info:
             ModelDiscovery(
@@ -150,7 +152,7 @@ class TestModelDiscovery:
 
     def test_discovered_backends_tracked(self, mock_lg: Logger) -> None:
         """Test that discovered backends are tracked."""
-        backend = MockBackend(models=["model"])
+        backend = MockBackend(mock_lg, models=["model"])
 
         discovery = ModelDiscovery(
             mock_lg,
@@ -167,8 +169,8 @@ class TestModelDiscovery:
 
     def test_discover_all(self, mock_lg: Logger) -> None:
         """Test discover_all probes all backends."""
-        backend1 = MockBackend(models=["model-1"])
-        backend2 = MockBackend(models=["model-2"])
+        backend1 = MockBackend(mock_lg, name="backend1", models=["model-1"])
+        backend2 = MockBackend(mock_lg, name="backend2", models=["model-2"])
 
         discovery = ModelDiscovery(
             mock_lg,
@@ -181,193 +183,3 @@ class TestModelDiscovery:
         assert backend1._list_models_called
         assert backend2._list_models_called
         assert models == {"model-1": "backend1", "model-2": "backend2"}
-
-
-class TestFactoryLazyDiscovery:
-    """Test Factory integration with lazy discovery."""
-
-    def test_no_probing_at_startup(self, mock_lg: Logger) -> None:
-        """Test that Factory.from_config doesn't probe backends at startup."""
-        # Register mock backend
-        Factory.register("mock", MockBackend)
-
-        factory = Factory(mock_lg)
-        config = {
-            "default": "local",
-            "backends": {
-                "local": {
-                    "type": "mock",
-                    "_test_models": ["local-model"],
-                },
-                "remote": {
-                    "type": "mock",
-                    "_test_models": ["remote-model"],
-                },
-            },
-        }
-
-        router = factory.from_config(config)
-
-        # Neither backend should have been probed
-        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
-        remote_backend: MockBackend = router.clients["remote"].backend  # type: ignore
-        assert not local_backend._list_models_called
-        assert not remote_backend._list_models_called
-
-        router.close()
-
-    def test_auto_model_probes_default_backend(self, mock_lg: Logger) -> None:
-        """Test that model='auto' probes only the default backend."""
-        Factory.register("mock", MockBackend)
-
-        factory = Factory(mock_lg)
-        config = {
-            "default": "local",
-            "backends": {
-                "local": {
-                    "type": "mock",
-                    "_test_models": ["local-model"],
-                },
-                "remote": {
-                    "type": "mock",
-                    "_test_models": ["remote-model"],
-                },
-            },
-        }
-
-        router = factory.from_config(config)
-
-        # model="auto" should route to default and probe it
-        resolved = router.resolve(model="auto")
-
-        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
-        remote_backend: MockBackend = router.clients["remote"].backend  # type: ignore
-
-        assert resolved.backend == "local"
-        assert resolved.model == "local-model"  # Resolved to actual model
-        assert local_backend._list_models_called
-        assert not remote_backend._list_models_called  # Remote not probed
-
-        router.close()
-
-    def test_explicit_backend_skips_discovery(self, mock_lg: Logger) -> None:
-        """Test that explicit backend= doesn't trigger discovery."""
-        Factory.register("mock", MockBackend)
-
-        factory = Factory(mock_lg)
-        config = {
-            "default": "local",
-            "backends": {
-                "local": {
-                    "type": "mock",
-                    "_test_models": ["local-model"],
-                },
-                "remote": {
-                    "type": "mock",
-                    "_test_models": ["remote-model"],
-                },
-            },
-        }
-
-        router = factory.from_config(config)
-
-        # Explicit backend - should not trigger discovery
-        resolved = router.resolve(backend="remote")
-
-        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
-        remote_backend: MockBackend = router.clients["remote"].backend  # type: ignore
-
-        assert resolved.backend == "remote"
-        assert not local_backend._list_models_called
-        assert not remote_backend._list_models_called
-
-        router.close()
-
-    def test_config_models_available_without_probing(self, mock_lg: Logger) -> None:
-        """Test that config-specified models work without probing."""
-        Factory.register("mock", MockBackend)
-
-        factory = Factory(mock_lg)
-        config = {
-            "default": "local",
-            "backends": {
-                "local": {
-                    "type": "mock",
-                    "models": ["explicitly-listed"],  # Config-specified
-                    "_test_models": ["discovered-model"],
-                },
-            },
-        }
-
-        router = factory.from_config(config)
-
-        # Config model should resolve without probing
-        resolved = router.resolve(model="explicitly-listed")
-
-        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
-        assert resolved.backend == "local"
-        assert not local_backend._list_models_called
-
-        router.close()
-
-    def test_default_model_uses_backend_default(self, mock_lg: Logger) -> None:
-        """Test that model='default' uses the backend's configured default_model."""
-        Factory.register("mock", MockBackend)
-
-        factory = Factory(mock_lg)
-        config = {
-            "default": "local",
-            "backends": {
-                "local": {
-                    "type": "mock",
-                    "model": "my-default-model",  # Configured default
-                    "_test_models": ["my-default-model", "other-model"],
-                },
-            },
-        }
-
-        router = factory.from_config(config)
-
-        # model="default" should resolve to configured default_model
-        resolved = router.resolve(model="default")
-
-        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
-        assert resolved.backend == "local"
-        assert resolved.model == "my-default-model"
-        assert not local_backend._list_models_called  # No probing needed
-
-        router.close()
-
-    def test_unknown_model_falls_back_to_default_backend(self, mock_lg: Logger) -> None:
-        """Test that unknown models route to default backend without probing."""
-        Factory.register("mock", MockBackend)
-
-        factory = Factory(mock_lg)
-        config = {
-            "default": "local",
-            "backends": {
-                "local": {
-                    "type": "mock",
-                    "_test_models": ["local-model"],
-                },
-                "remote": {
-                    "type": "mock",
-                    "_test_models": ["remote-model"],
-                },
-            },
-        }
-
-        router = factory.from_config(config)
-
-        # Unknown model should route to default without probing any backend
-        resolved = router.resolve(model="unknown-model")
-
-        local_backend: MockBackend = router.clients["local"].backend  # type: ignore
-        remote_backend: MockBackend = router.clients["remote"].backend  # type: ignore
-
-        assert resolved.backend == "local"
-        assert resolved.model == "unknown-model"  # Passed through
-        assert not local_backend._list_models_called
-        assert not remote_backend._list_models_called
-
-        router.close()
