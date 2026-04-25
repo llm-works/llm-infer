@@ -233,5 +233,6 @@ class FallbackLoop:
         if next_decision:
             self.decision = next_decision
             self.request = next_decision.updated_request or self.request
+            self.ctx.request = self.request
         else:
             raise e

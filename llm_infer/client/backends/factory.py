@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
@@ -98,12 +100,14 @@ class BackendFactory:
         """Create Anthropic backend."""
         from .anthropic import AnthropicBackend
 
-        return AnthropicBackend(
-            lg=self._lg,
-            name=name,
-            ctx=ctx,
-            default_model=default_model,
-            api_key=config.get("api_key"),
-            base_url=config.get("base_url"),
-            max_tokens=config.get("max_tokens"),
-        )
+        kwargs: dict[str, Any] = {
+            "lg": self._lg,
+            "name": name,
+            "ctx": ctx,
+            "default_model": default_model,
+            "api_key": config.get("api_key"),
+            "base_url": config.get("base_url"),
+        }
+        if config.get("max_tokens") is not None:
+            kwargs["max_tokens"] = config["max_tokens"]
+        return AnthropicBackend(**kwargs)

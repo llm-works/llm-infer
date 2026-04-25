@@ -267,7 +267,7 @@ class AnthropicBackend(Backend):
                 "extended_thinking requires different API structure"
             )
 
-        extra = request.extra or {}
+        extra = dict(request.extra) if request.extra else {}
         self._apply_response_format(request_kwargs, extra)
 
         for key, value in extra.items():

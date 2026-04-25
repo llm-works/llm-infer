@@ -79,7 +79,13 @@ class RetryHelper:
             except (BackendUnavailableError, BackendRequestError) as e:
                 if not self._should_retry(e, start_time, retry.timeout):
                     raise
-                backoff.wait()
+                delay = backoff.next_delay()
+                if retry.timeout > 0:
+                    remaining = retry.timeout - (time.monotonic() - start_time)
+                    if remaining <= 0:
+                        raise
+                    delay = min(delay, remaining)
+                time.sleep(delay)
 
     async def call_async(self, fn: Callable[[], Awaitable[T]]) -> T:
         """Execute async fn with retry on transient errors."""
@@ -95,4 +101,9 @@ class RetryHelper:
                 if not self._should_retry(e, start_time, retry.timeout):
                     raise
                 delay = backoff.next_delay()
+                if retry.timeout > 0:
+                    remaining = retry.timeout - (time.monotonic() - start_time)
+                    if remaining <= 0:
+                        raise
+                    delay = min(delay, remaining)
                 await asyncio.sleep(delay)

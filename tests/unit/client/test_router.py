@@ -38,30 +38,39 @@ class MockBackend(Backend):
     ) -> None:
         super().__init__(lg, name, ctx, default_model)
         self._responses = iter(responses or [])
+        self._last_request: ChatRequest | None = None
         self._last_response: ChatResponse | None = None
         self._closed = False
         self._aclosed = False
+
+    @property
+    def last_request(self) -> ChatRequest | None:
+        return self._last_request
 
     @property
     def last_response(self) -> ChatResponse | None:
         return self._last_response
 
     def chat(self, request: ChatRequest) -> ChatResponse:
+        self._last_request = request
         response = next(self._responses)
         self._last_response = response
         return response
 
     def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+        self._last_request = request
         response = next(self._responses)
         yield from response.content
         self._last_response = response
 
     async def chat_async(self, request: ChatRequest) -> ChatResponse:
+        self._last_request = request
         response = next(self._responses)
         self._last_response = response
         return response
 
     async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+        self._last_request = request
         response = next(self._responses)
         for char in response.content:
             yield char
