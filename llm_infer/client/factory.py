@@ -41,6 +41,7 @@ from .backends import Backend, BackendFactory
 from .client import LLMClient
 from .discovery import ModelDiscovery
 from .router import LLMRouter
+from .types import LLMCallbacks
 
 if TYPE_CHECKING:
     from .strategy import RoutingStrategy
@@ -77,7 +78,10 @@ class Factory:
         return self._backend_factory.create(name, DotDict(config))
 
     def from_config(
-        self, config: dict[str, Any], discover_models: bool = True
+        self,
+        config: dict[str, Any],
+        discover_models: bool = True,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
         """Create LLMRouter from configuration dict.
 
@@ -128,6 +132,8 @@ class Factory:
             config: Configuration dictionary.
             discover_models: If True, enable lazy model discovery when backends
                 are first used. Defaults to True.
+            callbacks: Optional callbacks for request/response/error lifecycle
+                events. Applied to all clients created by this router.
 
         Returns:
             Configured LLMRouter instance with all enabled backends.
@@ -143,7 +149,12 @@ class Factory:
 
         if not backends_config:
             return self._create_single_backend_router(
-                config, discover_models, rate_limit_config, retry_config, strategy
+                config,
+                discover_models,
+                rate_limit_config,
+                retry_config,
+                strategy,
+                callbacks,
             )
 
         return self._create_multi_backend_router(
@@ -153,6 +164,7 @@ class Factory:
             rate_limit_config,
             retry_config,
             strategy,
+            callbacks,
         )
 
     def _create_single_backend_router(
@@ -162,6 +174,7 @@ class Factory:
         rate_limit_config: dict[str, Any] | None = None,
         retry_config: dict[str, Any] | None = None,
         strategy: RoutingStrategy | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
         """Create router wrapping a single backend config.
 
@@ -177,7 +190,7 @@ class Factory:
 
         try:
             discovery = ModelDiscovery(self._lg, backends, configs)
-            client = LLMClient(self._lg, backend, discovery)
+            client = LLMClient(self._lg, backend, discovery, callbacks)
             clients = {name: client}
 
             return LLMRouter(
@@ -199,6 +212,7 @@ class Factory:
         rate_limit_config: dict[str, Any] | None = None,
         retry_config: dict[str, Any] | None = None,
         strategy: RoutingStrategy | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
         """Create router from multi-backend config.
 
@@ -221,7 +235,7 @@ class Factory:
         try:
             discovery = ModelDiscovery(self._lg, backends, configs)
             clients = {
-                name: LLMClient(self._lg, backend, discovery)
+                name: LLMClient(self._lg, backend, discovery, callbacks)
                 for name, backend in backends.items()
             }
 
