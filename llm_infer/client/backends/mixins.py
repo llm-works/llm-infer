@@ -73,5 +73,6 @@ class AsyncRequestTrackingMixin:
         """Wait for all in-flight async requests to complete. Call from aclose()."""
         self._close_requested = True
         if self._active_async_requests > 0:
-            self._drain_event = asyncio.Event()
+            if self._drain_event is None:
+                self._drain_event = asyncio.Event()
             await self._drain_event.wait()
