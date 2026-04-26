@@ -287,17 +287,19 @@ class LLMRouter(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         backend: str | None = None,
         role: str | None = None,
-        context: RoutingContext | None = None,
+        routing_context: RoutingContext | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request (sync).
 
         See ChatClient.chat() for common parameters. Router-specific args:
+            context: User context passed to callbacks (cost tracking, tracing).
             backend: Backend to route to (uses default if not specified).
             role: Application-defined role for strategy routing.
-            context: Routing context for strategy-based routing.
+            routing_context: Routing context for strategy-based routing.
         """
         request, ctx, decision = rh.setup_routing(
             self,
@@ -310,9 +312,10 @@ class LLMRouter(ChatClient):
             tool_choice,
             think,
             adapter,
+            context,
             backend,
             role,
-            context,
+            routing_context,
             **kwargs,
         )
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
@@ -333,16 +336,17 @@ class LLMRouter(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         backend: str | None = None,
         role: str | None = None,
-        context: RoutingContext | None = None,
+        routing_context: RoutingContext | None = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Stream chat completion tokens (sync).
 
         Fallback only occurs before streaming starts. Once streaming begins,
         errors are raised immediately. See ChatClient.chat_stream() for common
-        parameters. Router-specific: backend, role, context.
+        parameters. Router-specific: context, backend, role, routing_context.
         """
         request, ctx, decision = rh.setup_routing(
             self,
@@ -355,9 +359,10 @@ class LLMRouter(ChatClient):
             tool_choice,
             think,
             adapter,
+            context,
             backend,
             role,
-            context,
+            routing_context,
             **kwargs,
         )
         streamed = False
@@ -389,17 +394,19 @@ class LLMRouter(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         backend: str | None = None,
         role: str | None = None,
-        context: RoutingContext | None = None,
+        routing_context: RoutingContext | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request (async).
 
         See ChatClient.chat_async() for common parameters. Router-specific args:
+            context: User context passed to callbacks (cost tracking, tracing).
             backend: Backend to route to (uses default if not specified).
             role: Application-defined role for strategy routing.
-            context: Routing context for strategy-based routing.
+            routing_context: Routing context for strategy-based routing.
         """
         request, ctx, decision = rh.setup_routing(
             self,
@@ -412,9 +419,10 @@ class LLMRouter(ChatClient):
             tool_choice,
             think,
             adapter,
+            context,
             backend,
             role,
-            context,
+            routing_context,
             **kwargs,
         )
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
@@ -437,16 +445,17 @@ class LLMRouter(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         backend: str | None = None,
         role: str | None = None,
-        context: RoutingContext | None = None,
+        routing_context: RoutingContext | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream chat completion tokens (async).
 
         Fallback only occurs before streaming starts. Once streaming begins,
         errors are raised immediately. See ChatClient.chat_stream_async() for
-        common parameters. Router-specific: backend, role, context.
+        common parameters. Router-specific: context, backend, role, routing_context.
         """
         request, ctx, decision = rh.setup_routing(
             self,
@@ -459,9 +468,10 @@ class LLMRouter(ChatClient):
             tool_choice,
             think,
             adapter,
+            context,
             backend,
             role,
-            context,
+            routing_context,
             **kwargs,
         )
         streamed = False

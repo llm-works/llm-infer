@@ -11,6 +11,7 @@ from llm_infer.client import (
     ChatRequest,
     ChatResponse,
     Factory,
+    LLMCallbacks,
     LLMClient,
     LLMRouter,
     ModelConflictError,
@@ -911,3 +912,248 @@ class TestFromBackendConfig:
         assert client.backend.ctx.rate_limiter is not None
         assert client.backend.ctx.retry is not None
         client.close()
+
+
+class TestLLMClientCallbacks:
+    """Test LLMClient callback functionality."""
+
+    def test_with_callbacks_returns_copy(self, mock_lg: Logger) -> None:
+        """with_callbacks returns a new client instance."""
+        response = ChatResponse(content="test")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        client = LLMClient(mock_lg, backend)
+        callbacks = LLMCallbacks(on_response=lambda req, resp: None)
+
+        client_with_cb = client.with_callbacks(callbacks)
+
+        assert client_with_cb is not client
+        assert client_with_cb._callbacks is callbacks
+        assert client._callbacks is None
+        client.close()
+
+    def test_on_response_callback_fires(self, mock_lg: Logger) -> None:
+        """on_response callback fires after successful response."""
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        captured: list[tuple[ChatRequest, ChatResponse]] = []
+
+        def on_response(req: ChatRequest, resp: ChatResponse) -> None:
+            captured.append((req, resp))
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_response=on_response)
+        )
+        result = client.chat([{"role": "user", "content": "hi"}])
+
+        assert result.content == "hello"
+        assert len(captured) == 1
+        assert captured[0][0].messages == [{"role": "user", "content": "hi"}]
+        assert captured[0][1].content == "hello"
+        client.close()
+
+    def test_on_request_callback_fires(self, mock_lg: Logger) -> None:
+        """on_request callback fires before request."""
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        captured: list[tuple[ChatRequest, int]] = []
+
+        def on_request(req: ChatRequest, retry: int) -> None:
+            captured.append((req, retry))
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_request=on_request)
+        )
+        client.chat([{"role": "user", "content": "hi"}])
+
+        assert len(captured) == 1
+        assert captured[0][1] == 0  # First attempt, retry=0
+        client.close()
+
+    def test_on_error_callback_fires(self, mock_lg: Logger) -> None:
+        """on_error callback fires after error."""
+        backend = MockBackend(mock_lg, "test", responses=[])
+        captured: list[tuple[ChatRequest, Exception]] = []
+
+        def on_error(req: ChatRequest, err: Exception) -> None:
+            captured.append((req, err))
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_error=on_error)
+        )
+
+        with pytest.raises(StopIteration):
+            client.chat([{"role": "user", "content": "hi"}])
+
+        assert len(captured) == 1
+        assert isinstance(captured[0][1], StopIteration)
+        client.close()
+
+    def test_context_passed_to_callback(self, mock_lg: Logger) -> None:
+        """User context on request is accessible in callbacks."""
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        captured_context: list[dict] = []
+
+        def on_response(req: ChatRequest, resp: ChatResponse) -> None:
+            if req.context:
+                captured_context.append(req.context)
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_response=on_response)
+        )
+        client.chat(
+            [{"role": "user", "content": "hi"}],
+            context={"op": "planning", "session_id": 42},
+        )
+
+        assert len(captured_context) == 1
+        assert captured_context[0] == {"op": "planning", "session_id": 42}
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_async_on_response_callback_fires(self, mock_lg: Logger) -> None:
+        """on_response callback fires for async requests."""
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        captured: list[tuple[ChatRequest, ChatResponse]] = []
+
+        def on_response(req: ChatRequest, resp: ChatResponse) -> None:
+            captured.append((req, resp))
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_response=on_response)
+        )
+        result = await client.chat_async([{"role": "user", "content": "hi"}])
+
+        assert result.content == "hello"
+        assert len(captured) == 1
+        await client.aclose()
+
+    def test_on_request_fires_with_retry_count(self, mock_lg: Logger) -> None:
+        """on_request callback fires with incrementing retry count during retries."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="Success!")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+
+        request_calls: list[tuple[ChatRequest, int]] = []
+        response_calls: list[tuple[ChatRequest, ChatResponse]] = []
+        error_calls: list[tuple[ChatRequest, Exception]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_request=lambda req, retry: request_calls.append((req, retry)),
+                on_response=lambda req, resp: response_calls.append((req, resp)),
+                on_error=lambda req, err: error_calls.append((req, err)),
+            )
+        )
+
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success!"
+        assert call_count == 3
+        assert len(request_calls) == 3
+        assert request_calls[0][1] == 0
+        assert request_calls[1][1] == 1
+        assert request_calls[2][1] == 2
+        assert len(response_calls) == 1
+        assert response_calls[0][1].content == "Success!"
+        assert len(error_calls) == 0
+        client.close()
+
+    def test_stream_on_request_fires_before_stream(self, mock_lg: Logger) -> None:
+        """on_request callback fires before streaming starts."""
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        request_calls: list[tuple[ChatRequest, int]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_request=lambda req, retry: request_calls.append((req, retry))
+            )
+        )
+        tokens = list(client.chat_stream([{"role": "user", "content": "hi"}]))
+
+        assert tokens == ["h", "e", "l", "l", "o"]
+        assert len(request_calls) == 1
+        assert request_calls[0][1] == 0
+        client.close()
+
+    def test_stream_on_response_fires_after_completion(self, mock_lg: Logger) -> None:
+        """on_response callback fires after stream completes."""
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        response_calls: list[tuple[ChatRequest, ChatResponse]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_response=lambda req, resp: response_calls.append((req, resp))
+            )
+        )
+        tokens = list(client.chat_stream([{"role": "user", "content": "hi"}]))
+
+        assert tokens == ["h", "e", "l", "l", "o"]
+        assert len(response_calls) == 1
+        assert response_calls[0][1].content == "hello"
+        client.close()
+
+    def test_stream_on_error_fires_on_failure(self, mock_lg: Logger) -> None:
+        """on_error callback fires when streaming fails."""
+        from llm_infer.client import BackendRequestError
+
+        class FailingStreamBackend(MockBackend):
+            def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+                raise BackendRequestError("Stream failed", status_code=500)
+
+        backend = FailingStreamBackend(mock_lg, "test", responses=[])
+        error_calls: list[tuple[ChatRequest, Exception]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_error=lambda req, err: error_calls.append((req, err)))
+        )
+
+        with pytest.raises(BackendRequestError):
+            list(client.chat_stream([{"role": "user", "content": "hi"}]))
+
+        assert len(error_calls) == 1
+        assert isinstance(error_calls[0][1], BackendRequestError)
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_stream_async_callbacks_fire(self, mock_lg: Logger) -> None:
+        """Streaming async callbacks fire correctly."""
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        request_calls: list[tuple[ChatRequest, int]] = []
+        response_calls: list[tuple[ChatRequest, ChatResponse]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_request=lambda req, retry: request_calls.append((req, retry)),
+                on_response=lambda req, resp: response_calls.append((req, resp)),
+            )
+        )
+        tokens = []
+        async for token in client.chat_stream_async(
+            [{"role": "user", "content": "hi"}]
+        ):
+            tokens.append(token)
+
+        assert tokens == ["h", "e", "l", "l", "o"]
+        assert len(request_calls) == 1
+        assert request_calls[0][1] == 0
+        assert len(response_calls) == 1
+        assert response_calls[0][1].content == "hello"
+        await client.aclose()

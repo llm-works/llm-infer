@@ -86,6 +86,7 @@ class SAIAAdapter(Backend):
         response_schema: dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        context: dict[str, Any] | None = None,
     ) -> SAIAChatResponse:
         """Send a chat completion request via the wrapped LLMClient.
 
@@ -96,6 +97,7 @@ class SAIAAdapter(Backend):
             response_schema: Optional JSON schema for structured output.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (default 1.0).
+            context: User context passed to callbacks (cost tracking, tracing).
 
         Returns:
             SAIA ChatResponse with content, tool calls, token usage, resolved
@@ -118,6 +120,8 @@ class SAIAAdapter(Backend):
             call_kwargs["temperature"] = temperature
         elif "temperature" not in call_kwargs:
             call_kwargs["temperature"] = 1.0
+        if context is not None:
+            call_kwargs["context"] = context
         response = await self._client.chat_async(**call_kwargs)
 
         return self._convert_response(response)

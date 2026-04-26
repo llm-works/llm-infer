@@ -6,6 +6,7 @@ llm-infer specific extensions like thinking content and tool calls.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,6 +21,7 @@ __all__ = [
     "AdapterInfo",
     "ChatRequest",
     "ChatResponse",
+    "LLMCallbacks",
     "Provider",
 ]
 
@@ -42,6 +44,7 @@ class ChatRequest:
         think: Enable thinking mode.
         adapter: LoRA adapter name.
         extra: Backend-specific parameters.
+        context: User-provided context passed to callbacks (cost tracking, tracing).
     """
 
     messages: list[dict[str, Any]]
@@ -54,6 +57,7 @@ class ChatRequest:
     think: bool | None = None
     adapter: str | None = None
     extra: dict[str, Any] | None = None
+    context: dict[str, Any] | None = None
 
 
 @dataclass
@@ -119,3 +123,29 @@ class ChatResponse:
     def has_tool_calls(self) -> bool:
         """Check if the response contains tool calls."""
         return self.tool_calls is not None and len(self.tool_calls) > 0
+
+
+# Callback type aliases
+LLMRequestCallback = Callable[["ChatRequest", int], None]
+LLMResponseCallback = Callable[["ChatRequest", "ChatResponse"], None]
+LLMErrorCallback = Callable[["ChatRequest", Exception], None]
+
+
+@dataclass
+class LLMCallbacks:
+    """Callbacks for LLM request lifecycle events.
+
+    Configure callbacks to observe request/response flow for cost tracking,
+    logging, tracing, or metrics collection.
+
+    Attributes:
+        on_request: Called before each request attempt. Args: (request, retry).
+            retry is 0 for first attempt, 1+ for retries after transient errors.
+        on_response: Called after successful response. Args: (request, response).
+            For streaming, fires after stream completes.
+        on_error: Called after failed request. Args: (request, exception).
+    """
+
+    on_request: LLMRequestCallback | None = None
+    on_response: LLMResponseCallback | None = None
+    on_error: LLMErrorCallback | None = None
