@@ -90,7 +90,15 @@ from .strategy import (
     TransientAction,
     TransientDetector,
 )
-from .types import ChatRequest, ChatResponse, Provider
+from .types import (
+    ChatRequest,
+    ChatResponse,
+    LLMCallbacks,
+    LLMErrorCallback,
+    LLMRequestCallback,
+    LLMResponseCallback,
+    Provider,
+)
 
 __all__ = [
     # Factory (primary entry point)
@@ -121,6 +129,11 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "Provider",
+    # Callbacks
+    "LLMCallbacks",
+    "LLMRequestCallback",
+    "LLMResponseCallback",
+    "LLMErrorCallback",
     # Backend base class
     "Backend",
     "OpenAICompatibleBackend",

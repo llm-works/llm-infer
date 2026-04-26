@@ -28,6 +28,7 @@ For client creation, use Factory:
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from copy import copy
 from typing import Any, Self
 
 from appinfra.log import Logger
@@ -36,7 +37,7 @@ from .backends import Backend
 from .base import ChatClient
 from .discovery import ModelDiscovery
 from .retry import RetryHelper
-from .types import ChatRequest, ChatResponse
+from .types import ChatRequest, ChatResponse, LLMCallbacks
 
 
 class LLMClient(ChatClient):
@@ -73,6 +74,7 @@ class LLMClient(ChatClient):
         lg: Logger,
         backend: Backend,
         discovery: ModelDiscovery | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> None:
         """Initialize the client with a backend.
 
@@ -83,11 +85,13 @@ class LLMClient(ChatClient):
             discovery: Optional ModelDiscovery for resolving 'auto'/'default' model
                 names. When provided, handles model resolution including backend probing.
                 When None, falls back to backend's default_model.
+            callbacks: Optional callbacks for request/response/error lifecycle events.
         """
         self._lg = lg
         self._backend = backend
         self._discovery = discovery
         self._retry = RetryHelper(lg, backend.ctx)
+        self._callbacks = callbacks
 
     @property
     def backend(self) -> Backend:
@@ -139,6 +143,22 @@ class LLMClient(ChatClient):
         """
         return self._backend.can_call()
 
+    def with_callbacks(self, callbacks: LLMCallbacks) -> Self:
+        """Return a client copy with callbacks configured.
+
+        Callbacks fire on request/response/error events for cost tracking,
+        logging, tracing, or metrics collection.
+
+        Args:
+            callbacks: Callbacks for lifecycle events.
+
+        Returns:
+            New client instance with callbacks configured.
+        """
+        clone = copy(self)
+        clone._callbacks = callbacks
+        return clone
+
     # =========================================================================
     # Sync API
     # =========================================================================
@@ -154,6 +174,7 @@ class LLMClient(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request (sync).
@@ -171,6 +192,7 @@ class LLMClient(ChatClient):
             tool_choice: Control tool use.
             think: Enable thinking mode.
             adapter: LoRA adapter name (OpenAI-compatible only).
+            context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
@@ -187,6 +209,7 @@ class LLMClient(ChatClient):
             think=think,
             adapter=adapter,
             extra=kwargs or None,
+            context=context,
         )
         return self._chat(request)
 
@@ -201,6 +224,7 @@ class LLMClient(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Stream chat completion tokens (sync).
@@ -221,6 +245,7 @@ class LLMClient(ChatClient):
             tool_choice: Control tool use.
             think: Enable thinking mode.
             adapter: LoRA adapter name (OpenAI-compatible only).
+            context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
@@ -237,6 +262,7 @@ class LLMClient(ChatClient):
             think=think,
             adapter=adapter,
             extra=kwargs or None,
+            context=context,
         )
         yield from self._chat_stream(request)
 
@@ -255,6 +281,7 @@ class LLMClient(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat completion request (async).
@@ -272,6 +299,7 @@ class LLMClient(ChatClient):
             tool_choice: Control tool use.
             think: Enable thinking mode.
             adapter: LoRA adapter name (OpenAI-compatible only).
+            context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
         Returns:
@@ -288,6 +316,7 @@ class LLMClient(ChatClient):
             think=think,
             adapter=adapter,
             extra=kwargs or None,
+            context=context,
         )
         return await self._chat_async(request)
 
@@ -302,6 +331,7 @@ class LLMClient(ChatClient):
         tool_choice: str | dict[str, Any] | None = None,
         think: bool | None = None,
         adapter: str | None = None,
+        context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream chat completion tokens (async).
@@ -322,6 +352,7 @@ class LLMClient(ChatClient):
             tool_choice: Control tool use.
             think: Enable thinking mode.
             adapter: LoRA adapter name (OpenAI-compatible only).
+            context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
         Yields:
@@ -338,6 +369,7 @@ class LLMClient(ChatClient):
             think=think,
             adapter=adapter,
             extra=kwargs or None,
+            context=context,
         )
         async for token in self._chat_stream_async(request):
             yield token
@@ -348,20 +380,58 @@ class LLMClient(ChatClient):
 
     def _chat(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (sync) with retry."""
-        return self._retry.call(lambda: self._backend.chat(request))
+        return self._retry.call(
+            lambda: self._backend.chat(request),
+            request=request,
+            callbacks=self._callbacks,
+        )
 
     def _chat_stream(self, request: ChatRequest) -> Iterator[str]:
-        """Internal: stream chat request (sync)."""
-        yield from self._backend.chat_stream(request)
+        """Internal: stream chat request (sync).
+
+        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        """
+        cb = self._callbacks
+        if cb and cb.on_request:
+            cb.on_request(request, 0)
+        try:
+            yield from self._backend.chat_stream(request)
+            if cb and cb.on_response:
+                response = self._backend.last_response
+                if response:
+                    cb.on_response(request, response)
+        except Exception as e:
+            if cb and cb.on_error:
+                cb.on_error(request, e)
+            raise
 
     async def _chat_async(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (async) with retry."""
-        return await self._retry.call_async(lambda: self._backend.chat_async(request))
+        return await self._retry.call_async(
+            lambda: self._backend.chat_async(request),
+            request=request,
+            callbacks=self._callbacks,
+        )
 
     async def _chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
-        """Internal: stream chat request (async)."""
-        async for token in self._backend.chat_stream_async(request):
-            yield token
+        """Internal: stream chat request (async).
+
+        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        """
+        cb = self._callbacks
+        if cb and cb.on_request:
+            cb.on_request(request, 0)
+        try:
+            async for token in self._backend.chat_stream_async(request):
+                yield token
+            if cb and cb.on_response:
+                response = self._backend.last_response
+                if response:
+                    cb.on_response(request, response)
+        except Exception as e:
+            if cb and cb.on_error:
+                cb.on_error(request, e)
+            raise
 
     # =========================================================================
     # Resource management
