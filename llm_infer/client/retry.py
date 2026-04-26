@@ -157,7 +157,7 @@ class RetryHelper:
         self, backoff: Backoff, timeout: float, start_time: float
     ) -> float | None:
         """Compute delay for next retry, or None if timeout exceeded."""
-        delay = backoff.next_delay()
+        delay: float = backoff.next_delay()
         if timeout > 0:
             remaining = timeout - (time.monotonic() - start_time)
             if remaining <= 0:
