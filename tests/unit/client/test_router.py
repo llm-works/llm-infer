@@ -51,6 +51,10 @@ class MockBackend(Backend):
     def last_response(self) -> ChatResponse | None:
         return self._last_response
 
+    @property
+    def provider(self) -> str:
+        return "mock"
+
     def chat(self, request: ChatRequest) -> ChatResponse:
         self._last_request = request
         response = next(self._responses)

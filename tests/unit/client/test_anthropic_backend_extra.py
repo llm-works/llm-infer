@@ -481,6 +481,21 @@ def test_create_usage_present(mock_anthropic: Any, mock_lg: Logger) -> None:
     assert result.total_tokens == 15
 
 
+def test_create_usage_message_delta_none_input(
+    mock_anthropic: Any, mock_lg: Logger
+) -> None:
+    """Test _create_usage handles MessageDeltaUsage where input_tokens is None."""
+    backend = _make_backend(mock_anthropic, mock_lg)
+    usage = MagicMock()
+    usage.input_tokens = None
+    usage.output_tokens = 42
+    result = backend._create_usage(usage)
+    assert result is not None
+    assert result.prompt_tokens == 0
+    assert result.completion_tokens == 42
+    assert result.total_tokens == 42
+
+
 # ---------------------------------------------------------------------------
 # _create_tool_call
 # ---------------------------------------------------------------------------

@@ -606,10 +606,13 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         if isinstance(cache_read, int) and cache_read > 0:
             prompt_details = PromptTokensDetails(cached_tokens=cache_read)
 
+        input_tokens = getattr(usage, "input_tokens", None) or 0
+        output_tokens = getattr(usage, "output_tokens", None) or 0
+
         return ChatCompletionUsage(
-            prompt_tokens=usage.input_tokens,
-            completion_tokens=usage.output_tokens,
-            total_tokens=usage.input_tokens + usage.output_tokens,
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
             prompt_tokens_details=prompt_details,
         )
 

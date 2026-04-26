@@ -91,6 +91,12 @@ class Backend(ABC):
 
     @property
     @abstractmethod
+    def provider(self) -> str:
+        """Provider identifier for this backend (e.g., 'anthropic', 'openai')."""
+        ...
+
+    @property
+    @abstractmethod
     def last_response(self) -> ChatResponse | None:
         """Last response with usage stats.
 
