@@ -341,6 +341,15 @@ class TestFactory:
         assert router.clients["b"]._callbacks is callbacks
         router.close()
 
+    def test_from_config_single_backend_with_callbacks(self, mock_lg: Logger) -> None:
+        """Test from_config passes callbacks for single-backend config."""
+        callbacks = LLMCallbacks(on_response=lambda req, resp: None)
+        factory = Factory(mock_lg)
+        config = {"type": "openai_compatible", "base_url": "http://a:8000/v1"}
+        router = factory.from_config(config, callbacks=callbacks)
+        assert router.clients["default"]._callbacks is callbacks
+        router.close()
+
 
 class TestLLMClientSyncAPI:
     """Test LLMClient sync API."""

@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Request/response callbacks**: `LLMClient.with_callbacks()` enables observability hooks for cost
   tracking, logging, and tracing. Callbacks fire on request (with retry count), response, and error.
   Use `context` parameter to pass user data (e.g., `{"op": "planning"}`) through to callbacks.
-- **Factory callbacks injection**: `Factory.from_config(config, callbacks=...)` applies callbacks to
-  all clients at construction time, enabling centralized observability for multi-backend routers.
+- **Factory callbacks injection**: All factory methods (`from_config`, `from_backend_config`,
+  `openai`, `anthropic`) accept `callbacks` parameter for observability at construction time.
 - **Prompt caching support**: Anthropic backend now adds `cache_control: {"type": "ephemeral"}`
   to system prompts and tool definitions automatically, enabling prompt caching for agentic loops
 - **Cache token tracking**: `ChatCompletionUsage.prompt_tokens_details.cached_tokens` now populated

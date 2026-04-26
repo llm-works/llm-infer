@@ -365,19 +365,23 @@ class Factory:
         return factories[strategy_type]().create(self._lg, config)
 
     def from_backend_config(
-        self, config: dict[str, Any], name: str = "default"
+        self,
+        config: dict[str, Any],
+        name: str = "default",
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMClient:
         """Create LLMClient from single backend configuration.
 
         Args:
             config: Backend configuration with 'type' key.
             name: Backend name (for discovery/routing).
+            callbacks: Optional callbacks for request/response/error lifecycle events.
 
         Returns:
             Configured LLMClient instance.
         """
         backend = self.create_backend(name, config)
-        return LLMClient(self._lg, backend)
+        return LLMClient(self._lg, backend, callbacks=callbacks)
 
     def openai(
         self,
@@ -386,6 +390,7 @@ class Factory:
         api_key: str | None = None,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMClient:
         """Create LLMClient for OpenAI-compatible API.
 
@@ -397,6 +402,7 @@ class Factory:
             api_key: Optional API key.
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
+            callbacks: Optional callbacks for request/response/error lifecycle events.
 
         Returns:
             LLMClient configured for OpenAI-compatible API.
@@ -410,7 +416,7 @@ class Factory:
         }
         if rate_limit:
             config["rate_limit"] = rate_limit
-        return self.from_backend_config(config, "openai")
+        return self.from_backend_config(config, "openai", callbacks)
 
     def anthropic(
         self,
@@ -419,6 +425,7 @@ class Factory:
         max_tokens: int = 4096,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMClient:
         """Create LLMClient for Anthropic Claude API.
 
@@ -430,6 +437,7 @@ class Factory:
             max_tokens: Default max tokens for responses.
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
+            callbacks: Optional callbacks for request/response/error lifecycle events.
 
         Returns:
             LLMClient configured for Anthropic API.
@@ -446,4 +454,4 @@ class Factory:
         }
         if rate_limit:
             config["rate_limit"] = rate_limit
-        return self.from_backend_config(config, "anthropic")
+        return self.from_backend_config(config, "anthropic", callbacks)
