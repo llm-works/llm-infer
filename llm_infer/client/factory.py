@@ -41,6 +41,7 @@ from .backends import Backend, BackendFactory
 from .client import LLMClient
 from .discovery import ModelDiscovery
 from .router import LLMRouter
+from .types import LLMCallbacks
 
 if TYPE_CHECKING:
     from .strategy import RoutingStrategy
@@ -77,7 +78,10 @@ class Factory:
         return self._backend_factory.create(name, DotDict(config))
 
     def from_config(
-        self, config: dict[str, Any], discover_models: bool = True
+        self,
+        config: dict[str, Any],
+        discover_models: bool = True,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
         """Create LLMRouter from configuration dict.
 
@@ -128,6 +132,8 @@ class Factory:
             config: Configuration dictionary.
             discover_models: If True, enable lazy model discovery when backends
                 are first used. Defaults to True.
+            callbacks: Optional callbacks for request/response/error lifecycle
+                events. Applied to all clients created by this router.
 
         Returns:
             Configured LLMRouter instance with all enabled backends.
@@ -143,7 +149,12 @@ class Factory:
 
         if not backends_config:
             return self._create_single_backend_router(
-                config, discover_models, rate_limit_config, retry_config, strategy
+                config,
+                discover_models,
+                rate_limit_config,
+                retry_config,
+                strategy,
+                callbacks,
             )
 
         return self._create_multi_backend_router(
@@ -153,6 +164,7 @@ class Factory:
             rate_limit_config,
             retry_config,
             strategy,
+            callbacks,
         )
 
     def _create_single_backend_router(
@@ -162,6 +174,7 @@ class Factory:
         rate_limit_config: dict[str, Any] | None = None,
         retry_config: dict[str, Any] | None = None,
         strategy: RoutingStrategy | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
         """Create router wrapping a single backend config.
 
@@ -177,7 +190,7 @@ class Factory:
 
         try:
             discovery = ModelDiscovery(self._lg, backends, configs)
-            client = LLMClient(self._lg, backend, discovery)
+            client = LLMClient(self._lg, backend, discovery, callbacks)
             clients = {name: client}
 
             return LLMRouter(
@@ -199,6 +212,7 @@ class Factory:
         rate_limit_config: dict[str, Any] | None = None,
         retry_config: dict[str, Any] | None = None,
         strategy: RoutingStrategy | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
         """Create router from multi-backend config.
 
@@ -221,7 +235,7 @@ class Factory:
         try:
             discovery = ModelDiscovery(self._lg, backends, configs)
             clients = {
-                name: LLMClient(self._lg, backend, discovery)
+                name: LLMClient(self._lg, backend, discovery, callbacks)
                 for name, backend in backends.items()
             }
 
@@ -351,19 +365,23 @@ class Factory:
         return factories[strategy_type]().create(self._lg, config)
 
     def from_backend_config(
-        self, config: dict[str, Any], name: str = "default"
+        self,
+        config: dict[str, Any],
+        name: str = "default",
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMClient:
         """Create LLMClient from single backend configuration.
 
         Args:
             config: Backend configuration with 'type' key.
             name: Backend name (for discovery/routing).
+            callbacks: Optional callbacks for request/response/error lifecycle events.
 
         Returns:
             Configured LLMClient instance.
         """
         backend = self.create_backend(name, config)
-        return LLMClient(self._lg, backend)
+        return LLMClient(self._lg, backend, callbacks=callbacks)
 
     def openai(
         self,
@@ -372,6 +390,7 @@ class Factory:
         api_key: str | None = None,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMClient:
         """Create LLMClient for OpenAI-compatible API.
 
@@ -383,6 +402,7 @@ class Factory:
             api_key: Optional API key.
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
+            callbacks: Optional callbacks for request/response/error lifecycle events.
 
         Returns:
             LLMClient configured for OpenAI-compatible API.
@@ -396,7 +416,7 @@ class Factory:
         }
         if rate_limit:
             config["rate_limit"] = rate_limit
-        return self.from_backend_config(config, "openai")
+        return self.from_backend_config(config, "openai", callbacks)
 
     def anthropic(
         self,
@@ -405,6 +425,7 @@ class Factory:
         max_tokens: int = 4096,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
+        callbacks: LLMCallbacks | None = None,
     ) -> LLMClient:
         """Create LLMClient for Anthropic Claude API.
 
@@ -416,6 +437,7 @@ class Factory:
             max_tokens: Default max tokens for responses.
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
+            callbacks: Optional callbacks for request/response/error lifecycle events.
 
         Returns:
             LLMClient configured for Anthropic API.
@@ -432,4 +454,4 @@ class Factory:
         }
         if rate_limit:
             config["rate_limit"] = rate_limit
-        return self.from_backend_config(config, "anthropic")
+        return self.from_backend_config(config, "anthropic", callbacks)

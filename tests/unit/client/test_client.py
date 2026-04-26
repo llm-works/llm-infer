@@ -318,6 +318,38 @@ class TestFactory:
 
         assert exc_info.value.model == "shared-model"
 
+    def test_from_config_with_callbacks(self, mock_lg: Logger) -> None:
+        """Test from_config passes callbacks to all clients."""
+        responses: list[ChatResponse] = []
+        callbacks = LLMCallbacks(on_response=lambda req, resp: responses.append(resp))
+        factory = Factory(mock_lg)
+        config = {
+            "default": "a",
+            "backends": {
+                "a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://a:8000/v1",
+                },
+                "b": {
+                    "type": "openai_compatible",
+                    "base_url": "http://b:8000/v1",
+                },
+            },
+        }
+        router = factory.from_config(config, callbacks=callbacks)
+        assert router.clients["a"]._callbacks is callbacks
+        assert router.clients["b"]._callbacks is callbacks
+        router.close()
+
+    def test_from_config_single_backend_with_callbacks(self, mock_lg: Logger) -> None:
+        """Test from_config passes callbacks for single-backend config."""
+        callbacks = LLMCallbacks(on_response=lambda req, resp: None)
+        factory = Factory(mock_lg)
+        config = {"type": "openai_compatible", "base_url": "http://a:8000/v1"}
+        router = factory.from_config(config, callbacks=callbacks)
+        assert router.clients["default"]._callbacks is callbacks
+        router.close()
+
 
 class TestLLMClientSyncAPI:
     """Test LLMClient sync API."""
