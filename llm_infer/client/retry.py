@@ -149,6 +149,9 @@ class RetryHelper:
                 time.sleep(delay)
                 retry_count += 1
                 _fire_request(callbacks, request, retry_count)
+            except Exception as e:
+                _fire_error(callbacks, request, e)
+                raise
 
     def _compute_delay(
         self, backoff: Backoff, timeout: float, start_time: float
@@ -222,3 +225,6 @@ class RetryHelper:
                 await asyncio.sleep(delay)
                 retry_count += 1
                 _fire_request(callbacks, request, retry_count)
+            except Exception as e:
+                _fire_error(callbacks, request, e)
+                raise

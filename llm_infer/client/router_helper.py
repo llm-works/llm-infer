@@ -62,9 +62,10 @@ def setup_routing(  # cq: max-lines=35
     tool_choice: str | dict[str, Any] | None,
     think: bool | None,
     adapter: str | None,
+    context: dict[str, Any] | None,
     backend: str | None,
     role: str | None,
-    context: RoutingContext | None,
+    routing_context: RoutingContext | None,
     **kwargs: Any,
 ) -> tuple[ChatRequest, RoutingContext, RoutingDecision]:
     """Build ChatRequest, routing context, and get initial decision.
@@ -82,8 +83,9 @@ def setup_routing(  # cq: max-lines=35
         think=think,
         adapter=adapter,
         extra=kwargs or None,
+        context=context,
     )
-    return prepare_routing(router, request, backend, role, context)
+    return prepare_routing(router, request, backend, role, routing_context)
 
 
 def _normalize_decision(

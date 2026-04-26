@@ -1028,3 +1028,47 @@ class TestLLMClientCallbacks:
         assert result.content == "hello"
         assert len(captured) == 1
         await client.aclose()
+
+    def test_on_request_fires_with_retry_count(self, mock_lg: Logger) -> None:
+        """on_request callback fires with incrementing retry count during retries."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="Success!")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+
+        request_calls: list[tuple[ChatRequest, int]] = []
+        response_calls: list[tuple[ChatRequest, ChatResponse]] = []
+        error_calls: list[tuple[ChatRequest, Exception]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_request=lambda req, retry: request_calls.append((req, retry)),
+                on_response=lambda req, resp: response_calls.append((req, resp)),
+                on_error=lambda req, err: error_calls.append((req, err)),
+            )
+        )
+
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success!"
+        assert call_count == 3
+        assert len(request_calls) == 3
+        assert request_calls[0][1] == 0
+        assert request_calls[1][1] == 1
+        assert request_calls[2][1] == 2
+        assert len(response_calls) == 1
+        assert response_calls[0][1].content == "Success!"
+        assert len(error_calls) == 0
+        client.close()
