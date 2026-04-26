@@ -90,7 +90,7 @@ from .strategy import (
     TransientAction,
     TransientDetector,
 )
-from .types import ChatRequest, ChatResponse
+from .types import ChatRequest, ChatResponse, Provider
 
 __all__ = [
     # Factory (primary entry point)
@@ -120,6 +120,7 @@ __all__ = [
     # Request/Response types
     "ChatRequest",
     "ChatResponse",
+    "Provider",
     # Backend base class
     "Backend",
     "OpenAICompatibleBackend",

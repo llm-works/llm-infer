@@ -24,20 +24,25 @@ from typing import Any
 import httpx
 from appinfra.log import Logger
 
-from ...schemas.openai import (
+from ....schemas.openai import (
     ChatCompletionUsage,
+    CompletionTokensDetails,
     FinishReason,
     FunctionCall,
+    PromptTokensDetails,
     Role,
     ToolCall,
 )
-from ..errors import (
+from ...errors import (
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
 )
-from ..types import AdapterInfo, ChatRequest, ChatResponse
-from .base import AsyncRequestTrackingMixin, Backend, BackendContext
+from ...types import AdapterInfo, ChatRequest, ChatResponse
+from ..base import Backend
+from ..context import BackendContext
+from ..mixins import AsyncRequestTrackingMixin
+from ..provider import ProviderDetector
 
 
 class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
@@ -65,10 +70,16 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._provider = ProviderDetector.detect(base_url, api_key)
         self._last_response: ChatResponse | None = None
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
         self._init_async_tracking()
+
+    @property
+    def provider(self) -> str:
+        """Detected provider for this backend."""
+        return self._provider.value
 
     @property
     def last_response(self) -> ChatResponse | None:
@@ -95,7 +106,9 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             token = state.process_chunk(chunk)
             if token:
                 yield token
-        self._last_response = state.to_response(request.model or self.default_model)
+        self._last_response = state.to_response(
+            request.model or self.default_model, self.provider
+        )
 
     # =========================================================================
     # Async methods
@@ -117,7 +130,9 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             token = state.process_chunk(chunk)
             if token:
                 yield token
-        self._last_response = state.to_response(request.model or self.default_model)
+        self._last_response = state.to_response(
+            request.model or self.default_model, self.provider
+        )
 
     # =========================================================================
     # Model discovery
@@ -409,6 +424,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             usage=_parse_usage(data.get("usage")),
             finish_reason=_parse_finish_reason(choice.get("finish_reason")),
             model=data.get("model", model),
+            provider=self.provider,
+            raw=data,
             thinking=message.get("thinking"),
             tool_calls=tool_calls,
             adapter=_parse_adapter_info(data.get("adapter")),
@@ -486,6 +503,7 @@ class _StreamState:
     finish_reason: FinishReason | None = None
     usage: ChatCompletionUsage | None = None
     adapter: AdapterInfo | None = None
+    raw: dict[str, Any] | None = None
 
     def process_chunk(self, chunk: dict[str, Any]) -> str | None:
         """Process a single SSE chunk, returning token content if present."""
@@ -497,6 +515,7 @@ class _StreamState:
 
         if "usage" in chunk:
             self.usage = _parse_usage(chunk["usage"])
+            self.raw = chunk
 
         # Adapter info (present in final chunk if adapter was requested)
         if "adapter" in chunk:
@@ -551,7 +570,9 @@ class _StreamState:
         if func.get("arguments"):
             buf["function"]["arguments"] += func["arguments"]
 
-    def to_response(self, model: str | None) -> ChatResponse:
+    def to_response(
+        self, model: str | None, provider: str | None = None
+    ) -> ChatResponse:
         """Convert accumulated state to ChatResponse."""
         tool_calls = self._finalize_tool_calls()
         return ChatResponse(
@@ -559,6 +580,8 @@ class _StreamState:
             usage=self.usage,
             finish_reason=self.finish_reason,
             model=model,
+            provider=provider,
+            raw=self.raw,
             thinking="".join(self.thinking) if self.thinking else None,
             tool_calls=tool_calls,
             adapter=self.adapter,
@@ -597,10 +620,25 @@ def _parse_usage(data: dict[str, Any] | None) -> ChatCompletionUsage | None:
     """Parse usage dict to ChatCompletionUsage."""
     if data is None:
         return None
+
+    prompt_details = None
+    if prompt_data := data.get("prompt_tokens_details"):
+        prompt_details = PromptTokensDetails(
+            cached_tokens=prompt_data.get("cached_tokens") or 0,
+        )
+
+    completion_details = None
+    if completion_data := data.get("completion_tokens_details"):
+        completion_details = CompletionTokensDetails(
+            reasoning_tokens=completion_data.get("reasoning_tokens") or 0,
+        )
+
     return ChatCompletionUsage(
         prompt_tokens=data.get("prompt_tokens") or 0,
         completion_tokens=data.get("completion_tokens") or 0,
         total_tokens=data.get("total_tokens") or 0,
+        prompt_tokens_details=prompt_details,
+        completion_tokens_details=completion_details,
     )
 
 

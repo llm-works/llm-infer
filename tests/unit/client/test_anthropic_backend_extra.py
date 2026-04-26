@@ -60,7 +60,7 @@ def mock_anthropic() -> Any:
 def _make_backend(mock_anthropic: Any, mock_lg: Logger) -> Any:
     """Create AnthropicBackend with mocked anthropic SDK."""
     with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-        from llm_infer.client.backends.anthropic import AnthropicBackend
+        from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
         return AnthropicBackend(lg=mock_lg, name="test", api_key="test-key")
 
@@ -366,7 +366,7 @@ def test_chat_stream_async_yields_text(mock_anthropic: Any, mock_lg: Logger) -> 
 
 def test_process_stream_event_text_delta(mock_anthropic: Any, mock_lg: Logger) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     state = _StreamState()
     token = backend._process_stream_event(_delta_event("hi"), state)
@@ -378,7 +378,7 @@ def test_process_stream_event_thinking_delta(
     mock_anthropic: Any, mock_lg: Logger
 ) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     event = MagicMock()
     event.type = "content_block_delta"
@@ -395,7 +395,7 @@ def test_process_stream_event_thinking_delta(
 
 def test_process_stream_event_no_delta(mock_anthropic: Any, mock_lg: Logger) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     event = MagicMock()
     event.type = "content_block_delta"
@@ -409,7 +409,7 @@ def test_process_stream_event_block_stop_tool_use(
     mock_anthropic: Any, mock_lg: Logger
 ) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     event = MagicMock()
     event.type = "content_block_stop"
@@ -430,7 +430,7 @@ def test_process_stream_event_message_delta_usage(
     mock_anthropic: Any, mock_lg: Logger
 ) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     event = MagicMock()
     event.type = "message_delta"
@@ -449,7 +449,7 @@ def test_process_stream_event_message_delta_no_usage(
     mock_anthropic: Any, mock_lg: Logger
 ) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     event = MagicMock()
     event.type = "message_delta"
@@ -479,6 +479,21 @@ def test_create_usage_present(mock_anthropic: Any, mock_lg: Logger) -> None:
     assert result is not None
     assert result.prompt_tokens == 10
     assert result.total_tokens == 15
+
+
+def test_create_usage_message_delta_none_input(
+    mock_anthropic: Any, mock_lg: Logger
+) -> None:
+    """Test _create_usage handles MessageDeltaUsage where input_tokens is None."""
+    backend = _make_backend(mock_anthropic, mock_lg)
+    usage = MagicMock()
+    usage.input_tokens = None
+    usage.output_tokens = 42
+    result = backend._create_usage(usage)
+    assert result is not None
+    assert result.prompt_tokens == 0
+    assert result.completion_tokens == 42
+    assert result.total_tokens == 42
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +531,7 @@ def test_create_tool_call_string_input(mock_anthropic: Any, mock_lg: Logger) -> 
 
 def test_stream_state_to_response_basic(mock_anthropic: Any, mock_lg: Logger) -> None:
     _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     state = _StreamState()
     state.content_parts = ["hello ", "world"]
@@ -533,7 +548,7 @@ def test_stream_state_to_response_structured_output_overrides_finish(
     mock_anthropic: Any, mock_lg: Logger
 ) -> None:
     _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     state = _StreamState(structured_output_tool="__structured_output__")
     state.finish_reason = FinishReason.TOOL_CALLS
@@ -546,7 +561,7 @@ def test_stream_state_to_response_no_thinking(
     mock_anthropic: Any, mock_lg: Logger
 ) -> None:
     _make_backend(mock_anthropic, mock_lg)
-    from llm_infer.client.backends.anthropic import _StreamState
+    from llm_infer.client.backends.providers.anthropic import _StreamState
 
     state = _StreamState()
     state.content_parts = ["text"]

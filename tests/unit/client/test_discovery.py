@@ -39,6 +39,10 @@ class MockBackend(Backend):
     def last_response(self) -> ChatResponse | None:
         return self._last_response
 
+    @property
+    def provider(self) -> str:
+        return "mock"
+
     def list_models(self) -> list[str]:
         self._list_models_called = True
         return self._models

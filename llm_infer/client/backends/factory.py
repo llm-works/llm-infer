@@ -8,7 +8,8 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
 
-from .base import Backend, BackendContext, RetryConfig
+from .base import Backend
+from .context import BackendContext, RetryConfig
 
 
 class BackendFactory:
@@ -79,7 +80,7 @@ class BackendFactory:
         config: DotDict,
     ) -> Backend:
         """Create OpenAI-compatible backend."""
-        from .openai import OpenAICompatibleBackend
+        from .providers.openai import OpenAICompatibleBackend
 
         return OpenAICompatibleBackend(
             lg=self._lg,
@@ -98,7 +99,7 @@ class BackendFactory:
         config: DotDict,
     ) -> Backend:
         """Create Anthropic backend."""
-        from .anthropic import AnthropicBackend
+        from .providers.anthropic import AnthropicBackend
 
         kwargs: dict[str, Any] = {
             "lg": self._lg,

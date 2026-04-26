@@ -25,7 +25,7 @@ class TestAnthropicBackendImport:
         with patch.dict("sys.modules", {"anthropic": None}):
             import importlib
 
-            import llm_infer.client.backends.anthropic as anthropic_backend
+            import llm_infer.client.backends.providers.anthropic as anthropic_backend
 
             importlib.reload(anthropic_backend)
 
@@ -63,7 +63,7 @@ class TestAnthropicBackendMocked:
     def test_convert_messages_filters_system(self, mock_anthropic: Any) -> None:
         """Test system messages are filtered from message list."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -80,7 +80,7 @@ class TestAnthropicBackendMocked:
     def test_convert_messages_handles_tool_response(self, mock_anthropic: Any) -> None:
         """Test tool response messages are converted to tool_result format."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -104,7 +104,7 @@ class TestAnthropicBackendMocked:
     ) -> None:
         """Test consecutive tool results are merged into single user message."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -142,7 +142,7 @@ class TestAnthropicBackendMocked:
     ) -> None:
         """Test tool call arguments are parsed from JSON strings."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -177,7 +177,7 @@ class TestAnthropicBackendMocked:
     def test_prepare_request_basic(self, mock_anthropic: Any) -> None:
         """Test basic request kwargs construction."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -196,12 +196,19 @@ class TestAnthropicBackendMocked:
             assert kwargs["model"] == "claude-3-opus"
             assert kwargs["max_tokens"] == 1000
             assert kwargs["temperature"] == 0.7
-            assert kwargs["system"] == "Be helpful"
+            # System prompt converted to content blocks with cache_control
+            assert kwargs["system"] == [
+                {
+                    "type": "text",
+                    "text": "Be helpful",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
 
     def test_prepare_request_converts_tools(self, mock_anthropic: Any) -> None:
         """Test tools are converted to Anthropic format."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -236,7 +243,7 @@ class TestAnthropicBackendMocked:
     def test_prepare_request_tool_choice_auto(self, mock_anthropic: Any) -> None:
         """Test tool_choice auto is converted."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -257,7 +264,7 @@ class TestAnthropicBackendMocked:
     def test_prepare_request_tool_choice_required(self, mock_anthropic: Any) -> None:
         """Test tool_choice required maps to any."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -278,7 +285,7 @@ class TestAnthropicBackendMocked:
     def test_map_stop_reason(self, mock_anthropic: Any) -> None:
         """Test stop reason mapping."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
             from llm_infer.schemas.openai import FinishReason
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
@@ -309,7 +316,7 @@ class TestAnthropicStructuredOutput:
     def test_convert_response_format_none(self, mock_anthropic: Any) -> None:
         """Test None response_format returns None."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -320,7 +327,7 @@ class TestAnthropicStructuredOutput:
     def test_convert_response_format_text(self, mock_anthropic: Any) -> None:
         """Test text type response_format returns None."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -331,7 +338,7 @@ class TestAnthropicStructuredOutput:
     def test_convert_response_format_json_object(self, mock_anthropic: Any) -> None:
         """Test json_object type creates basic schema tool."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -345,7 +352,7 @@ class TestAnthropicStructuredOutput:
     def test_convert_response_format_json_schema(self, mock_anthropic: Any) -> None:
         """Test json_schema type creates tool with full schema."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -369,7 +376,7 @@ class TestAnthropicStructuredOutput:
     def test_prepare_request_with_response_format(self, mock_anthropic: Any) -> None:
         """Test response_format adds tool and tool_choice to request."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -399,7 +406,7 @@ class TestAnthropicStructuredOutput:
     def test_prepare_request_strips_response_format(self, mock_anthropic: Any) -> None:
         """Test response_format is not passed to API."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -422,7 +429,7 @@ class TestAnthropicStructuredOutput:
     ) -> None:
         """Test response_format tool is merged with user-provided tools."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -457,10 +464,11 @@ class TestAnthropicStructuredOutput:
     def test_parse_response_structured_output(self, mock_anthropic: Any) -> None:
         """Test structured output tool args extracted as content."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
+            backend._name = "test"
 
             mock_block = MagicMock()
             mock_block.type = "tool_use"
@@ -485,11 +493,12 @@ class TestAnthropicStructuredOutput:
     def test_structured_output_finish_reason(self, mock_anthropic: Any) -> None:
         """Test structured output returns STOP not TOOL_CALLS."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
             from llm_infer.schemas.openai import FinishReason
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
+            backend._name = "test"
 
             mock_block = MagicMock()
             mock_block.type = "tool_use"
@@ -515,10 +524,11 @@ class TestAnthropicStructuredOutput:
     ) -> None:
         """Test regular tool calls still work when structured output is enabled."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
+            backend._name = "test"
 
             mock_block = MagicMock()
             mock_block.type = "tool_use"
@@ -544,7 +554,7 @@ class TestAnthropicStructuredOutput:
     ) -> None:
         """Test response_format in extra is extracted and handled."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend.__new__(AnthropicBackend)
             backend._anthropic = mock_anthropic
@@ -610,7 +620,7 @@ class TestAnthropicBackendConcurrentClose:
         import asyncio
 
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend(mock_lg, "test", default_model="claude-3")
 
@@ -660,7 +670,7 @@ class TestAnthropicBackendConcurrentClose:
     ) -> None:
         """Test new requests fail immediately after close is requested."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
             from llm_infer.client.errors import BackendUnavailableError
 
             backend = AnthropicBackend(mock_lg, "test", default_model="claude-3")
@@ -685,7 +695,7 @@ class TestAnthropicBackendConcurrentClose:
         import asyncio
 
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
-            from llm_infer.client.backends.anthropic import AnthropicBackend
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend(mock_lg, "test", default_model="claude-3")
 

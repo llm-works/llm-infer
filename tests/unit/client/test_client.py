@@ -48,6 +48,10 @@ class MockBackend(Backend):
     def last_response(self) -> ChatResponse | None:
         return self._last_response
 
+    @property
+    def provider(self) -> str:
+        return "mock"
+
     def chat(self, request: ChatRequest) -> ChatResponse:
         if self._ctx.rate_limiter is not None:
             self._ctx.rate_limiter.next()

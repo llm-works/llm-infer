@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Prompt caching support**: Anthropic backend now adds `cache_control: {"type": "ephemeral"}`
+  to system prompts and tool definitions automatically, enabling prompt caching for agentic loops
+- **Cache token tracking**: `ChatCompletionUsage.prompt_tokens_details.cached_tokens` now populated
+  from OpenAI/xAI responses and Anthropic `cache_read_input_tokens`
+- **Provider detection**: `Provider` enum and `ProviderDetector` class for accurate provider
+  identification based on URL patterns (not user-assigned backend names)
+- **Raw response access**: `ChatResponse.raw` field exposes the full provider API response for
+  accessing provider-specific fields like `cost_in_usd_ticks`
+- **Provider field**: `ChatResponse.provider` identifies the backend provider (anthropic, openai,
+  xai, google, azure, local)
+
 ### Changed
 
 - **BREAKING**: `SAIAAdapter.chat()` now returns `llm_saia.core.ChatResponse` instead of
@@ -24,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (previously ignored, always used defaults)
 - `aclose()` now waits for in-flight async requests before closing the httpx client, preventing
   `RuntimeError: Cannot send a request, as the client has been closed` during concurrent calls
+
+### Internal
+
+- Restructure backends: move provider implementations to `backends/providers/` subdirectory
+- Split `base.py` into focused modules: `base.py` (Backend ABC), `context.py` (BackendContext,
+  RetryConfig), `mixins.py` (AsyncRequestTrackingMixin)
 
 ## [0.3.0] - 2026-04-13
 

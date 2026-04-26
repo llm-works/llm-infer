@@ -13,7 +13,7 @@ from llm_infer.client import (
     BackendUnavailableError,
     ChatRequest,
 )
-from llm_infer.client.backends.openai import (
+from llm_infer.client.backends.providers.openai import (
     OpenAICompatibleBackend,
     _parse_finish_reason,
     _parse_usage,

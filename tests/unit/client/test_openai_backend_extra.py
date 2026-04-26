@@ -23,7 +23,7 @@ import httpx
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client.backends.openai import (
+from llm_infer.client.backends.providers.openai import (
     OpenAICompatibleBackend,
     _parse_adapter_info,
     _parse_finish_reason,
