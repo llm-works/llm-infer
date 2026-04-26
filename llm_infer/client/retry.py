@@ -22,27 +22,45 @@ T = TypeVar("T")
 
 
 def _fire_request(
-    callbacks: LLMCallbacks | None, request: ChatRequest | None, retry: int
+    lg: Logger,
+    callbacks: LLMCallbacks | None,
+    request: ChatRequest | None,
+    retry: int,
 ) -> None:
     """Fire on_request callback if configured."""
     if callbacks and callbacks.on_request and request:
-        callbacks.on_request(request, retry)
+        try:
+            callbacks.on_request(request, retry)
+        except Exception as e:
+            lg.warning("on_request callback failed", extra={"exception": e})
 
 
 def _fire_response(
-    callbacks: LLMCallbacks | None, request: ChatRequest | None, response: Any
+    lg: Logger,
+    callbacks: LLMCallbacks | None,
+    request: ChatRequest | None,
+    response: Any,
 ) -> None:
     """Fire on_response callback if configured."""
     if callbacks and callbacks.on_response and request:
-        callbacks.on_response(request, response)  # response is ChatResponse at runtime
+        try:
+            callbacks.on_response(request, response)
+        except Exception as e:
+            lg.warning("on_response callback failed", extra={"exception": e})
 
 
 def _fire_error(
-    callbacks: LLMCallbacks | None, request: ChatRequest | None, error: Exception
+    lg: Logger,
+    callbacks: LLMCallbacks | None,
+    request: ChatRequest | None,
+    error: Exception,
 ) -> None:
     """Fire on_error callback if configured."""
     if callbacks and callbacks.on_error and request:
-        callbacks.on_error(request, error)
+        try:
+            callbacks.on_error(request, error)
+        except Exception as e:
+            lg.warning("on_error callback failed", extra={"exception": e})
 
 
 class RetryHelper:
@@ -99,7 +117,7 @@ class RetryHelper:
     ) -> T:
         """Execute fn with retry on transient errors."""
         retry_count = 0
-        _fire_request(callbacks, request, retry_count)
+        _fire_request(self._lg, callbacks, request, retry_count)
 
         retry = self._ctx.retry
         if retry is None:
@@ -116,10 +134,10 @@ class RetryHelper:
         """Execute without retry, firing callbacks."""
         try:
             result = fn()
-            _fire_response(callbacks, request, result)
+            _fire_response(self._lg, callbacks, request, result)
             return result
         except Exception as e:
-            _fire_error(callbacks, request, e)
+            _fire_error(self._lg, callbacks, request, e)
             raise
 
     def _call_with_retry(
@@ -136,21 +154,21 @@ class RetryHelper:
         while True:
             try:
                 result = fn()
-                _fire_response(callbacks, request, result)
+                _fire_response(self._lg, callbacks, request, result)
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
                 if not self._should_retry(e, start_time, retry.timeout):
-                    _fire_error(callbacks, request, e)
+                    _fire_error(self._lg, callbacks, request, e)
                     raise
                 delay = self._compute_delay(backoff, retry.timeout, start_time)
                 if delay is None:
-                    _fire_error(callbacks, request, e)
+                    _fire_error(self._lg, callbacks, request, e)
                     raise
                 time.sleep(delay)
                 retry_count += 1
-                _fire_request(callbacks, request, retry_count)
+                _fire_request(self._lg, callbacks, request, retry_count)
             except Exception as e:
-                _fire_error(callbacks, request, e)
+                _fire_error(self._lg, callbacks, request, e)
                 raise
 
     def _compute_delay(
@@ -173,7 +191,7 @@ class RetryHelper:
     ) -> T:
         """Execute async fn with retry on transient errors."""
         retry_count = 0
-        _fire_request(callbacks, request, retry_count)
+        _fire_request(self._lg, callbacks, request, retry_count)
 
         retry = self._ctx.retry
         if retry is None:
@@ -192,10 +210,10 @@ class RetryHelper:
         """Execute without retry, firing callbacks (async)."""
         try:
             result = await fn()
-            _fire_response(callbacks, request, result)
+            _fire_response(self._lg, callbacks, request, result)
             return result
         except Exception as e:
-            _fire_error(callbacks, request, e)
+            _fire_error(self._lg, callbacks, request, e)
             raise
 
     async def _call_with_retry_async(
@@ -212,19 +230,19 @@ class RetryHelper:
         while True:
             try:
                 result = await fn()
-                _fire_response(callbacks, request, result)
+                _fire_response(self._lg, callbacks, request, result)
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
                 if not self._should_retry(e, start_time, retry.timeout):
-                    _fire_error(callbacks, request, e)
+                    _fire_error(self._lg, callbacks, request, e)
                     raise
                 delay = self._compute_delay(backoff, retry.timeout, start_time)
                 if delay is None:
-                    _fire_error(callbacks, request, e)
+                    _fire_error(self._lg, callbacks, request, e)
                     raise
                 await asyncio.sleep(delay)
                 retry_count += 1
-                _fire_request(callbacks, request, retry_count)
+                _fire_request(self._lg, callbacks, request, retry_count)
             except Exception as e:
-                _fire_error(callbacks, request, e)
+                _fire_error(self._lg, callbacks, request, e)
                 raise

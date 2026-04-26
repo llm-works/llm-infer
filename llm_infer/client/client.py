@@ -393,16 +393,29 @@ class LLMClient(ChatClient):
         """
         cb = self._callbacks
         if cb and cb.on_request:
-            cb.on_request(request, 0)
+            try:
+                cb.on_request(request, 0)
+            except Exception as e:
+                self._lg.warning("on_request callback failed", extra={"exception": e})
         try:
             yield from self._backend.chat_stream(request)
             if cb and cb.on_response:
                 response = self._backend.last_response
                 if response:
-                    cb.on_response(request, response)
+                    try:
+                        cb.on_response(request, response)
+                    except Exception as e:
+                        self._lg.warning(
+                            "on_response callback failed", extra={"exception": e}
+                        )
         except Exception as e:
             if cb and cb.on_error:
-                cb.on_error(request, e)
+                try:
+                    cb.on_error(request, e)
+                except Exception as cb_err:
+                    self._lg.warning(
+                        "on_error callback failed", extra={"exception": cb_err}
+                    )
             raise
 
     async def _chat_async(self, request: ChatRequest) -> ChatResponse:
@@ -420,17 +433,30 @@ class LLMClient(ChatClient):
         """
         cb = self._callbacks
         if cb and cb.on_request:
-            cb.on_request(request, 0)
+            try:
+                cb.on_request(request, 0)
+            except Exception as e:
+                self._lg.warning("on_request callback failed", extra={"exception": e})
         try:
             async for token in self._backend.chat_stream_async(request):
                 yield token
             if cb and cb.on_response:
                 response = self._backend.last_response
                 if response:
-                    cb.on_response(request, response)
+                    try:
+                        cb.on_response(request, response)
+                    except Exception as e:
+                        self._lg.warning(
+                            "on_response callback failed", extra={"exception": e}
+                        )
         except Exception as e:
             if cb and cb.on_error:
-                cb.on_error(request, e)
+                try:
+                    cb.on_error(request, e)
+                except Exception as cb_err:
+                    self._lg.warning(
+                        "on_error callback failed", extra={"exception": cb_err}
+                    )
             raise
 
     # =========================================================================
