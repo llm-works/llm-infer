@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `[runtime]` — CPU serving (torch, transformers, FastAPI)
   - `[cuda]` — GPU serving (vLLM, includes runtime)
   - `[all]` — everything
+  - **Migration**: If you use `llm-infer serve`, upgrade with `pip install llm-infer[runtime]`
+    (CPU) or `llm-infer[cuda]` (GPU). Client-only users need no changes.
 - **BREAKING**: `SAIAAdapter.chat()` now returns `llm_saia.core.ChatResponse` instead of
   `AgentResponse`, with the resolved `model` name and the raw llm-infer `ChatResponse` attached
   as `raw` so consumers can reach backend-specific fields (thinking, adapter info) without
