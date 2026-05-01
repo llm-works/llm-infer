@@ -100,6 +100,9 @@ class SAIAAdapter(Backend):
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (default 1.0).
             context: User context passed to callbacks (cost tracking, tracing).
+            abort_signal: Optional event that, when set, aborts the request.
+                Raises PauseRequested on abort. Uses streaming internally
+                for fast abort even during time-to-first-token.
 
         Returns:
             SAIA ChatResponse with content, tool calls, token usage, resolved
@@ -136,34 +139,34 @@ class SAIAAdapter(Backend):
         call_kwargs: dict[str, Any],
         abort_signal: asyncio.Event,
     ) -> SAIAChatResponse:
-        """Stream with abort support via task cancellation.
-
-        Races the stream against the abort signal. If abort fires (even during
-        time-to-first-token), the stream task is cancelled immediately.
-        """
+        """Stream with abort support via task cancellation."""
         from llm_saia.core.errors import PauseRequested
 
-        async def consume_stream() -> None:
-            async for _ in self._client.chat_stream_async(**call_kwargs):
-                if abort_signal.is_set():
-                    return
+        from .types import ChatStreamAsync
 
-        stream_task = asyncio.create_task(consume_stream())
+        stream: ChatStreamAsync = self._client.chat_stream_async(**call_kwargs)
+        stream_task = asyncio.create_task(self._consume_stream(stream, abort_signal))
         abort_task = asyncio.create_task(abort_signal.wait())
         done, pending = await asyncio.wait(
             [stream_task, abort_task], return_when=asyncio.FIRST_COMPLETED
         )
         await self._cancel_tasks(pending)
 
+        if stream_task in done and stream_task.exception() is None:
+            if stream.response is not None:
+                return self._convert_response(stream.response)
         if abort_task in done:
             raise PauseRequested()
         if stream_task.exception():
             raise stream_task.exception()  # type: ignore[misc]
+        raise RuntimeError("No response available after streaming")
 
-        response = self._client.last_response
-        if response is None:
-            raise RuntimeError("No response available after streaming")
-        return self._convert_response(response)
+    @staticmethod
+    async def _consume_stream(stream: Any, abort_signal: asyncio.Event) -> None:
+        """Consume stream tokens, returning early if abort fires."""
+        async for _ in stream:
+            if abort_signal.is_set():
+                return
 
     @staticmethod
     async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:

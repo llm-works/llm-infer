@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Streaming abort support**: `SAIAAdapter.chat()` accepts `abort_signal: asyncio.Event` parameter
-  for fast pause during LLM calls. Uses task cancellation to abort immediately when signal fires,
-  even during time-to-first-token. Raises `PauseRequested`.
-- **ChatClient.last_response property**: Added abstract `last_response` property to `ChatClient` ABC,
-  implemented in `LLMClient`, `LLMRouter`, and `BoundChatClient`. Available after any completed
-  chat request or after fully consuming a stream.
+  for fast pause during LLM calls. Uses streaming internally with task cancellation to abort
+  immediately when signal fires, even during time-to-first-token. Raises `PauseRequested`.
+- **Per-request stream response**: `chat_stream()` and `chat_stream_async()` now return
+  `ChatStreamSync`/`ChatStream` wrappers that capture the response per-request. Access
+  `stream.response` after iteration for usage statistics. This eliminates the thread-safety
+  issues of the previous `client.last_response` pattern.
 - **Request/response callbacks**: `LLMClient.with_callbacks()` enables observability hooks for cost
   tracking, logging, and tracing. Callbacks fire on request (with retry count), response, and error.
   Use `context` parameter to pass user data (e.g., `{"op": "planning"}`) through to callbacks.
@@ -51,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameters. Backend implementations must update their signatures accordingly.
 - **BREAKING**: `Backend.__init__()` now requires a `name` parameter for backend identification
   in routing and discovery.
+- **BREAKING**: `chat_stream()` and `chat_stream_async()` now return `ChatStreamSync`/`ChatStream`
+  wrapper objects instead of raw `Iterator[str]`/`AsyncIterator[str]`. The wrappers are still
+  iterable, but provide a `response` property for per-request response access after iteration.
+  Removed `last_response` property from `ChatClient` ABC (was not concurrent-safe).
 
 ### Fixed
 

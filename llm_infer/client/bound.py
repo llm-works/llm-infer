@@ -12,12 +12,11 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
 from enum import Enum, auto
 from typing import Any, Self
 
 from .base import ChatClient
-from .types import ChatResponse
+from .types import ChatResponse, ChatStreamAsync, ChatStreamSyncProto
 
 
 class _Unset(Enum):
@@ -59,11 +58,6 @@ class BoundChatClient(ChatClient):
     def bound_kwargs(self) -> dict[str, Any]:
         """The bound kwargs (read-only copy)."""
         return dict(self._bound_kwargs)
-
-    @property
-    def last_response(self) -> ChatResponse | None:
-        """The most recent ChatResponse (delegates to wrapped client)."""
-        return self._client.last_response
 
     def with_chat_args(self, **kwargs: Any) -> BoundChatClient:
         """Create a new BoundChatClient with additional bound kwargs.
@@ -151,7 +145,7 @@ class BoundChatClient(ChatClient):
         think: bool | None | _Unset = _UNSET,
         adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
-    ) -> Iterator[str]:
+    ) -> ChatStreamSyncProto:
         """Stream chat completion tokens with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
             messages,
@@ -165,7 +159,7 @@ class BoundChatClient(ChatClient):
             adapter,
             **kwargs,
         )
-        yield from self._client.chat_stream(**call_kwargs)
+        return self._client.chat_stream(**call_kwargs)
 
     async def chat_async(
         self,
@@ -195,7 +189,7 @@ class BoundChatClient(ChatClient):
         )
         return await self._client.chat_async(**call_kwargs)
 
-    async def chat_stream_async(
+    def chat_stream_async(
         self,
         messages: list[dict[str, Any]],
         model: str | None | _Unset = _UNSET,
@@ -207,7 +201,7 @@ class BoundChatClient(ChatClient):
         think: bool | None | _Unset = _UNSET,
         adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> ChatStreamAsync:
         """Stream chat completion tokens (async) with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
             messages,
@@ -221,8 +215,7 @@ class BoundChatClient(ChatClient):
             adapter,
             **kwargs,
         )
-        async for token in self._client.chat_stream_async(**call_kwargs):
-            yield token
+        return self._client.chat_stream_async(**call_kwargs)
 
     def close(self) -> None:
         """Close the wrapped client."""

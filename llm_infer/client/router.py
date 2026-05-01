@@ -42,8 +42,14 @@ from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import RESERVED_MODEL_NAMES, ModelDiscovery
 from .errors import BackendError
-from .strategy import RoutingContext, RoutingStrategy
-from .types import ChatResponse
+from .strategy import RoutingContext, RoutingDecision, RoutingStrategy
+from .types import (
+    ChatRequest,
+    ChatResponse,
+    ResponseHolder,
+    RouterChatStream,
+    RouterChatStreamSync,
+)
 
 
 @dataclass(frozen=True)
@@ -100,7 +106,6 @@ class LLMRouter(ChatClient):
         self._default = default
         self._discovery = discovery
         self._strategy = strategy
-        self._last_response: ChatResponse | None = None
 
         if default not in clients:
             raise ValueError(f"Default backend '{default}' not in clients")
@@ -135,11 +140,6 @@ class LLMRouter(ChatClient):
     def strategy(self) -> RoutingStrategy | None:
         """Routing strategy, if configured."""
         return self._strategy
-
-    @property
-    def last_response(self) -> ChatResponse | None:
-        """The most recent ChatResponse from a completed request."""
-        return self._last_response
 
     def with_chat_args(self, **kwargs: Any) -> BoundChatClient:
         """Create a bound ChatClient with kwargs merged into every call.
@@ -326,9 +326,7 @@ class LLMRouter(ChatClient):
         )
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                response = attempt.success(attempt.client._chat(attempt.request))
-                self._last_response = response
-                return response
+                return attempt.success(attempt.client._chat(attempt.request))
             except BackendError as e:
                 attempt.fail(e)
         raise RuntimeError("FallbackLoop exhausted without result")
@@ -349,12 +347,15 @@ class LLMRouter(ChatClient):
         role: str | None = None,
         routing_context: RoutingContext | None = None,
         **kwargs: Any,
-    ) -> Iterator[str]:
+    ) -> RouterChatStreamSync:
         """Stream chat completion tokens (sync).
 
         Fallback only occurs before streaming starts. Once streaming begins,
-        errors are raised immediately. See ChatClient.chat_stream() for common
-        parameters. Router-specific: context, backend, role, routing_context.
+        errors are raised immediately. Returns a RouterChatStreamSync that yields
+        tokens. After iteration, access stream.response for usage statistics.
+
+        See ChatClient.chat_stream() for common parameters.
+        Router-specific: context, backend, role, routing_context.
         """
         request, ctx, decision = rh.setup_routing(
             self,
@@ -373,6 +374,19 @@ class LLMRouter(ChatClient):
             routing_context,
             **kwargs,
         )
+        holder = ResponseHolder()
+        return RouterChatStreamSync(
+            self._stream_with_fallback(request, ctx, decision, holder), holder
+        )
+
+    def _stream_with_fallback(
+        self,
+        request: ChatRequest,
+        ctx: RoutingContext,
+        decision: RoutingDecision,
+        holder: ResponseHolder,
+    ) -> Iterator[str]:
+        """Internal generator that handles fallback and captures response."""
         streamed = False
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
@@ -380,7 +394,7 @@ class LLMRouter(ChatClient):
                     streamed = True
                     yield token
                 if attempt.client.last_response:
-                    self._last_response = attempt.client.last_response
+                    holder.value = attempt.client.last_response
                     attempt.success(attempt.client.last_response)
                 return
             except BackendError as e:
@@ -436,16 +450,14 @@ class LLMRouter(ChatClient):
         )
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                response = attempt.success(
+                return attempt.success(
                     await attempt.client._chat_async(attempt.request)
                 )
-                self._last_response = response
-                return response
             except BackendError as e:
                 attempt.fail(e)
         raise RuntimeError("FallbackLoop exhausted without result")
 
-    async def chat_stream_async(  # cq: max-lines=35
+    def chat_stream_async(  # cq: max-lines=35
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -461,12 +473,15 @@ class LLMRouter(ChatClient):
         role: str | None = None,
         routing_context: RoutingContext | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> RouterChatStream:
         """Stream chat completion tokens (async).
 
         Fallback only occurs before streaming starts. Once streaming begins,
-        errors are raised immediately. See ChatClient.chat_stream_async() for
-        common parameters. Router-specific: context, backend, role, routing_context.
+        errors are raised immediately. Returns a RouterChatStream that yields
+        tokens. After iteration, access stream.response for usage statistics.
+
+        See ChatClient.chat_stream_async() for common parameters.
+        Router-specific: context, backend, role, routing_context.
         """
         request, ctx, decision = rh.setup_routing(
             self,
@@ -485,6 +500,19 @@ class LLMRouter(ChatClient):
             routing_context,
             **kwargs,
         )
+        holder = ResponseHolder()
+        return RouterChatStream(
+            self._stream_async_with_fallback(request, ctx, decision, holder), holder
+        )
+
+    async def _stream_async_with_fallback(
+        self,
+        request: ChatRequest,
+        ctx: RoutingContext,
+        decision: RoutingDecision,
+        holder: ResponseHolder,
+    ) -> AsyncIterator[str]:
+        """Internal async generator that handles fallback and captures response."""
         streamed = False
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
@@ -492,7 +520,7 @@ class LLMRouter(ChatClient):
                     streamed = True
                     yield token
                 if attempt.client.last_response:
-                    self._last_response = attempt.client.last_response
+                    holder.value = attempt.client.last_response
                     attempt.success(attempt.client.last_response)
                 return
             except BackendError as e:

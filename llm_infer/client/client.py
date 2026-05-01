@@ -37,7 +37,13 @@ from .backends import Backend
 from .base import ChatClient
 from .discovery import ModelDiscovery
 from .retry import RetryHelper
-from .types import ChatRequest, ChatResponse, LLMCallbacks
+from .types import (
+    ChatRequest,
+    ChatResponse,
+    ChatStream,
+    ChatStreamSync,
+    LLMCallbacks,
+)
 
 
 class LLMClient(ChatClient):
@@ -226,14 +232,14 @@ class LLMClient(ChatClient):
         adapter: str | None = None,
         context: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Iterator[str]:
+    ) -> ChatStreamSync:
         """Stream chat completion tokens (sync).
 
         Note: Streaming does not support automatic retry. For retry support,
         use chat() instead.
 
-        Yields tokens as they arrive. After iteration, access last_response
-        for usage statistics.
+        Returns a ChatStreamSync that yields tokens. After iteration, access
+        stream.response for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -248,8 +254,8 @@ class LLMClient(ChatClient):
             context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
-        Yields:
-            String tokens as they arrive.
+        Returns:
+            ChatStreamSync that yields tokens and provides response after completion.
         """
         request = ChatRequest(
             messages=messages,
@@ -264,7 +270,7 @@ class LLMClient(ChatClient):
             extra=kwargs or None,
             context=context,
         )
-        yield from self._chat_stream(request)
+        return ChatStreamSync(self._chat_stream(request), self._backend)
 
     # =========================================================================
     # Async API
@@ -320,7 +326,7 @@ class LLMClient(ChatClient):
         )
         return await self._chat_async(request)
 
-    async def chat_stream_async(
+    def chat_stream_async(
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -333,14 +339,14 @@ class LLMClient(ChatClient):
         adapter: str | None = None,
         context: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> ChatStream:
         """Stream chat completion tokens (async).
 
         Note: Streaming does not support automatic retry. For retry support,
         use chat_async() instead.
 
-        Yields tokens as they arrive. After iteration, access last_response
-        for usage statistics.
+        Returns a ChatStream that yields tokens. After iteration, access
+        stream.response for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -355,8 +361,8 @@ class LLMClient(ChatClient):
             context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
-        Yields:
-            String tokens as they arrive.
+        Returns:
+            ChatStream that yields tokens and provides response after completion.
         """
         request = ChatRequest(
             messages=messages,
@@ -371,8 +377,7 @@ class LLMClient(ChatClient):
             extra=kwargs or None,
             context=context,
         )
-        async for token in self._chat_stream_async(request):
-            yield token
+        return ChatStream(self._chat_stream_async(request), self._backend)
 
     # =========================================================================
     # Internal API (for Router - takes ChatRequest directly)
