@@ -100,6 +100,7 @@ class LLMRouter(ChatClient):
         self._default = default
         self._discovery = discovery
         self._strategy = strategy
+        self._last_response: ChatResponse | None = None
 
         if default not in clients:
             raise ValueError(f"Default backend '{default}' not in clients")
@@ -134,6 +135,11 @@ class LLMRouter(ChatClient):
     def strategy(self) -> RoutingStrategy | None:
         """Routing strategy, if configured."""
         return self._strategy
+
+    @property
+    def last_response(self) -> ChatResponse | None:
+        """The most recent ChatResponse from a completed request."""
+        return self._last_response
 
     def with_chat_args(self, **kwargs: Any) -> BoundChatClient:
         """Create a bound ChatClient with kwargs merged into every call.
@@ -320,7 +326,9 @@ class LLMRouter(ChatClient):
         )
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                return attempt.success(attempt.client._chat(attempt.request))
+                response = attempt.success(attempt.client._chat(attempt.request))
+                self._last_response = response
+                return response
             except BackendError as e:
                 attempt.fail(e)
         raise RuntimeError("FallbackLoop exhausted without result")
@@ -372,6 +380,7 @@ class LLMRouter(ChatClient):
                     streamed = True
                     yield token
                 if attempt.client.last_response:
+                    self._last_response = attempt.client.last_response
                     attempt.success(attempt.client.last_response)
                 return
             except BackendError as e:
@@ -427,9 +436,11 @@ class LLMRouter(ChatClient):
         )
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                return attempt.success(
+                response = attempt.success(
                     await attempt.client._chat_async(attempt.request)
                 )
+                self._last_response = response
+                return response
             except BackendError as e:
                 attempt.fail(e)
         raise RuntimeError("FallbackLoop exhausted without result")
@@ -481,6 +492,7 @@ class LLMRouter(ChatClient):
                     streamed = True
                     yield token
                 if attempt.client.last_response:
+                    self._last_response = attempt.client.last_response
                     attempt.success(attempt.client.last_response)
                 return
             except BackendError as e:

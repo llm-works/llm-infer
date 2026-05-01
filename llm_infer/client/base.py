@@ -186,6 +186,21 @@ class ChatClient(ABC):
         ...
 
     # =========================================================================
+    # State
+    # =========================================================================
+
+    @property
+    @abstractmethod
+    def last_response(self) -> ChatResponse | None:
+        """The most recent ChatResponse from a completed request.
+
+        Available after chat(), chat_async(), or after fully consuming
+        chat_stream()/chat_stream_async(). Returns None if no request
+        has completed yet.
+        """
+        ...
+
+    # =========================================================================
     # Resource management
     # =========================================================================
 

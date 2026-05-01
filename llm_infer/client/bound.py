@@ -60,6 +60,11 @@ class BoundChatClient(ChatClient):
         """The bound kwargs (read-only copy)."""
         return dict(self._bound_kwargs)
 
+    @property
+    def last_response(self) -> ChatResponse | None:
+        """The most recent ChatResponse (delegates to wrapped client)."""
+        return self._client.last_response
+
     def with_chat_args(self, **kwargs: Any) -> BoundChatClient:
         """Create a new BoundChatClient with additional bound kwargs.
 
