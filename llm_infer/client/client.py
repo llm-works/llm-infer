@@ -388,6 +388,18 @@ class LLMClient(ChatClient):
     # Internal API (for Router - takes ChatRequest directly)
     # =========================================================================
 
+    def _get_stream_response(
+        self, holder: ResponseHolder | None
+    ) -> ChatResponse | None:
+        """Get response from holder or fall back to backend.last_response."""
+        if holder is not None:
+            return holder.value
+        self._lg.warning(
+            "falling back to backend.last_response (not thread-safe for concurrent streams)",
+            extra={"backend": self._backend.name, "provider": self._backend.provider},
+        )
+        return self._backend.last_response
+
     def _chat(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (sync) with retry."""
         return self._retry.call(
@@ -410,10 +422,8 @@ class LLMClient(ChatClient):
             except Exception as e:
                 self._lg.warning("on_request callback failed", extra={"exception": e})
         try:
-            yield from self._backend.chat_stream(request)
-            response = self._backend.last_response
-            if holder is not None:
-                holder.value = response
+            yield from self._backend.chat_stream(request, holder)
+            response = self._get_stream_response(holder)
             if cb and cb.on_response and response:
                 try:
                     cb.on_response(request, response)
@@ -453,11 +463,9 @@ class LLMClient(ChatClient):
             except Exception as e:
                 self._lg.warning("on_request callback failed", extra={"exception": e})
         try:
-            async for token in self._backend.chat_stream_async(request):
+            async for token in self._backend.chat_stream_async(request, holder):
                 yield token
-            response = self._backend.last_response
-            if holder is not None:
-                holder.value = response
+            response = self._get_stream_response(holder)
             if cb and cb.on_response and response:
                 try:
                     cb.on_response(request, response)

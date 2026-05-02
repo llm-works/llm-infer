@@ -142,6 +142,9 @@ class SAIAAdapter(Backend):
         """Stream with abort support via task cancellation."""
         from llm_saia.core.errors import PauseRequested
 
+        if abort_signal.is_set():
+            raise PauseRequested()
+
         from .types import ChatStream
 
         stream: ChatStream = self._client.chat_stream_async(**call_kwargs)
@@ -176,7 +179,8 @@ class SAIAAdapter(Backend):
             task.cancel()
             try:
                 await task
-            except asyncio.CancelledError:
+            except Exception:
+                # Suppress all exceptions during cleanup to avoid masking PauseRequested
                 pass
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:

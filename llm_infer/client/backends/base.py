@@ -12,7 +12,7 @@ from typing import Any
 
 from appinfra.log import Logger
 
-from ..types import ChatRequest, ChatResponse
+from ..types import ChatRequest, ChatResponse, ResponseHolder
 from .context import BackendContext
 
 
@@ -128,14 +128,17 @@ class Backend(ABC):
         ...
 
     @abstractmethod
-    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+    def chat_stream(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> Iterator[str]:
         """Send a streaming chat completion request (sync).
 
-        Yields tokens as they arrive. After iteration completes, access
-        `last_response` for usage statistics and metadata.
+        Yields tokens as they arrive. If holder is provided, populates it
+        with the response when streaming completes (concurrent-safe).
 
         Args:
             request: Chat request with messages, model, and parameters.
+            holder: Optional ResponseHolder to populate with the response.
 
         Yields:
             String tokens as they arrive.
@@ -169,11 +172,13 @@ class Backend(ABC):
         ...
 
     @abstractmethod
-    def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+    def chat_stream_async(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async).
 
-        Yields tokens as they arrive. After iteration completes, access
-        `last_response` for usage statistics and metadata.
+        Yields tokens as they arrive. If holder is provided, populates it
+        with the response when streaming completes (concurrent-safe).
 
         Note: This method is an async generator. Call it without await:
             async for token in backend.chat_stream_async(request):
@@ -181,6 +186,7 @@ class Backend(ABC):
 
         Args:
             request: Chat request with messages, model, and parameters.
+            holder: Optional ResponseHolder to populate with the response.
 
         Yields:
             String tokens as they arrive.

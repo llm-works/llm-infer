@@ -12,6 +12,7 @@ from llm_infer.client import (
     LLMClient,
     LLMRouter,
     ResolvedTarget,
+    ResponseHolder,
 )
 from llm_infer.client.backends import Backend, BackendContext
 from llm_infer.client.discovery import ModelDiscovery
@@ -61,11 +62,15 @@ class MockBackend(Backend):
         self._last_response = response
         return response
 
-    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+    def chat_stream(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> Iterator[str]:
         self._last_request = request
         response = next(self._responses)
         yield from response.content
         self._last_response = response
+        if holder is not None:
+            holder.value = response
 
     async def chat_async(self, request: ChatRequest) -> ChatResponse:
         self._last_request = request
@@ -73,12 +78,16 @@ class MockBackend(Backend):
         self._last_response = response
         return response
 
-    async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def chat_stream_async(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> AsyncIterator[str]:
         self._last_request = request
         response = next(self._responses)
         for char in response.content:
             yield char
         self._last_response = response
+        if holder is not None:
+            holder.value = response
 
     def close(self) -> None:
         self._closed = True
