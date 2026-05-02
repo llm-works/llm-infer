@@ -155,7 +155,11 @@ class SAIAAdapter(Backend):
         )
         await self._cancel_tasks(pending)
 
-        if stream_task in done and stream_task.exception() is None:
+        if (
+            stream_task in done
+            and not stream_task.cancelled()
+            and stream_task.exception() is None
+        ):
             if stream.response is not None:
                 return self._convert_response(stream.response)
             if abort_signal.is_set():
@@ -179,7 +183,7 @@ class SAIAAdapter(Backend):
             task.cancel()
             try:
                 await task
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 # Suppress all exceptions during cleanup to avoid masking PauseRequested
                 pass
 

@@ -392,12 +392,11 @@ class LLMRouter(ChatClient):
         streamed = False
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                for token in attempt.client._chat_stream(attempt.request):
+                for token in attempt.client._chat_stream(attempt.request, holder):
                     streamed = True
                     yield token
-                if attempt.client.last_response:
-                    holder.value = attempt.client.last_response
-                    attempt.success(attempt.client.last_response)
+                if holder.value:
+                    attempt.success(holder.value)
                 return
             except BackendError as e:
                 if streamed:
@@ -518,12 +517,13 @@ class LLMRouter(ChatClient):
         streamed = False
         for attempt in rh.FallbackLoop(self, request, ctx, decision):
             try:
-                async for token in attempt.client._chat_stream_async(attempt.request):
+                async for token in attempt.client._chat_stream_async(
+                    attempt.request, holder
+                ):
                     streamed = True
                     yield token
-                if attempt.client.last_response:
-                    holder.value = attempt.client.last_response
-                    attempt.success(attempt.client.last_response)
+                if holder.value:
+                    attempt.success(holder.value)
                 return
             except BackendError as e:
                 if streamed:
