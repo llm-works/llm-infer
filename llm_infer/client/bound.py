@@ -12,12 +12,11 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
 from enum import Enum, auto
 from typing import Any, Self
 
 from .base import ChatClient
-from .types import ChatResponse
+from .types import ChatResponse, ChatStream, ChatStreamSync
 
 
 class _Unset(Enum):
@@ -146,7 +145,7 @@ class BoundChatClient(ChatClient):
         think: bool | None | _Unset = _UNSET,
         adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
-    ) -> Iterator[str]:
+    ) -> ChatStreamSync:
         """Stream chat completion tokens with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
             messages,
@@ -160,7 +159,7 @@ class BoundChatClient(ChatClient):
             adapter,
             **kwargs,
         )
-        yield from self._client.chat_stream(**call_kwargs)
+        return self._client.chat_stream(**call_kwargs)
 
     async def chat_async(
         self,
@@ -190,7 +189,7 @@ class BoundChatClient(ChatClient):
         )
         return await self._client.chat_async(**call_kwargs)
 
-    async def chat_stream_async(
+    def chat_stream_async(
         self,
         messages: list[dict[str, Any]],
         model: str | None | _Unset = _UNSET,
@@ -202,7 +201,7 @@ class BoundChatClient(ChatClient):
         think: bool | None | _Unset = _UNSET,
         adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> ChatStream:
         """Stream chat completion tokens (async) with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
             messages,
@@ -216,8 +215,7 @@ class BoundChatClient(ChatClient):
             adapter,
             **kwargs,
         )
-        async for token in self._client.chat_stream_async(**call_kwargs):
-            yield token
+        return self._client.chat_stream_async(**call_kwargs)
 
     def close(self) -> None:
         """Close the wrapped client."""

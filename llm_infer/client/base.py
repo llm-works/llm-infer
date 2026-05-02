@@ -11,10 +11,9 @@ Use ChatClient as a type hint when your code works with either:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Iterator
 from typing import Any, Self
 
-from .types import ChatResponse
+from .types import ChatResponse, ChatStream, ChatStreamSync
 
 
 class ChatClient(ABC):
@@ -95,8 +94,11 @@ class ChatClient(ABC):
         think: bool | None = None,
         adapter: str | None = None,
         **kwargs: Any,
-    ) -> Iterator[str]:
+    ) -> ChatStreamSync:
         """Stream chat completion tokens (sync).
+
+        Returns a stream that yields tokens and captures the response.
+        After iteration, access stream.response for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -110,8 +112,8 @@ class ChatClient(ABC):
             adapter: LoRA adapter name (OpenAI-compatible only).
             **kwargs: Additional backend-specific parameters.
 
-        Yields:
-            String tokens as they arrive.
+        Returns:
+            Stream that yields tokens and provides response after completion.
         """
         ...
 
@@ -165,8 +167,11 @@ class ChatClient(ABC):
         think: bool | None = None,
         adapter: str | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> ChatStream:
         """Stream chat completion tokens (async).
+
+        Returns a stream that yields tokens and captures the response.
+        After iteration, access stream.response for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -180,8 +185,8 @@ class ChatClient(ABC):
             adapter: LoRA adapter name (OpenAI-compatible only).
             **kwargs: Additional backend-specific parameters.
 
-        Yields:
-            String tokens as they arrive.
+        Returns:
+            Stream that yields tokens and provides response after completion.
         """
         ...
 

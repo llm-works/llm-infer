@@ -33,7 +33,7 @@ from ...errors import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
-from ...types import ChatRequest, ChatResponse
+from ...types import ChatRequest, ChatResponse, ResponseHolder
 from ..base import Backend
 from ..context import BackendContext
 from ..mixins import AsyncRequestTrackingMixin
@@ -141,7 +141,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         self._last_response = result
         return result
 
-    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+    def chat_stream(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> Iterator[str]:
         """Send a streaming chat completion request (sync)."""
         request_kwargs = self._prepare_request(request, stream=True)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
@@ -153,9 +155,10 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                     if token:
                         yield token
                 self._finalize_stream_state(state, stream.get_final_message())
-        self._last_response = state.to_response(
-            request.model or self.default_model, self.provider
-        )
+        response = state.to_response(request.model or self.default_model, self.provider)
+        self._last_response = response
+        if holder is not None:
+            holder.value = response
 
     # =========================================================================
     # Async methods
@@ -178,7 +181,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         finally:
             self._release_async_request()
 
-    async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def chat_stream_async(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async)."""
         request_kwargs = self._prepare_request(request, stream=True)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
@@ -193,9 +198,12 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                         if token:
                             yield token
                     self._finalize_stream_state(state, await stream.get_final_message())
-            self._last_response = state.to_response(
+            response = state.to_response(
                 request.model or self.default_model, self.provider
             )
+            self._last_response = response
+            if holder is not None:
+                holder.value = response
         finally:
             self._release_async_request()
 

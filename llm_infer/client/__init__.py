@@ -98,6 +98,7 @@ from .types import (
     LLMRequestCallback,
     LLMResponseCallback,
     Provider,
+    ResponseHolder,
 )
 
 __all__ = [
@@ -129,6 +130,7 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "Provider",
+    "ResponseHolder",
     # Callbacks
     "LLMCallbacks",
     "LLMRequestCallback",

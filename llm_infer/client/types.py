@@ -6,9 +6,9 @@ llm-infer specific extensions like thinking content and tool calls.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from ..schemas.openai import (
     ChatCompletionUsage,
@@ -21,9 +21,58 @@ __all__ = [
     "AdapterInfo",
     "ChatRequest",
     "ChatResponse",
+    "ChatStream",
+    "ChatStreamSync",
     "LLMCallbacks",
     "Provider",
+    "ResponseHolder",
 ]
+
+
+@runtime_checkable
+class ChatStream(Protocol):
+    """Protocol for async chat streams with response access.
+
+    Any async iterable that yields string tokens and provides a `response`
+    property satisfies this protocol. Use in type hints for streaming APIs.
+
+    Example:
+        async def process(stream: ChatStream) -> None:
+            async for token in stream:
+                print(token, end="")
+            print(f"Tokens: {stream.response.usage.total_tokens}")
+    """
+
+    def __aiter__(self) -> ChatStream: ...
+    async def __anext__(self) -> str: ...
+
+    @property
+    def response(self) -> ChatResponse | None:
+        """The ChatResponse after stream completes. None while streaming."""
+        ...
+
+
+@runtime_checkable
+class ChatStreamSync(Protocol):
+    """Protocol for sync chat streams with response access.
+
+    Any iterable that yields string tokens and provides a `response`
+    property satisfies this protocol. Use in type hints for streaming APIs.
+
+    Example:
+        def process(stream: ChatStreamSync) -> None:
+            for token in stream:
+                print(token, end="")
+            print(f"Tokens: {stream.response.usage.total_tokens}")
+    """
+
+    def __iter__(self) -> ChatStreamSync: ...
+    def __next__(self) -> str: ...
+
+    @property
+    def response(self) -> ChatResponse | None:
+        """The ChatResponse after stream completes. None while streaming."""
+        ...
 
 
 @dataclass
@@ -149,3 +198,55 @@ class LLMCallbacks:
     on_request: LLMRequestCallback | None = None
     on_response: LLMResponseCallback | None = None
     on_error: LLMErrorCallback | None = None
+
+
+class _ChatStream:
+    """Internal async streaming wrapper. Implements ChatStream protocol."""
+
+    def __init__(
+        self, inner: AsyncIterator[str], response_holder: ResponseHolder
+    ) -> None:
+        self._inner = inner
+        self._holder = response_holder
+
+    def __aiter__(self) -> _ChatStream:
+        return self
+
+    async def __anext__(self) -> str:
+        return await self._inner.__anext__()
+
+    @property
+    def response(self) -> ChatResponse | None:
+        return self._holder.value
+
+
+class _ChatStreamSync:
+    """Internal sync streaming wrapper. Implements ChatStreamSync protocol."""
+
+    def __init__(self, inner: Iterator[str], response_holder: ResponseHolder) -> None:
+        self._inner = inner
+        self._holder = response_holder
+
+    def __iter__(self) -> _ChatStreamSync:
+        return self
+
+    def __next__(self) -> str:
+        return next(self._inner)
+
+    @property
+    def response(self) -> ChatResponse | None:
+        """The ChatResponse after stream completes. None while streaming."""
+        return self._holder.value
+
+
+class ResponseHolder:
+    """Mutable container for capturing response during iteration.
+
+    Used by router streams where the response comes from different backends
+    depending on fallback behavior.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self) -> None:
+        self.value: ChatResponse | None = None

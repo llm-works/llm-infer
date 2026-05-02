@@ -15,6 +15,7 @@ from llm_infer.client import (
     LLMClient,
     LLMRouter,
     ModelConflictError,
+    ResponseHolder,
 )
 from llm_infer.client.backends import Backend, BackendContext, OpenAICompatibleBackend
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
@@ -60,12 +61,16 @@ class MockBackend(Backend):
         self._last_response = response
         return response
 
-    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+    def chat_stream(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> Iterator[str]:
         if self._ctx.rate_limiter is not None:
             self._ctx.rate_limiter.next()
         response = next(self._responses)
         yield from response.content
         self._last_response = response
+        if holder is not None:
+            holder.value = response
 
     async def chat_async(self, request: ChatRequest) -> ChatResponse:
         if self._ctx.rate_limiter is not None:
@@ -74,13 +79,17 @@ class MockBackend(Backend):
         self._last_response = response
         return response
 
-    async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def chat_stream_async(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> AsyncIterator[str]:
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
         response = next(self._responses)
         for char in response.content:
             yield char
         self._last_response = response
+        if holder is not None:
+            holder.value = response
 
     def close(self) -> None:
         self._closed = True
@@ -1146,7 +1155,9 @@ class TestLLMClientCallbacks:
         from llm_infer.client import BackendRequestError
 
         class FailingStreamBackend(MockBackend):
-            def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
                 raise BackendRequestError("Stream failed", status_code=500)
 
         backend = FailingStreamBackend(mock_lg, "test", responses=[])

@@ -37,7 +37,16 @@ from .backends import Backend
 from .base import ChatClient
 from .discovery import ModelDiscovery
 from .retry import RetryHelper
-from .types import ChatRequest, ChatResponse, LLMCallbacks
+from .types import (
+    ChatRequest,
+    ChatResponse,
+    ChatStream,
+    ChatStreamSync,
+    LLMCallbacks,
+    ResponseHolder,
+    _ChatStream,
+    _ChatStreamSync,
+)
 
 
 class LLMClient(ChatClient):
@@ -226,14 +235,14 @@ class LLMClient(ChatClient):
         adapter: str | None = None,
         context: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Iterator[str]:
+    ) -> ChatStreamSync:
         """Stream chat completion tokens (sync).
 
         Note: Streaming does not support automatic retry. For retry support,
         use chat() instead.
 
-        Yields tokens as they arrive. After iteration, access last_response
-        for usage statistics.
+        Returns a ChatStreamSync that yields tokens. After iteration, access
+        stream.response for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -248,8 +257,8 @@ class LLMClient(ChatClient):
             context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
-        Yields:
-            String tokens as they arrive.
+        Returns:
+            ChatStreamSync that yields tokens and provides response after completion.
         """
         request = ChatRequest(
             messages=messages,
@@ -264,7 +273,8 @@ class LLMClient(ChatClient):
             extra=kwargs or None,
             context=context,
         )
-        yield from self._chat_stream(request)
+        holder = ResponseHolder()
+        return _ChatStreamSync(self._chat_stream(request, holder), holder)
 
     # =========================================================================
     # Async API
@@ -320,7 +330,7 @@ class LLMClient(ChatClient):
         )
         return await self._chat_async(request)
 
-    async def chat_stream_async(
+    def chat_stream_async(
         self,
         messages: list[dict[str, Any]],
         model: str | None = None,
@@ -333,14 +343,14 @@ class LLMClient(ChatClient):
         adapter: str | None = None,
         context: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[str]:
+    ) -> ChatStream:
         """Stream chat completion tokens (async).
 
         Note: Streaming does not support automatic retry. For retry support,
         use chat_async() instead.
 
-        Yields tokens as they arrive. After iteration, access last_response
-        for usage statistics.
+        Returns a ChatStream that yields tokens. After iteration, access
+        stream.response for usage statistics.
 
         Args:
             messages: List of chat messages.
@@ -355,8 +365,8 @@ class LLMClient(ChatClient):
             context: User context passed to callbacks (cost tracking, tracing).
             **kwargs: Additional backend-specific parameters.
 
-        Yields:
-            String tokens as they arrive.
+        Returns:
+            ChatStream that yields tokens and provides response after completion.
         """
         request = ChatRequest(
             messages=messages,
@@ -371,12 +381,24 @@ class LLMClient(ChatClient):
             extra=kwargs or None,
             context=context,
         )
-        async for token in self._chat_stream_async(request):
-            yield token
+        holder = ResponseHolder()
+        return _ChatStream(self._chat_stream_async(request, holder), holder)
 
     # =========================================================================
     # Internal API (for Router - takes ChatRequest directly)
     # =========================================================================
+
+    def _get_stream_response(
+        self, holder: ResponseHolder | None
+    ) -> ChatResponse | None:
+        """Get response from holder or fall back to backend.last_response."""
+        if holder is not None:
+            return holder.value
+        self._lg.warning(
+            "falling back to backend.last_response (not thread-safe for concurrent streams)",
+            extra={"backend": self._backend.name, "provider": self._backend.provider},
+        )
+        return self._backend.last_response
 
     def _chat(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (sync) with retry."""
@@ -386,7 +408,9 @@ class LLMClient(ChatClient):
             callbacks=self._callbacks,
         )
 
-    def _chat_stream(self, request: ChatRequest) -> Iterator[str]:
+    def _chat_stream(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> Iterator[str]:
         """Internal: stream chat request (sync).
 
         Note: Streaming does not support retry. Callbacks fire after stream completes.
@@ -398,16 +422,15 @@ class LLMClient(ChatClient):
             except Exception as e:
                 self._lg.warning("on_request callback failed", extra={"exception": e})
         try:
-            yield from self._backend.chat_stream(request)
-            if cb and cb.on_response:
-                response = self._backend.last_response
-                if response:
-                    try:
-                        cb.on_response(request, response)
-                    except Exception as e:
-                        self._lg.warning(
-                            "on_response callback failed", extra={"exception": e}
-                        )
+            yield from self._backend.chat_stream(request, holder)
+            response = self._get_stream_response(holder)
+            if cb and cb.on_response and response:
+                try:
+                    cb.on_response(request, response)
+                except Exception as e:
+                    self._lg.warning(
+                        "on_response callback failed", extra={"exception": e}
+                    )
         except Exception as e:
             if cb and cb.on_error:
                 try:
@@ -426,7 +449,9 @@ class LLMClient(ChatClient):
             callbacks=self._callbacks,
         )
 
-    async def _chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def _chat_stream_async(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> AsyncIterator[str]:
         """Internal: stream chat request (async).
 
         Note: Streaming does not support retry. Callbacks fire after stream completes.
@@ -438,17 +463,16 @@ class LLMClient(ChatClient):
             except Exception as e:
                 self._lg.warning("on_request callback failed", extra={"exception": e})
         try:
-            async for token in self._backend.chat_stream_async(request):
+            async for token in self._backend.chat_stream_async(request, holder):
                 yield token
-            if cb and cb.on_response:
-                response = self._backend.last_response
-                if response:
-                    try:
-                        cb.on_response(request, response)
-                    except Exception as e:
-                        self._lg.warning(
-                            "on_response callback failed", extra={"exception": e}
-                        )
+            response = self._get_stream_response(holder)
+            if cb and cb.on_response and response:
+                try:
+                    cb.on_response(request, response)
+                except Exception as e:
+                    self._lg.warning(
+                        "on_response callback failed", extra={"exception": e}
+                    )
         except Exception as e:
             if cb and cb.on_error:
                 try:

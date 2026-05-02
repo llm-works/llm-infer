@@ -18,6 +18,7 @@ Requires: pip install llm-infer[saia]
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any, Self
 
@@ -87,6 +88,7 @@ class SAIAAdapter(Backend):
         max_tokens: int | None = None,
         temperature: float | None = None,
         context: dict[str, Any] | None = None,
+        abort_signal: asyncio.Event | None = None,
     ) -> SAIAChatResponse:
         """Send a chat completion request via the wrapped LLMClient.
 
@@ -98,6 +100,9 @@ class SAIAAdapter(Backend):
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (default 1.0).
             context: User context passed to callbacks (cost tracking, tracing).
+            abort_signal: Optional event that, when set, aborts the request.
+                Raises PauseRequested on abort. Uses streaming internally
+                for fast abort even during time-to-first-token.
 
         Returns:
             SAIA ChatResponse with content, tool calls, token usage, resolved
@@ -122,9 +127,65 @@ class SAIAAdapter(Backend):
             call_kwargs["temperature"] = 1.0
         if context is not None:
             call_kwargs["context"] = context
-        response = await self._client.chat_async(**call_kwargs)
 
+        if abort_signal is not None:
+            return await self._chat_with_abort(call_kwargs, abort_signal)
+
+        response = await self._client.chat_async(**call_kwargs)
         return self._convert_response(response)
+
+    async def _chat_with_abort(
+        self,
+        call_kwargs: dict[str, Any],
+        abort_signal: asyncio.Event,
+    ) -> SAIAChatResponse:
+        """Stream with abort support via task cancellation."""
+        from llm_saia.core.errors import PauseRequested
+
+        if abort_signal.is_set():
+            raise PauseRequested()
+
+        from .types import ChatStream
+
+        stream: ChatStream = self._client.chat_stream_async(**call_kwargs)
+        stream_task = asyncio.create_task(self._consume_stream(stream, abort_signal))
+        abort_task = asyncio.create_task(abort_signal.wait())
+        done, pending = await asyncio.wait(
+            [stream_task, abort_task], return_when=asyncio.FIRST_COMPLETED
+        )
+        await self._cancel_tasks(pending)
+
+        if (
+            stream_task in done
+            and not stream_task.cancelled()
+            and stream_task.exception() is None
+        ):
+            if stream.response is not None:
+                return self._convert_response(stream.response)
+            if abort_signal.is_set():
+                raise PauseRequested()
+        if abort_task in done:
+            raise PauseRequested()
+        if stream_task.exception():
+            raise stream_task.exception()  # type: ignore[misc]
+        raise RuntimeError("No response available after streaming")
+
+    @staticmethod
+    async def _consume_stream(stream: Any, abort_signal: asyncio.Event) -> None:
+        """Consume stream tokens, returning early if abort fires."""
+        async for _ in stream:
+            if abort_signal.is_set():
+                return
+
+    @staticmethod
+    async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
+        for task in tasks:
+            task.cancel()
+            try:
+                await task
+            except (Exception, asyncio.CancelledError):
+                # Suppress all exceptions during cleanup to avoid masking PauseRequested
+                pass
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert SAIA messages to llm-infer message dicts."""

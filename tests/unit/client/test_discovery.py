@@ -8,7 +8,7 @@ from appinfra.log import Logger
 
 from llm_infer.client import ModelConflictError, ModelDiscovery
 from llm_infer.client.backends import Backend, BackendContext
-from llm_infer.client.types import ChatRequest, ChatResponse
+from llm_infer.client.types import ChatRequest, ChatResponse, ResponseHolder
 
 pytestmark = pytest.mark.unit
 
@@ -50,13 +50,17 @@ class MockBackend(Backend):
     def chat(self, request: ChatRequest) -> ChatResponse:
         return ChatResponse(content="mock")
 
-    def chat_stream(self, request: ChatRequest) -> Iterator[str]:
+    def chat_stream(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> Iterator[str]:
         yield "mock"
 
     async def chat_async(self, request: ChatRequest) -> ChatResponse:
         return ChatResponse(content="mock")
 
-    async def chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def chat_stream_async(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> AsyncIterator[str]:
         yield "mock"
 
 
