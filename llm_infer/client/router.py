@@ -46,9 +46,11 @@ from .strategy import RoutingContext, RoutingDecision, RoutingStrategy
 from .types import (
     ChatRequest,
     ChatResponse,
+    ChatStream,
+    ChatStreamSync,
     ResponseHolder,
-    RouterChatStream,
-    RouterChatStreamSync,
+    _ChatStream,
+    _ChatStreamSync,
 )
 
 
@@ -347,11 +349,11 @@ class LLMRouter(ChatClient):
         role: str | None = None,
         routing_context: RoutingContext | None = None,
         **kwargs: Any,
-    ) -> RouterChatStreamSync:
+    ) -> ChatStreamSync:
         """Stream chat completion tokens (sync).
 
         Fallback only occurs before streaming starts. Once streaming begins,
-        errors are raised immediately. Returns a RouterChatStreamSync that yields
+        errors are raised immediately. Returns a ChatStreamSync that yields
         tokens. After iteration, access stream.response for usage statistics.
 
         See ChatClient.chat_stream() for common parameters.
@@ -375,7 +377,7 @@ class LLMRouter(ChatClient):
             **kwargs,
         )
         holder = ResponseHolder()
-        return RouterChatStreamSync(
+        return _ChatStreamSync(
             self._stream_with_fallback(request, ctx, decision, holder), holder
         )
 
@@ -473,11 +475,11 @@ class LLMRouter(ChatClient):
         role: str | None = None,
         routing_context: RoutingContext | None = None,
         **kwargs: Any,
-    ) -> RouterChatStream:
+    ) -> ChatStream:
         """Stream chat completion tokens (async).
 
         Fallback only occurs before streaming starts. Once streaming begins,
-        errors are raised immediately. Returns a RouterChatStream that yields
+        errors are raised immediately. Returns a ChatStream that yields
         tokens. After iteration, access stream.response for usage statistics.
 
         See ChatClient.chat_stream_async() for common parameters.
@@ -501,7 +503,7 @@ class LLMRouter(ChatClient):
             **kwargs,
         )
         holder = ResponseHolder()
-        return RouterChatStream(
+        return _ChatStream(
             self._stream_async_with_fallback(request, ctx, decision, holder), holder
         )
 

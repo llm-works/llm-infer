@@ -16,7 +16,7 @@ from enum import Enum, auto
 from typing import Any, Self
 
 from .base import ChatClient
-from .types import ChatResponse, ChatStreamAsync, ChatStreamSyncProto
+from .types import ChatResponse, ChatStream, ChatStreamSync
 
 
 class _Unset(Enum):
@@ -145,7 +145,7 @@ class BoundChatClient(ChatClient):
         think: bool | None | _Unset = _UNSET,
         adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
-    ) -> ChatStreamSyncProto:
+    ) -> ChatStreamSync:
         """Stream chat completion tokens with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
             messages,
@@ -201,7 +201,7 @@ class BoundChatClient(ChatClient):
         think: bool | None | _Unset = _UNSET,
         adapter: str | None | _Unset = _UNSET,
         **kwargs: Any,
-    ) -> ChatStreamAsync:
+    ) -> ChatStream:
         """Stream chat completion tokens (async) with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
             messages,

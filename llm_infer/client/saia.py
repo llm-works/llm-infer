@@ -142,9 +142,9 @@ class SAIAAdapter(Backend):
         """Stream with abort support via task cancellation."""
         from llm_saia.core.errors import PauseRequested
 
-        from .types import ChatStreamAsync
+        from .types import ChatStream
 
-        stream: ChatStreamAsync = self._client.chat_stream_async(**call_kwargs)
+        stream: ChatStream = self._client.chat_stream_async(**call_kwargs)
         stream_task = asyncio.create_task(self._consume_stream(stream, abort_signal))
         abort_task = asyncio.create_task(abort_signal.wait())
         done, pending = await asyncio.wait(
@@ -155,6 +155,8 @@ class SAIAAdapter(Backend):
         if stream_task in done and stream_task.exception() is None:
             if stream.response is not None:
                 return self._convert_response(stream.response)
+            if abort_signal.is_set():
+                raise PauseRequested()
         if abort_task in done:
             raise PauseRequested()
         if stream_task.exception():

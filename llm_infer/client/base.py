@@ -13,7 +13,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Self
 
-from .types import ChatResponse, ChatStreamAsync, ChatStreamSyncProto
+from .types import ChatResponse, ChatStream, ChatStreamSync
 
 
 class ChatClient(ABC):
@@ -94,7 +94,7 @@ class ChatClient(ABC):
         think: bool | None = None,
         adapter: str | None = None,
         **kwargs: Any,
-    ) -> ChatStreamSyncProto:
+    ) -> ChatStreamSync:
         """Stream chat completion tokens (sync).
 
         Returns a stream that yields tokens and captures the response.
@@ -167,7 +167,7 @@ class ChatClient(ABC):
         think: bool | None = None,
         adapter: str | None = None,
         **kwargs: Any,
-    ) -> ChatStreamAsync:
+    ) -> ChatStream:
         """Stream chat completion tokens (async).
 
         Returns a stream that yields tokens and captures the response.

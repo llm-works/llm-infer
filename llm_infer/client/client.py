@@ -43,6 +43,9 @@ from .types import (
     ChatStream,
     ChatStreamSync,
     LLMCallbacks,
+    ResponseHolder,
+    _ChatStream,
+    _ChatStreamSync,
 )
 
 
@@ -270,7 +273,8 @@ class LLMClient(ChatClient):
             extra=kwargs or None,
             context=context,
         )
-        return ChatStreamSync(self._chat_stream(request), self._backend)
+        holder = ResponseHolder()
+        return _ChatStreamSync(self._chat_stream(request, holder), holder)
 
     # =========================================================================
     # Async API
@@ -377,7 +381,8 @@ class LLMClient(ChatClient):
             extra=kwargs or None,
             context=context,
         )
-        return ChatStream(self._chat_stream_async(request), self._backend)
+        holder = ResponseHolder()
+        return _ChatStream(self._chat_stream_async(request, holder), holder)
 
     # =========================================================================
     # Internal API (for Router - takes ChatRequest directly)
@@ -391,7 +396,9 @@ class LLMClient(ChatClient):
             callbacks=self._callbacks,
         )
 
-    def _chat_stream(self, request: ChatRequest) -> Iterator[str]:
+    def _chat_stream(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> Iterator[str]:
         """Internal: stream chat request (sync).
 
         Note: Streaming does not support retry. Callbacks fire after stream completes.
@@ -404,15 +411,16 @@ class LLMClient(ChatClient):
                 self._lg.warning("on_request callback failed", extra={"exception": e})
         try:
             yield from self._backend.chat_stream(request)
-            if cb and cb.on_response:
-                response = self._backend.last_response
-                if response:
-                    try:
-                        cb.on_response(request, response)
-                    except Exception as e:
-                        self._lg.warning(
-                            "on_response callback failed", extra={"exception": e}
-                        )
+            response = self._backend.last_response
+            if holder is not None:
+                holder.value = response
+            if cb and cb.on_response and response:
+                try:
+                    cb.on_response(request, response)
+                except Exception as e:
+                    self._lg.warning(
+                        "on_response callback failed", extra={"exception": e}
+                    )
         except Exception as e:
             if cb and cb.on_error:
                 try:
@@ -431,7 +439,9 @@ class LLMClient(ChatClient):
             callbacks=self._callbacks,
         )
 
-    async def _chat_stream_async(self, request: ChatRequest) -> AsyncIterator[str]:
+    async def _chat_stream_async(
+        self, request: ChatRequest, holder: ResponseHolder | None = None
+    ) -> AsyncIterator[str]:
         """Internal: stream chat request (async).
 
         Note: Streaming does not support retry. Callbacks fire after stream completes.
@@ -445,15 +455,16 @@ class LLMClient(ChatClient):
         try:
             async for token in self._backend.chat_stream_async(request):
                 yield token
-            if cb and cb.on_response:
-                response = self._backend.last_response
-                if response:
-                    try:
-                        cb.on_response(request, response)
-                    except Exception as e:
-                        self._lg.warning(
-                            "on_response callback failed", extra={"exception": e}
-                        )
+            response = self._backend.last_response
+            if holder is not None:
+                holder.value = response
+            if cb and cb.on_response and response:
+                try:
+                    cb.on_response(request, response)
+                except Exception as e:
+                    self._lg.warning(
+                        "on_response callback failed", extra={"exception": e}
+                    )
         except Exception as e:
             if cb and cb.on_error:
                 try:

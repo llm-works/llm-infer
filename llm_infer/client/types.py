@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..schemas.openai import (
     ChatCompletionUsage,
@@ -17,29 +17,33 @@ from ..schemas.openai import (
 )
 from .backends.provider import Provider
 
-if TYPE_CHECKING:
-    from .backends import Backend
-
 __all__ = [
     "AdapterInfo",
     "ChatRequest",
     "ChatResponse",
     "ChatStream",
-    "ChatStreamAsync",
     "ChatStreamSync",
     "LLMCallbacks",
     "Provider",
     "ResponseHolder",
-    "RouterChatStream",
-    "RouterChatStreamSync",
 ]
 
 
 @runtime_checkable
-class ChatStreamAsync(Protocol):
-    """Protocol for async chat streams with response access."""
+class ChatStream(Protocol):
+    """Protocol for async chat streams with response access.
 
-    def __aiter__(self) -> ChatStreamAsync: ...
+    Any async iterable that yields string tokens and provides a `response`
+    property satisfies this protocol. Use in type hints for streaming APIs.
+
+    Example:
+        async def process(stream: ChatStream) -> None:
+            async for token in stream:
+                print(token, end="")
+            print(f"Tokens: {stream.response.usage.total_tokens}")
+    """
+
+    def __aiter__(self) -> ChatStream: ...
     async def __anext__(self) -> str: ...
 
     @property
@@ -49,10 +53,20 @@ class ChatStreamAsync(Protocol):
 
 
 @runtime_checkable
-class ChatStreamSyncProto(Protocol):
-    """Protocol for sync chat streams with response access."""
+class ChatStreamSync(Protocol):
+    """Protocol for sync chat streams with response access.
 
-    def __iter__(self) -> ChatStreamSyncProto: ...
+    Any iterable that yields string tokens and provides a `response`
+    property satisfies this protocol. Use in type hints for streaming APIs.
+
+    Example:
+        def process(stream: ChatStreamSync) -> None:
+            for token in stream:
+                print(token, end="")
+            print(f"Tokens: {stream.response.usage.total_tokens}")
+    """
+
+    def __iter__(self) -> ChatStreamSync: ...
     def __next__(self) -> str: ...
 
     @property
@@ -186,78 +200,43 @@ class LLMCallbacks:
     on_error: LLMErrorCallback | None = None
 
 
-class ChatStream:
-    """Async streaming wrapper with per-request response access.
+class _ChatStream:
+    """Internal async streaming wrapper. Implements ChatStream protocol."""
 
-    Wraps an async token iterator and captures the response when iteration
-    completes. Use `response` property after consuming the stream to get
-    usage statistics and metadata.
-
-    This is concurrent-safe: each stream instance holds its own response,
-    avoiding the race conditions of shared `last_response` state.
-
-    Example:
-        stream = await client.chat_stream_async(messages)
-        async for token in stream:
-            print(token, end="")
-        print(f"Tokens used: {stream.response.usage.total_tokens}")
-    """
-
-    def __init__(self, inner: AsyncIterator[str], backend: Backend) -> None:
+    def __init__(
+        self, inner: AsyncIterator[str], response_holder: ResponseHolder
+    ) -> None:
         self._inner = inner
-        self._backend = backend
-        self._response: ChatResponse | None = None
+        self._holder = response_holder
 
-    def __aiter__(self) -> ChatStream:
+    def __aiter__(self) -> _ChatStream:
         return self
 
     async def __anext__(self) -> str:
-        try:
-            return await self._inner.__anext__()
-        except StopAsyncIteration:
-            # Capture response immediately - no await between here and assignment
-            self._response = self._backend.last_response
-            raise
+        return await self._inner.__anext__()
 
     @property
     def response(self) -> ChatResponse | None:
-        """The ChatResponse after stream completes. None while streaming."""
-        return self._response
+        return self._holder.value
 
 
-class ChatStreamSync:
-    """Sync streaming wrapper with per-request response access.
+class _ChatStreamSync:
+    """Internal sync streaming wrapper. Implements ChatStreamSync protocol."""
 
-    Wraps a sync token iterator and captures the response when iteration
-    completes. Use `response` property after consuming the stream to get
-    usage statistics and metadata.
-
-    Example:
-        stream = client.chat_stream(messages)
-        for token in stream:
-            print(token, end="")
-        print(f"Tokens used: {stream.response.usage.total_tokens}")
-    """
-
-    def __init__(self, inner: Iterator[str], backend: Backend) -> None:
+    def __init__(self, inner: Iterator[str], response_holder: ResponseHolder) -> None:
         self._inner = inner
-        self._backend = backend
-        self._response: ChatResponse | None = None
+        self._holder = response_holder
 
-    def __iter__(self) -> ChatStreamSync:
+    def __iter__(self) -> _ChatStreamSync:
         return self
 
     def __next__(self) -> str:
-        try:
-            return next(self._inner)
-        except StopIteration:
-            self._response = self._backend.last_response
-            raise
+        return next(self._inner)
 
     @property
     def response(self) -> ChatResponse | None:
         """The ChatResponse after stream completes. None while streaming."""
-        return self._response
+        return self._holder.value
 
 
 class ResponseHolder:
@@ -271,51 +250,3 @@ class ResponseHolder:
 
     def __init__(self) -> None:
         self.value: ChatResponse | None = None
-
-
-class RouterChatStream:
-    """Async streaming wrapper for router with response capture.
-
-    Like ChatStream, but uses a ResponseHolder that the router's generator
-    populates directly, enabling proper response capture with fallback logic.
-    """
-
-    def __init__(
-        self, inner: AsyncIterator[str], response_holder: ResponseHolder
-    ) -> None:
-        self._inner = inner
-        self._holder = response_holder
-
-    def __aiter__(self) -> RouterChatStream:
-        return self
-
-    async def __anext__(self) -> str:
-        return await self._inner.__anext__()
-
-    @property
-    def response(self) -> ChatResponse | None:
-        """The ChatResponse after stream completes. None while streaming."""
-        return self._holder.value
-
-
-class RouterChatStreamSync:
-    """Sync streaming wrapper for router with response capture.
-
-    Like ChatStreamSync, but uses a ResponseHolder that the router's generator
-    populates directly, enabling proper response capture with fallback logic.
-    """
-
-    def __init__(self, inner: Iterator[str], response_holder: ResponseHolder) -> None:
-        self._inner = inner
-        self._holder = response_holder
-
-    def __iter__(self) -> RouterChatStreamSync:
-        return self
-
-    def __next__(self) -> str:
-        return next(self._inner)
-
-    @property
-    def response(self) -> ChatResponse | None:
-        """The ChatResponse after stream completes. None while streaming."""
-        return self._holder.value
