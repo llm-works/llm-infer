@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-10
+
 ### Added
 
+- **Pluggable routing strategies**: `LLMRouter` accepts a `RoutingStrategy` for custom backend
+selection logic. Built-in strategies: `RoundRobinStrategy`, `RandomStrategy`,
+`FirstAvailableStrategy`.
+- **Routing kwargs binding**: `SAIAAdapter` and `LLMRouter` support `routing_kwargs` for passing
+  strategy-specific parameters per request.
 - **Streaming abort support**: `SAIAAdapter.chat()` accepts `abort_signal: asyncio.Event` parameter
   for fast pause during LLM calls. Uses streaming internally with task cancellation to abort
   immediately when signal fires, even during time-to-first-token. Raises `PauseRequested`.
@@ -64,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (previously ignored, always used defaults)
 - `aclose()` now waits for in-flight async requests before closing the httpx client, preventing
   `RuntimeError: Cannot send a request, as the client has been closed` during concurrent calls
+- Anthropic backend multi-tool call failures: tool results now sent with correct structure
+- `model` key in backend config now respected by factory methods (previously ignored)
 
 ### Internal
 
@@ -227,7 +236,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/llm-works/llm-infer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/llm-works/llm-infer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-infer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/llm-works/llm-infer/compare/v0.1.0...v0.1.1
