@@ -115,13 +115,13 @@ jobs:
 
       - name: Pull Ollama model
         run: |
-          curl -X POST http://localhost:11434/api/pull -d '{"name": "qwen2.5:0.5b"}'
-          sleep 5
+          # Use ollama CLI (blocking) instead of async curl to ensure model is ready
+          docker exec $(docker ps -q --filter ancestor=ollama/ollama:latest) ollama pull qwen2.5:0.5b
           curl http://localhost:11434/api/tags | jq .
 
       - name: Start llm-infer server
         run: |
-          llm-infer serve --model qwen2.5:0.5b &
+          llm-infer --etc-dir .github/ci/ollama-e2e serve --model qwen2.5:0.5b &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           for i in {1..60}; do
@@ -140,7 +140,7 @@ jobs:
 
       - name: Run smoke test
         run: |
-          RESPONSE=$(llm-infer query "Say hello in exactly 3 words" --max-tokens 20)
+          RESPONSE=$(llm-infer --etc-dir .github/ci/ollama-e2e query "Say hello in exactly 3 words" --max-tokens 20)
           echo "Response: $RESPONSE"
           if [ -z "$RESPONSE" ]; then
             echo "ERROR: Empty response from server"

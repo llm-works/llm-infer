@@ -42,11 +42,10 @@ if TYPE_CHECKING:
 
 def _get_adapter_name(lora_request: Any) -> str:
     """Extract adapter name from a LoRA request object."""
-    return (
-        lora_request.lora_name
-        if hasattr(lora_request, "lora_name")
-        else str(lora_request)
-    )
+    if hasattr(lora_request, "lora_name"):
+        name: str = lora_request.lora_name
+        return name
+    return str(lora_request)
 
 
 def _build_adapter_info(

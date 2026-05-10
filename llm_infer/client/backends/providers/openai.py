@@ -24,42 +24,62 @@ from typing import Any
 import httpx
 from appinfra.log import Logger
 
-from ...schemas.openai import (
+from ....schemas.openai import (
     ChatCompletionUsage,
+    CompletionTokensDetails,
     FinishReason,
     FunctionCall,
+    PromptTokensDetails,
     Role,
     ToolCall,
 )
-from ..errors import (
+from ...errors import (
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
 )
-from ..types import AdapterInfo, ChatResponse
-from .base import Backend
+from ...types import AdapterInfo, ChatRequest, ChatResponse, ResponseHolder
+from ..base import Backend
+from ..context import BackendContext
+from ..mixins import AsyncRequestTrackingMixin
+from ..provider import ProviderDetector
 
 
-class OpenAICompatibleBackend(Backend):
+class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     """Backend for OpenAI-compatible APIs."""
 
     def __init__(
         self,
         lg: Logger,
+        name: str,
+        ctx: BackendContext | None = None,
+        default_model: str | None = None,
         base_url: str = "http://localhost:8000/v1",
-        model: str = "default",
         api_key: str | None = None,
-        timeout: float = 120.0,
     ) -> None:
-        """Initialize the backend."""
-        self._lg = lg
+        """Initialize the backend.
+
+        Args:
+            lg: Logger instance.
+            name: Backend name (for discovery/routing).
+            ctx: Backend context with rate limiter, backoff, and timeouts.
+            default_model: Default model if not specified per-request.
+            base_url: Base URL for the API.
+            api_key: API key for authentication.
+        """
+        super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
-        self._model = model
         self._api_key = api_key
-        self._timeout = timeout
+        self._provider = ProviderDetector.detect(base_url, api_key)
         self._last_response: ChatResponse | None = None
-        self._client = httpx.Client(timeout=timeout)
+        self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
+        self._init_async_tracking()
+
+    @property
+    def provider(self) -> str:
+        """Detected provider for this backend."""
+        return self._provider.value
 
     @property
     def last_response(self) -> ChatResponse | None:
@@ -70,141 +90,55 @@ class OpenAICompatibleBackend(Backend):
     # Sync methods
     # =========================================================================
 
-    def chat(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> ChatResponse:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (sync)."""
-        url, payload = self._prepare_request(
-            messages,
-            model,
-            system,
-            temperature,
-            max_tokens,
-            tools,
-            tool_choice,
-            think,
-            adapter,
-            stream=False,
-            **kwargs,
-        )
+        url, payload = self._prepare_request(request, stream=False)
         data = self._execute_sync(url, payload)
-        response = self._parse_chat_response(data, model or self._model)
+        response = self._parse_chat_response(data, request.model or self.default_model)
         self._last_response = response
         return response
 
     def chat_stream(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
+        self, request: ChatRequest, holder: ResponseHolder | None = None
     ) -> Iterator[str]:
         """Send a streaming chat completion request (sync)."""
-        url, payload = self._prepare_request(
-            messages,
-            model,
-            system,
-            temperature,
-            max_tokens,
-            tools,
-            tool_choice,
-            think,
-            adapter,
-            stream=True,
-            **kwargs,
-        )
+        url, payload = self._prepare_request(request, stream=True)
         state = _StreamState()
         for chunk in self._execute_stream_sync(url, payload):
             token = state.process_chunk(chunk)
             if token:
                 yield token
-        self._last_response = state.to_response(model or self._model)
+        response = state.to_response(request.model or self.default_model, self.provider)
+        self._last_response = response
+        if holder is not None:
+            holder.value = response
 
     # =========================================================================
     # Async methods
     # =========================================================================
 
-    async def chat_async(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> ChatResponse:
+    async def chat_async(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (async)."""
-        url, payload = self._prepare_request(
-            messages,
-            model,
-            system,
-            temperature,
-            max_tokens,
-            tools,
-            tool_choice,
-            think,
-            adapter,
-            stream=False,
-            **kwargs,
-        )
+        url, payload = self._prepare_request(request, stream=False)
         data = await self._execute_async(url, payload)
-        response = self._parse_chat_response(data, model or self._model)
+        response = self._parse_chat_response(data, request.model or self.default_model)
         self._last_response = response
         return response
 
     async def chat_stream_async(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
+        self, request: ChatRequest, holder: ResponseHolder | None = None
     ) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async)."""
-        url, payload = self._prepare_request(
-            messages,
-            model,
-            system,
-            temperature,
-            max_tokens,
-            tools,
-            tool_choice,
-            think,
-            adapter,
-            stream=True,
-            **kwargs,
-        )
+        url, payload = self._prepare_request(request, stream=True)
         state = _StreamState()
         async for chunk in self._execute_stream_async(url, payload):
             token = state.process_chunk(chunk)
             if token:
                 yield token
-        self._last_response = state.to_response(model or self._model)
+        response = state.to_response(request.model or self.default_model, self.provider)
+        self._last_response = response
+        if holder is not None:
+            holder.value = response
 
     # =========================================================================
     # Model discovery
@@ -212,8 +146,8 @@ class OpenAICompatibleBackend(Backend):
 
     def list_models(self) -> list[str]:
         """List available models from this backend via /v1/models endpoint."""
-        if self._rate_limiter is not None:
-            self._rate_limiter.next()
+        if self._ctx.rate_limiter is not None:
+            self._ctx.rate_limiter.next()
         url = f"{self._base_url}/models"
         try:
             resp = self._client.get(url, headers=self._build_headers())
@@ -227,7 +161,7 @@ class OpenAICompatibleBackend(Backend):
             ) from e
         except httpx.TimeoutException as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
             raise BackendRequestError(
@@ -244,8 +178,8 @@ class OpenAICompatibleBackend(Backend):
 
     def _execute_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute sync request with error translation."""
-        if self._rate_limiter is not None:
-            self._rate_limiter.next()
+        if self._ctx.rate_limiter is not None:
+            self._ctx.rate_limiter.next()
         try:
             resp = self._client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
@@ -257,7 +191,7 @@ class OpenAICompatibleBackend(Backend):
             ) from e
         except httpx.TimeoutException as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
             raise BackendRequestError(
@@ -272,8 +206,8 @@ class OpenAICompatibleBackend(Backend):
         self, url: str, payload: dict[str, Any]
     ) -> Iterator[dict[str, Any]]:
         """Execute sync streaming request with error translation."""
-        if self._rate_limiter is not None:
-            self._rate_limiter.next()
+        if self._ctx.rate_limiter is not None:
+            self._ctx.rate_limiter.next()
         try:
             with self._client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
@@ -286,7 +220,7 @@ class OpenAICompatibleBackend(Backend):
             ) from e
         except httpx.TimeoutException as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
             raise BackendRequestError(
@@ -299,10 +233,11 @@ class OpenAICompatibleBackend(Backend):
 
     async def _execute_async(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute async request with error translation."""
-        if self._rate_limiter is not None:
-            await asyncio.to_thread(self._rate_limiter.next)
-        client = self._get_async_client()
+        if self._ctx.rate_limiter is not None:
+            await asyncio.to_thread(self._ctx.rate_limiter.next)
+        self._acquire_async_request()
         try:
+            client = self._get_async_client()
             resp = await client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
@@ -313,7 +248,7 @@ class OpenAICompatibleBackend(Backend):
             ) from e
         except httpx.TimeoutException as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
             raise BackendRequestError(
@@ -323,15 +258,18 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(f"Transport error: {e}") from e
         except json.JSONDecodeError as e:
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        finally:
+            self._release_async_request()
 
     async def _execute_stream_async(
         self, url: str, payload: dict[str, Any]
     ) -> AsyncIterator[dict[str, Any]]:
         """Execute async streaming request with error translation."""
-        if self._rate_limiter is not None:
-            await asyncio.to_thread(self._rate_limiter.next)
-        client = self._get_async_client()
+        if self._ctx.rate_limiter is not None:
+            await asyncio.to_thread(self._ctx.rate_limiter.next)
+        self._acquire_async_request()
         try:
+            client = self._get_async_client()
             async with client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
             ) as resp:
@@ -344,7 +282,7 @@ class OpenAICompatibleBackend(Backend):
             ) from e
         except httpx.TimeoutException as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
             raise BackendRequestError(
@@ -354,6 +292,8 @@ class OpenAICompatibleBackend(Backend):
             raise BackendRequestError(f"Transport error: {e}") from e
         except json.JSONDecodeError as e:
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        finally:
+            self._release_async_request()
 
     # =========================================================================
     # Resource management
@@ -362,7 +302,7 @@ class OpenAICompatibleBackend(Backend):
     def _get_async_client(self) -> httpx.AsyncClient:
         """Get or create the async HTTP client (lazy initialization)."""
         if self._async_client is None:
-            self._async_client = httpx.AsyncClient(timeout=self._timeout)
+            self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
         return self._async_client
 
     def close(self) -> None:
@@ -374,60 +314,28 @@ class OpenAICompatibleBackend(Backend):
         self._client.close()
 
     async def aclose(self) -> None:
-        """Close all HTTP clients (sync and async)."""
+        """Close all HTTP clients (sync and async).
+
+        Waits for any in-flight async requests to complete before closing.
+        New requests will fail immediately once close is requested.
+        """
+        await self._drain_async_requests()
         self._client.close()
         if self._async_client is not None:
             await self._async_client.aclose()
             self._async_client = None
 
     # =========================================================================
-    # Factory
-    # =========================================================================
-
-    @classmethod
-    def from_config(cls, lg: Logger, config: dict[str, Any]) -> OpenAICompatibleBackend:
-        """Create backend from configuration dict."""
-        return cls(
-            lg=lg,
-            base_url=config.get("base_url", "http://localhost:8000/v1"),
-            model=config.get("model", "default"),
-            api_key=config.get("api_key"),
-            timeout=config.get("timeout", 120.0),
-        )
-
-    # =========================================================================
     # Request preparation
     # =========================================================================
 
     def _prepare_request(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None,
-        system: str | None,
-        temperature: float,
-        max_tokens: int | None,
-        tools: list[dict[str, Any]] | None,
-        tool_choice: str | dict[str, Any] | None,
-        think: bool | None,
-        adapter: str | None,
-        stream: bool,
-        **kwargs: Any,
+        self, request: ChatRequest, stream: bool
     ) -> tuple[str, dict[str, Any]]:
         """Prepare URL and payload for request."""
         url = f"{self._base_url}/chat/completions"
-        built_messages = self._build_messages(messages, system)
-        payload = self._build_payload(
-            built_messages,
-            model or self._model,
-            temperature,
-            max_tokens,
-            stream,
-            tools,
-            tool_choice,
-            think,
-            adapter,
-            **kwargs,
-        )
+        built_messages = self._build_messages(request.messages, request.system)
+        payload = self._build_payload(request, built_messages, stream)
         return url, payload
 
     def _build_headers(self) -> dict[str, str]:
@@ -461,67 +369,53 @@ class OpenAICompatibleBackend(Backend):
     )
 
     def _build_payload(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        temperature: float,
-        max_tokens: int | None,
-        stream: bool,
-        tools: list[dict[str, Any]] | None,
-        tool_choice: str | dict[str, Any] | None,
-        think: bool | None,
-        adapter: str | None,
-        **kwargs: Any,
+        self, request: ChatRequest, messages: list[dict[str, Any]], stream: bool
     ) -> dict[str, Any]:
         """Build the request payload."""
         payload: dict[str, Any] = {
-            "model": model,
+            "model": request.model or self.default_model,
             "messages": messages,
-            "temperature": temperature,
+            "temperature": request.temperature,
             "stream": stream,
         }
-        self._add_optional_params(
-            payload, max_tokens, tools, tool_choice, think, adapter
-        )
-        # Extract and merge extra_body contents as top-level keys
-        # This matches OpenAI SDK behavior where extra_body contents are merged into the request
-        extra_body = kwargs.pop("extra_body", None)
-        if extra_body:
-            for key, value in extra_body.items():
+        self._add_optional_params(payload, request)
+        # Add extra params, filtering out reserved keys to prevent override
+        if request.extra:
+            # Extract extra_body contents as top-level keys (OpenAI SDK convention)
+            extra_body = request.extra.get("extra_body")
+            if extra_body:
+                for key, value in extra_body.items():
+                    if value is not None and key not in self._RESERVED_KEYS:
+                        payload[key] = value
+            for key, value in request.extra.items():
+                if key == "extra_body":
+                    continue
                 if value is not None and key not in self._RESERVED_KEYS:
                     payload[key] = value
-        # Add remaining kwargs, filtering out reserved keys to prevent override
-        for key, value in kwargs.items():
-            if value is not None and key not in self._RESERVED_KEYS:
-                payload[key] = value
         return payload
 
     def _add_optional_params(
-        self,
-        payload: dict[str, Any],
-        max_tokens: int | None,
-        tools: list[dict[str, Any]] | None,
-        tool_choice: str | dict[str, Any] | None,
-        think: bool | None,
-        adapter: str | None,
+        self, payload: dict[str, Any], request: ChatRequest
     ) -> None:
         """Add optional parameters to payload."""
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
-        if tools is not None:
-            payload["tools"] = tools
-        if tool_choice is not None:
-            payload["tool_choice"] = tool_choice
-        if think is not None:
-            payload["think"] = think
-        if adapter is not None:
-            payload["adapter"] = adapter
+        if request.max_tokens is not None:
+            payload["max_tokens"] = request.max_tokens
+        if request.tools is not None:
+            payload["tools"] = request.tools
+        if request.tool_choice is not None:
+            payload["tool_choice"] = request.tool_choice
+        if request.think is not None:
+            payload["think"] = request.think
+        if request.adapter is not None:
+            payload["adapter"] = request.adapter
 
     # =========================================================================
     # Response parsing
     # =========================================================================
 
-    def _parse_chat_response(self, data: dict[str, Any], model: str) -> ChatResponse:
+    def _parse_chat_response(
+        self, data: dict[str, Any], model: str | None
+    ) -> ChatResponse:
         """Parse API response data into ChatResponse."""
         choices = data.get("choices", [])
         if not choices:
@@ -536,6 +430,8 @@ class OpenAICompatibleBackend(Backend):
             usage=_parse_usage(data.get("usage")),
             finish_reason=_parse_finish_reason(choice.get("finish_reason")),
             model=data.get("model", model),
+            provider=self.provider,
+            raw=data,
             thinking=message.get("thinking"),
             tool_calls=tool_calls,
             adapter=_parse_adapter_info(data.get("adapter")),
@@ -613,6 +509,7 @@ class _StreamState:
     finish_reason: FinishReason | None = None
     usage: ChatCompletionUsage | None = None
     adapter: AdapterInfo | None = None
+    raw: dict[str, Any] | None = None
 
     def process_chunk(self, chunk: dict[str, Any]) -> str | None:
         """Process a single SSE chunk, returning token content if present."""
@@ -624,6 +521,7 @@ class _StreamState:
 
         if "usage" in chunk:
             self.usage = _parse_usage(chunk["usage"])
+            self.raw = chunk
 
         # Adapter info (present in final chunk if adapter was requested)
         if "adapter" in chunk:
@@ -678,7 +576,9 @@ class _StreamState:
         if func.get("arguments"):
             buf["function"]["arguments"] += func["arguments"]
 
-    def to_response(self, model: str) -> ChatResponse:
+    def to_response(
+        self, model: str | None, provider: str | None = None
+    ) -> ChatResponse:
         """Convert accumulated state to ChatResponse."""
         tool_calls = self._finalize_tool_calls()
         return ChatResponse(
@@ -686,6 +586,8 @@ class _StreamState:
             usage=self.usage,
             finish_reason=self.finish_reason,
             model=model,
+            provider=provider,
+            raw=self.raw,
             thinking="".join(self.thinking) if self.thinking else None,
             tool_calls=tool_calls,
             adapter=self.adapter,
@@ -724,10 +626,25 @@ def _parse_usage(data: dict[str, Any] | None) -> ChatCompletionUsage | None:
     """Parse usage dict to ChatCompletionUsage."""
     if data is None:
         return None
+
+    prompt_details = None
+    if prompt_data := data.get("prompt_tokens_details"):
+        prompt_details = PromptTokensDetails(
+            cached_tokens=prompt_data.get("cached_tokens") or 0,
+        )
+
+    completion_details = None
+    if completion_data := data.get("completion_tokens_details"):
+        completion_details = CompletionTokensDetails(
+            reasoning_tokens=completion_data.get("reasoning_tokens") or 0,
+        )
+
     return ChatCompletionUsage(
         prompt_tokens=data.get("prompt_tokens") or 0,
         completion_tokens=data.get("completion_tokens") or 0,
         total_tokens=data.get("total_tokens") or 0,
+        prompt_tokens_details=prompt_details,
+        completion_tokens_details=completion_details,
     )
 
 

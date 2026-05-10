@@ -61,6 +61,7 @@ llm-infer Extensions:
 
 from .backends import Backend, OpenAICompatibleBackend
 from .base import ChatClient
+from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
 from .errors import (
@@ -73,20 +74,68 @@ from .errors import (
 )
 from .factory import Factory
 from .router import LLMRouter, ResolvedTarget
-from .types import ChatResponse
+from .strategies import (
+    DefaultStrategy,
+    DefaultStrategyFactory,
+    FallbackStrategy,
+    FallbackStrategyFactory,
+)
+from .strategy import (
+    DefaultTransientDetector,
+    RoutingContext,
+    RoutingDecision,
+    RoutingResult,
+    RoutingStrategy,
+    StrategyFactory,
+    TransientAction,
+    TransientDetector,
+)
+from .types import (
+    ChatRequest,
+    ChatResponse,
+    LLMCallbacks,
+    LLMErrorCallback,
+    LLMRequestCallback,
+    LLMResponseCallback,
+    Provider,
+    ResponseHolder,
+)
 
 __all__ = [
     # Factory (primary entry point)
     "Factory",
     # Client types
     "ChatClient",
+    "BoundChatClient",
     "LLMClient",
     # Router (multi-backend)
     "LLMRouter",
     "ResolvedTarget",
+    # Model discovery and resolution
     "ModelDiscovery",
-    # Response types
+    # Routing strategies
+    "RoutingStrategy",
+    "RoutingContext",
+    "RoutingDecision",
+    "RoutingResult",
+    "StrategyFactory",
+    "TransientAction",
+    "TransientDetector",
+    "DefaultTransientDetector",
+    "DefaultStrategy",
+    "DefaultStrategyFactory",
+    "FallbackStrategy",
+    "FallbackStrategyFactory",
+    # Request/Response types
+    "ChatRequest",
     "ChatResponse",
+    "Provider",
+    "ResponseHolder",
+    # Callbacks
+    "LLMCallbacks",
+    "LLMRequestCallback",
+    "LLMResponseCallback",
+    "LLMErrorCallback",
     # Backend base class
     "Backend",
     "OpenAICompatibleBackend",

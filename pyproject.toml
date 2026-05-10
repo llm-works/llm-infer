@@ -11,7 +11,9 @@ authors = [{name = "LLM Works LLC", email = "info@llm-works.ai"}]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "appinfra[fastapi]>=0.5.0,<0.6.0",
+    # Minimal base for LLMClient with OpenAI-compatible backends
+    # Use [client] for all backends, [runtime]/[cuda] for serving
+    "appinfra>=0.6.0",
     "httpx>=0.27.0,<1.0.0",
     # Security: explicitly pin transitive dependencies for CVE fixes
     "aiohttp>=3.13.3,<4.0.0",
@@ -21,21 +23,37 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Anthropic: native Claude API backend
+anthropic = [
+    "anthropic>=0.47.0,<1.0.0",
+]
+# SAIA: llm-saia verb vocabulary adapter
+saia = [
+    "llm-saia>=0.2.0",
+]
+# Client: all client backends (anthropic + saia)
+client = [
+    "llm-infer[anthropic]",
+    "llm-infer[saia]",
+]
+# Runtime: CPU serving (includes FastAPI)
 runtime = [
+    "appinfra[fastapi]>=0.6.0",
     "torch>=2.0.0,<3.0.0",
     "transformers>=4.30.0,<5.0.0",
     "safetensors>=0.4.0,<1.0.0",
 ]
-anthropic = [
-    "anthropic>=0.47.0,<1.0.0",
-]
-saia = [
-    "llm-saia>=0.2.0,<0.3.0",
-]
+# CUDA: GPU serving with vLLM (includes runtime)
 cuda = [
+    "llm-infer[runtime]",
     "vllm>=0.7.0,<1.0.0",
     "flashinfer-python>=0.2.0,<1.0.0",
     "pynvml>=11.0.0,<13.0.0",
+]
+# All: everything
+all = [
+    "llm-infer[client]",
+    "llm-infer[cuda]",
 ]
 dev = [
     "coverage>=7.0.0,<8.0.0",

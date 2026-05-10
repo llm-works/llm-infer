@@ -18,43 +18,66 @@ Requires: pip install llm-infer[saia]
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from llm_saia.core import (
-    AgentResponse,
     Backend,
     Message,
     ToolDef,
+)
+from llm_saia.core import (
+    ChatResponse as SAIAChatResponse,
 )
 from llm_saia.core import (
     ToolCall as SAIAToolCall,
 )
 
 if TYPE_CHECKING:
-    from .client import LLMClient
+    from .base import ChatClient
+    from .types import ChatResponse as InferChatResponse
 
 
 class SAIAAdapter(Backend):
-    """Adapter that wraps LLMClient to implement llm-saia Backend.
+    """Adapter that wraps a ChatClient to implement llm-saia Backend.
 
-    This allows any LLMClient (or subclass like LearnClient) to be used
-    with the llm-saia verb vocabulary.
+    This allows any ChatClient (LLMClient, LLMRouter, BoundChatClient) to be
+    used with the llm-saia verb vocabulary.
 
     The adapter handles conversion between:
     - SAIA Message types <-> llm-infer message dicts
     - SAIA ToolDef <-> llm-infer tool dicts
-    - llm-infer ChatResponse -> SAIA AgentResponse
+    - llm-infer ChatResponse -> SAIA ChatResponse
     - Tool call argument parsing (JSON string -> dict)
     """
 
-    def __init__(self, client: LLMClient) -> None:
-        """Initialize the adapter with an LLMClient.
+    def __init__(self, client: ChatClient) -> None:
+        """Initialize the adapter with a ChatClient.
 
         Args:
-            client: The LLMClient instance to wrap. Can be any subclass.
+            client: The ChatClient to wrap (LLMClient, LLMRouter, etc.).
         """
         self._client = client
+        self._chat_args: dict[str, Any] = {}
+
+    def with_chat_args(self, **kwargs: Any) -> Self:
+        """Bind kwargs to be merged into every chat call.
+
+        Useful for binding routing parameters when using LLMRouter with
+        role-based strategies.
+
+        Args:
+            **kwargs: Arguments to merge into chat calls (e.g., role, backend).
+
+        Returns:
+            Self for fluent chaining.
+
+        Example:
+            adapter = SAIAAdapter(router).with_chat_args(role="exploration")
+        """
+        self._chat_args = {**self._chat_args, **kwargs}
+        return self
 
     async def chat(
         self,
@@ -64,7 +87,9 @@ class SAIAAdapter(Backend):
         response_schema: dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
-    ) -> AgentResponse:
+        context: dict[str, Any] | None = None,
+        abort_signal: asyncio.Event | None = None,
+    ) -> SAIAChatResponse:
         """Send a chat completion request via the wrapped LLMClient.
 
         Args:
@@ -74,24 +99,93 @@ class SAIAAdapter(Backend):
             response_schema: Optional JSON schema for structured output.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (default 1.0).
+            context: User context passed to callbacks (cost tracking, tracing).
+            abort_signal: Optional event that, when set, aborts the request.
+                Raises PauseRequested on abort. Uses streaming internally
+                for fast abort even during time-to-first-token.
 
         Returns:
-            AgentResponse with content, tool calls, and token usage.
+            SAIA ChatResponse with content, tool calls, token usage, resolved
+            model name, and the raw llm-infer response attached as ``raw``.
         """
         api_messages = self._convert_messages(messages)
         api_tools = self._convert_tools(tools) if tools else None
         response_format = self._build_response_format(response_schema)
 
-        response = await self._client.chat_async(
-            messages=api_messages,
-            system=system,
-            tools=api_tools,
-            max_tokens=max_tokens,
-            response_format=response_format,
-            temperature=temperature if temperature is not None else 1.0,
-        )
+        call_kwargs: dict[str, Any] = {**self._chat_args, "messages": api_messages}
+        if system is not None:
+            call_kwargs["system"] = system
+        if api_tools is not None:
+            call_kwargs["tools"] = api_tools
+        if max_tokens is not None:
+            call_kwargs["max_tokens"] = max_tokens
+        if response_format is not None:
+            call_kwargs["response_format"] = response_format
+        if temperature is not None:
+            call_kwargs["temperature"] = temperature
+        elif "temperature" not in call_kwargs:
+            call_kwargs["temperature"] = 1.0
+        if context is not None:
+            call_kwargs["context"] = context
 
+        if abort_signal is not None:
+            return await self._chat_with_abort(call_kwargs, abort_signal)
+
+        response = await self._client.chat_async(**call_kwargs)
         return self._convert_response(response)
+
+    async def _chat_with_abort(
+        self,
+        call_kwargs: dict[str, Any],
+        abort_signal: asyncio.Event,
+    ) -> SAIAChatResponse:
+        """Stream with abort support via task cancellation."""
+        from llm_saia.core.errors import PauseRequested
+
+        if abort_signal.is_set():
+            raise PauseRequested()
+
+        from .types import ChatStream
+
+        stream: ChatStream = self._client.chat_stream_async(**call_kwargs)
+        stream_task = asyncio.create_task(self._consume_stream(stream, abort_signal))
+        abort_task = asyncio.create_task(abort_signal.wait())
+        done, pending = await asyncio.wait(
+            [stream_task, abort_task], return_when=asyncio.FIRST_COMPLETED
+        )
+        await self._cancel_tasks(pending)
+
+        if (
+            stream_task in done
+            and not stream_task.cancelled()
+            and stream_task.exception() is None
+        ):
+            if stream.response is not None:
+                return self._convert_response(stream.response)
+            if abort_signal.is_set():
+                raise PauseRequested()
+        if abort_task in done:
+            raise PauseRequested()
+        if stream_task.exception():
+            raise stream_task.exception()  # type: ignore[misc]
+        raise RuntimeError("No response available after streaming")
+
+    @staticmethod
+    async def _consume_stream(stream: Any, abort_signal: asyncio.Event) -> None:
+        """Consume stream tokens, returning early if abort fires."""
+        async for _ in stream:
+            if abort_signal.is_set():
+                return
+
+    @staticmethod
+    async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
+        for task in tasks:
+            task.cancel()
+            try:
+                await task
+            except (Exception, asyncio.CancelledError):
+                # Suppress all exceptions during cleanup to avoid masking PauseRequested
+                pass
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert SAIA messages to llm-infer message dicts."""
@@ -99,7 +193,9 @@ class SAIAAdapter(Backend):
 
     def _convert_message(self, msg: Message) -> dict[str, Any]:
         """Convert a single SAIA message to llm-infer format."""
-        if msg.role == "tool_result":
+        # OpenAI uses "tool" for tool results, Anthropic convention uses "tool_result".
+        # SAIA's Role.TOOL is "tool", so we accept both for compatibility.
+        if msg.role in ("tool", "tool_result"):
             return {
                 "role": "tool",
                 "tool_call_id": msg.tool_call_id,
@@ -155,8 +251,13 @@ class SAIAAdapter(Backend):
             },
         }
 
-    def _convert_response(self, response: Any) -> AgentResponse:
-        """Convert llm-infer ChatResponse to SAIA AgentResponse."""
+    def _convert_response(self, response: InferChatResponse) -> SAIAChatResponse:
+        """Convert llm-infer ChatResponse to SAIA ChatResponse.
+
+        The full llm-infer response is attached as ``raw`` so consumers that
+        need backend-specific fields (thinking, adapter info, detailed usage)
+        can reach them without another round of adapter churn.
+        """
         tool_calls: list[SAIAToolCall] = []
 
         if response.tool_calls:
@@ -178,12 +279,14 @@ class SAIAAdapter(Backend):
 
         finish_reason = response.finish_reason.value if response.finish_reason else None
 
-        return AgentResponse(
+        return SAIAChatResponse(
             content=response.content or "",
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            model=response.model,
+            raw=response,
         )
 
     def _parse_tool_arguments(self, args_str: str) -> dict[str, Any]:

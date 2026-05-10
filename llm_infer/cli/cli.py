@@ -8,9 +8,10 @@ import os
 # dictConfig closes existing FileHandler streams, breaking file logging
 os.environ.setdefault("VLLM_CONFIGURE_LOGGING", "0")
 
-from appinfra.app import AppBuilder
+# Imports below must follow VLLM_CONFIGURE_LOGGING setup above.
+from appinfra.app import AppBuilder  # noqa: E402
 
-from .tools import CompatTool, MetricsTool, QueryTool, ServeTool
+from .tools import CompatTool, MetricsTool, QueryTool, ServeTool  # noqa: E402
 
 
 def main() -> int:

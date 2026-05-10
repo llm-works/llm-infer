@@ -44,7 +44,7 @@ class _WarmupLoraRequest:
 
 def _get_max_model_len(engine: Any) -> int:
     """Get max_model_len from engine, with fallback default."""
-    max_len = getattr(engine, "max_model_len", None)
+    max_len: int | None = getattr(engine, "max_model_len", None)
     return max_len if max_len is not None else _DEFAULT_MAX_MODEL_LEN
 
 

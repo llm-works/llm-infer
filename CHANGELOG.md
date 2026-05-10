@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-10
+
+### Added
+
+- **Pluggable routing strategies**: `LLMRouter` accepts a `RoutingStrategy` for custom backend
+selection logic. Built-in strategies: `RoundRobinStrategy`, `RandomStrategy`,
+`FirstAvailableStrategy`.
+- **Routing kwargs binding**: `SAIAAdapter` and `LLMRouter` support `routing_kwargs` for passing
+  strategy-specific parameters per request.
+- **Streaming abort support**: `SAIAAdapter.chat()` accepts `abort_signal: asyncio.Event` parameter
+  for fast pause during LLM calls. Uses streaming internally with task cancellation to abort
+  immediately when signal fires, even during time-to-first-token. Raises `PauseRequested`.
+- **Per-request stream response**: `chat_stream()` and `chat_stream_async()` now return
+  objects implementing `ChatStreamSync`/`ChatStream` protocols that capture the response
+  per-request. Access `stream.response` after iteration for usage statistics. This eliminates
+  the thread-safety issues of the previous `client.last_response` pattern.
+- **Request/response callbacks**: `LLMClient.with_callbacks()` enables observability hooks for cost
+  tracking, logging, and tracing. Callbacks fire on request (with retry count), response, and error.
+  Use `context` parameter to pass user data (e.g., `{"op": "planning"}`) through to callbacks.
+- **Factory callbacks injection**: All factory methods (`from_config`, `from_backend_config`,
+  `openai`, `anthropic`) accept `callbacks` parameter for observability at construction time.
+- **Prompt caching support**: Anthropic backend now adds `cache_control: {"type": "ephemeral"}`
+  to system prompts and tool definitions automatically, enabling prompt caching for agentic loops
+- **Cache token tracking**: `ChatCompletionUsage.prompt_tokens_details.cached_tokens` now populated
+  from OpenAI/xAI responses and Anthropic `cache_read_input_tokens`
+- **Provider detection**: `Provider` enum and `ProviderDetector` class for accurate provider
+  identification based on URL patterns (not user-assigned backend names)
+- **Raw response access**: `ChatResponse.raw` field exposes the full provider API response for
+  accessing provider-specific fields like `cost_in_usd_ticks`
+- **Provider field**: `ChatResponse.provider` identifies the backend provider (anthropic, openai,
+  xai, google, azure, local)
+
+### Changed
+
+- **BREAKING**: Restructured package extras for lighter installs. Base `pip install llm-infer` now
+  only includes client dependencies (httpx, appinfra). Use extras for additional features:
+  - `[anthropic]` — Claude API backend
+  - `[saia]` — llm-saia verb vocabulary adapter
+  - `[client]` — all client backends (anthropic + saia)
+  - `[runtime]` — CPU serving (torch, transformers, FastAPI)
+  - `[cuda]` — GPU serving (vLLM, includes runtime)
+  - `[all]` — everything
+  - **Migration**: If you use `llm-infer serve`, upgrade with `pip install "llm-infer[runtime]"`
+    (CPU) or `"llm-infer[cuda]"` (GPU). Client-only users need no changes.
+- **BREAKING**: `SAIAAdapter.chat()` now returns `llm_saia.core.ChatResponse` instead of
+  `AgentResponse`, with the resolved `model` name and the raw llm-infer `ChatResponse` attached
+  as `raw` so consumers can reach backend-specific fields (thinking, adapter info) without
+  further adapter churn.
+- **BREAKING**: `Backend.chat()` and related methods now take `ChatRequest` instead of individual
+  parameters. Backend implementations must update their signatures accordingly.
+- **BREAKING**: `Backend.__init__()` now requires a `name` parameter for backend identification
+  in routing and discovery.
+- **BREAKING**: `chat_stream()` and `chat_stream_async()` now return objects implementing
+  `ChatStreamSync`/`ChatStream` protocols instead of raw `Iterator[str]`/`AsyncIterator[str]`.
+  The streams are still iterable, but provide a `response` property for per-request response
+  access after iteration. Removed `last_response` property from `ChatClient` ABC (was not
+  concurrent-safe).
+
+### Fixed
+
+- `from_backend_config()` now extracts `rate_limit` and `retry` from the backend config
+  (previously ignored, always used defaults)
+- `aclose()` now waits for in-flight async requests before closing the httpx client, preventing
+  `RuntimeError: Cannot send a request, as the client has been closed` during concurrent calls
+- Anthropic backend multi-tool call failures: tool results now sent with correct structure
+- `model` key in backend config now respected by factory methods (previously ignored)
+
+### Internal
+
+- Restructure backends: move provider implementations to `backends/providers/` subdirectory
+- Split `base.py` into focused modules: `base.py` (Backend ABC), `context.py` (BackendContext,
+  RetryConfig), `mixins.py` (AsyncRequestTrackingMixin)
+
 ## [0.3.0] - 2026-04-13
 
 ### Added
@@ -163,7 +236,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/llm-works/llm-infer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/llm-works/llm-infer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-infer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/llm-works/llm-infer/compare/v0.1.0...v0.1.1

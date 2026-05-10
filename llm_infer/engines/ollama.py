@@ -15,7 +15,7 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -776,14 +776,14 @@ class OllamaEngine:
         if fmt_type == "json_object":
             return "json"
         elif fmt_type == "json_schema":
-            schema = response_format.get("json_schema", {}).get("schema", {})
-            if schema:
+            raw_schema = response_format.get("json_schema", {}).get("schema", {})
+            if isinstance(raw_schema, Mapping) and raw_schema:
                 # Workaround for Ollama structured output issues:
                 # JSON Schema allows extra properties by default, so models may output
                 # fields not in the schema. Setting additionalProperties=false enforces
                 # strict compliance. See: https://github.com/ollama/ollama/issues/10001
                 # and https://github.com/ollama/ollama/issues/7978
-                schema = dict(schema)  # Don't mutate original
+                schema: dict[str, Any] = dict(raw_schema)  # Don't mutate original
                 if (
                     schema.get("type") == "object"
                     and "additionalProperties" not in schema

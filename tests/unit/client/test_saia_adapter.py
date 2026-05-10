@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from llm_saia.core import (
-    AgentResponse,
+    ChatResponse as SAIAChatResponse,
+)
+from llm_saia.core import (
     Message,
     ToolDef,
 )
@@ -39,6 +41,36 @@ class TestSAIAAdapterInit:
         """Test adapter initializes with client."""
         adapter = SAIAAdapter(mock_client)
         assert adapter._client is mock_client
+        assert adapter._chat_args == {}
+
+    def test_with_chat_args_sets_args(self, mock_client: MagicMock) -> None:
+        """Test with_chat_args binds kwargs."""
+        adapter = SAIAAdapter(mock_client).with_chat_args(role="exploration")
+        assert adapter._chat_args == {"role": "exploration"}
+
+    def test_with_chat_args_returns_self(self, mock_client: MagicMock) -> None:
+        """Test with_chat_args returns self for chaining."""
+        adapter = SAIAAdapter(mock_client)
+        result = adapter.with_chat_args(role="exploration")
+        assert result is adapter
+
+    def test_with_chat_args_multiple_calls_merge(self, mock_client: MagicMock) -> None:
+        """Test multiple with_chat_args calls accumulate."""
+        adapter = (
+            SAIAAdapter(mock_client)
+            .with_chat_args(role="exploration")
+            .with_chat_args(backend="openai")
+        )
+        assert adapter._chat_args == {"role": "exploration", "backend": "openai"}
+
+    def test_with_chat_args_later_overrides(self, mock_client: MagicMock) -> None:
+        """Test later with_chat_args overrides earlier values."""
+        adapter = (
+            SAIAAdapter(mock_client)
+            .with_chat_args(role="exploration")
+            .with_chat_args(role="synthesis")
+        )
+        assert adapter._chat_args == {"role": "synthesis"}
 
 
 class TestSAIAAdapterMessageConversion:
@@ -77,6 +109,23 @@ class TestSAIAAdapterMessageConversion:
             "role": "tool",
             "tool_call_id": "call_123",
             "content": '{"result": 42}',
+        }
+
+    def test_convert_tool_message(self, mock_client: MagicMock) -> None:
+        """Test tool message conversion (SAIA uses role='tool', not 'tool_result')."""
+        adapter = SAIAAdapter(mock_client)
+        msg = Message(
+            role="tool",
+            content="Search results...",
+            tool_call_id="toolu_01ABC123",
+        )
+
+        result = adapter._convert_message(msg)
+
+        assert result == {
+            "role": "tool",
+            "tool_call_id": "toolu_01ABC123",
+            "content": "Search results...",
         }
 
     def test_convert_assistant_message_with_tool_calls(
@@ -150,7 +199,7 @@ class TestSAIAAdapterResponseConversion:
 
         result = adapter._convert_response(response)
 
-        assert isinstance(result, AgentResponse)
+        assert isinstance(result, SAIAChatResponse)
         assert result.content == "Hello!"
         assert result.tool_calls == []
         assert result.finish_reason == "stop"
@@ -201,6 +250,30 @@ class TestSAIAAdapterResponseConversion:
         result = adapter._convert_response(response)
 
         assert result.finish_reason is None
+
+    def test_convert_response_passes_model_and_raw(
+        self, mock_client: MagicMock
+    ) -> None:
+        """Resolved model name and raw llm-infer response are passed through.
+
+        Motivation: ``model: auto`` in config resolves server-side. Without the
+        passthrough, SAIA consumers can't attribute cost to the actual model,
+        and backend-specific fields (thinking, adapter info) are unreachable.
+        """
+        adapter = SAIAAdapter(mock_client)
+        response = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+            model="claude-haiku-4-5-20251001",
+        )
+
+        result = adapter._convert_response(response)
+
+        assert result.model == "claude-haiku-4-5-20251001"
+        assert result.raw is response
+        # raw is a live reference, not a copy: mutations are visible post-conversion.
+        response.content = "mutated"
+        assert result.raw.content == "mutated"
 
 
 class TestSAIAAdapterToolArgumentParsing:
@@ -284,7 +357,7 @@ class TestSAIAAdapterChat:
             max_tokens=100,
         )
 
-        assert isinstance(result, AgentResponse)
+        assert isinstance(result, SAIAChatResponse)
         assert result.content == "Hello!"
         mock_client.chat_async.assert_called_once()
         call_kwargs = mock_client.chat_async.call_args.kwargs
@@ -377,3 +450,62 @@ class TestSAIAAdapterChat:
 
         call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["temperature"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_chat_with_bound_chat_args(self, mock_client: MagicMock) -> None:
+        """Test bound chat_args are passed to chat_async."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client).with_chat_args(
+            role="exploration", backend="openai"
+        )
+
+        await adapter.chat(messages=[Message(role="user", content="Hi")])
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["role"] == "exploration"
+        assert call_kwargs["backend"] == "openai"
+
+    @pytest.mark.asyncio
+    async def test_chat_explicit_args_override_bound_args(
+        self, mock_client: MagicMock
+    ) -> None:
+        """Test explicit chat args override bound chat_args."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client).with_chat_args(
+            temperature=0.5, max_tokens=100
+        )
+
+        await adapter.chat(
+            messages=[Message(role="user", content="Hi")],
+            temperature=0.9,
+            max_tokens=200,
+        )
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.9
+        assert call_kwargs["max_tokens"] == 200
+
+    @pytest.mark.asyncio
+    async def test_chat_uses_bound_args_when_not_passed(
+        self, mock_client: MagicMock
+    ) -> None:
+        """Test bound chat_args are used when explicit args are omitted."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client).with_chat_args(
+            temperature=0.5, max_tokens=123
+        )
+
+        await adapter.chat(messages=[Message(role="user", content="Hi")])
+
+        call_kwargs = mock_client.chat_async.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["max_tokens"] == 123

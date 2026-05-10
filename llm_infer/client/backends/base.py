@@ -8,14 +8,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from appinfra.log import Logger
 
-from ..types import ChatResponse
-
-if TYPE_CHECKING:
-    from appinfra.rate_limit import RateLimiter
+from ..types import ChatRequest, ChatResponse, ResponseHolder
+from .context import BackendContext
 
 
 class Backend(ABC):
@@ -40,9 +38,62 @@ class Backend(ABC):
             response = await backend.chat_async(messages)
     """
 
-    # Rate limiter injected via set_rate_limiter() by LLMClient.
-    # Class-level default is safe here (None is immutable, always overwritten).
-    _rate_limiter: RateLimiter | None = None
+    def __init__(
+        self,
+        lg: Logger,
+        name: str,
+        ctx: BackendContext | None = None,
+        default_model: str | None = None,
+    ) -> None:
+        """Initialize backend with common configuration.
+
+        Args:
+            lg: Logger instance.
+            name: Backend name (used for discovery/routing).
+            ctx: Backend context with rate limiter and backoff config.
+            default_model: Default model to use if not specified per-request.
+        """
+        self._lg = lg
+        self._name = name
+        self._ctx = ctx or BackendContext()
+        self._default_model = default_model
+
+    @property
+    def name(self) -> str:
+        """Backend name (used for discovery/routing)."""
+        return self._name
+
+    @property
+    def default_model(self) -> str | None:
+        """Default model used when not specified per-request."""
+        return self._default_model
+
+    @property
+    def ctx(self) -> BackendContext:
+        """Backend context with rate limiter and backoff."""
+        return self._ctx
+
+    def can_call(self) -> bool:
+        """Check if a call would be allowed right now (non-blocking).
+
+        Returns False if rate limited. Use in event loops to skip cycles
+        when the rate limit would block.
+
+        Returns:
+            True if a call would be allowed, False otherwise.
+        """
+        if (
+            self._ctx.rate_limiter is not None
+            and not self._ctx.rate_limiter.can_proceed()
+        ):
+            return False
+        return True
+
+    @property
+    @abstractmethod
+    def provider(self) -> str:
+        """Provider identifier for this backend (e.g., 'anthropic', 'openai')."""
+        ...
 
     @property
     @abstractmethod
@@ -55,45 +106,16 @@ class Backend(ABC):
         """
         ...
 
-    def set_rate_limiter(self, rate_limiter: RateLimiter | None) -> None:
-        """Set rate limiter for this backend.
-
-        Called by LLMClient to inject rate limiting. When set, all HTTP
-        requests will be rate limited.
-        """
-        self._rate_limiter = rate_limiter
-
     # =========================================================================
     # Sync methods
     # =========================================================================
 
     @abstractmethod
-    def chat(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> ChatResponse:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (sync).
 
         Args:
-            messages: List of chat messages as dicts with 'role' and 'content'.
-            model: Model to use (overrides default if set).
-            system: System prompt (prepended to messages or passed separately).
-            temperature: Sampling temperature (0.0 to 2.0).
-            max_tokens: Maximum tokens to generate.
-            tools: List of tool definitions for function calling.
-            tool_choice: Control tool use ('auto', 'none', 'required', or specific).
-            think: Enable thinking mode (llm-infer extension).
-            adapter: LoRA adapter name (llm-infer extension, OpenAI only).
-            **kwargs: Additional backend-specific parameters.
+            request: Chat request with messages, model, and parameters.
 
         Returns:
             ChatResponse with content, usage, and optional extensions.
@@ -107,34 +129,16 @@ class Backend(ABC):
 
     @abstractmethod
     def chat_stream(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
+        self, request: ChatRequest, holder: ResponseHolder | None = None
     ) -> Iterator[str]:
         """Send a streaming chat completion request (sync).
 
-        Yields tokens as they arrive. After iteration completes, access
-        `last_response` for usage statistics and metadata.
+        Yields tokens as they arrive. If holder is provided, populates it
+        with the response when streaming completes (concurrent-safe).
 
         Args:
-            messages: List of chat messages.
-            model: Model to use.
-            system: System prompt.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-            tools: List of tool definitions.
-            tool_choice: Control tool use.
-            think: Enable thinking mode (llm-infer extension).
-            adapter: LoRA adapter name (llm-infer extension).
-            **kwargs: Additional backend-specific parameters.
+            request: Chat request with messages, model, and parameters.
+            holder: Optional ResponseHolder to populate with the response.
 
         Yields:
             String tokens as they arrive.
@@ -151,32 +155,11 @@ class Backend(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def chat_async(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
-    ) -> ChatResponse:
+    async def chat_async(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (async).
 
         Args:
-            messages: List of chat messages.
-            model: Model to use.
-            system: System prompt.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-            tools: List of tool definitions.
-            tool_choice: Control tool use.
-            think: Enable thinking mode (llm-infer extension).
-            adapter: LoRA adapter name (llm-infer extension).
-            **kwargs: Additional backend-specific parameters.
+            request: Chat request with messages, model, and parameters.
 
         Returns:
             ChatResponse with content, usage, and optional extensions.
@@ -190,38 +173,20 @@ class Backend(ABC):
 
     @abstractmethod
     def chat_stream_async(
-        self,
-        messages: list[dict[str, Any]],
-        model: str | None = None,
-        system: str | None = None,
-        temperature: float = 1.0,
-        max_tokens: int | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-        think: bool | None = None,
-        adapter: str | None = None,
-        **kwargs: Any,
+        self, request: ChatRequest, holder: ResponseHolder | None = None
     ) -> AsyncIterator[str]:
         """Send a streaming chat completion request (async).
 
-        Yields tokens as they arrive. After iteration completes, access
-        `last_response` for usage statistics and metadata.
+        Yields tokens as they arrive. If holder is provided, populates it
+        with the response when streaming completes (concurrent-safe).
 
         Note: This method is an async generator. Call it without await:
-            async for token in backend.chat_stream_async(messages):
+            async for token in backend.chat_stream_async(request):
                 ...
 
         Args:
-            messages: List of chat messages.
-            model: Model to use.
-            system: System prompt.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens to generate.
-            tools: List of tool definitions.
-            tool_choice: Control tool use.
-            think: Enable thinking mode (llm-infer extension).
-            adapter: LoRA adapter name (llm-infer extension).
-            **kwargs: Additional backend-specific parameters.
+            request: Chat request with messages, model, and parameters.
+            holder: Optional ResponseHolder to populate with the response.
 
         Yields:
             String tokens as they arrive.
@@ -302,21 +267,3 @@ class Backend(ABC):
     ) -> None:
         """Exit async context manager."""
         await self.aclose()
-
-    # =========================================================================
-    # Factory
-    # =========================================================================
-
-    @classmethod
-    @abstractmethod
-    def from_config(cls, lg: Logger, config: dict[str, Any]) -> Backend:
-        """Create a backend from configuration dict.
-
-        Args:
-            lg: Logger instance.
-            config: Configuration dictionary with backend-specific settings.
-
-        Returns:
-            Configured backend instance.
-        """
-        ...

@@ -299,7 +299,7 @@ class TestPublicAPIImports:
 
         for name in api.__all__:
             obj = getattr(api, name)
-            assert isinstance(obj, (type, EnumMeta)), f"{name} is not a class/enum"
+            assert isinstance(obj, type | EnumMeta), f"{name} is not a class/enum"
             if isinstance(obj, type) and not isinstance(obj, EnumMeta):
                 if name in client_types:
                     # Client types: Protocol, dataclass, or regular class
