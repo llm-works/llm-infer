@@ -14,6 +14,7 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 
 from .strategy import (
+    DecisionType,
     DefaultTransientDetector,
     RoutingContext,
     RoutingDecision,
@@ -144,6 +145,7 @@ class FallbackStrategy(DefaultStrategy):
         return RoutingDecision(
             backend=result.decision.backend,
             metadata=DotDict(reason="retry_same", attempt=count + 1),
+            decision_type=DecisionType.RETRY_SAME,
         )
 
     def on_error(  # cq: max-lines=35
@@ -180,6 +182,7 @@ class FallbackStrategy(DefaultStrategy):
         return RoutingDecision(
             backend=backend,
             metadata=DotDict(reason="fallback", previous=result.decision.backend),
+            decision_type=DecisionType.FALLBACK,
         )
 
 

@@ -14,7 +14,7 @@ from appinfra.dot_dict import DotDict
 
 from .client import LLMClient
 from .errors import BackendError
-from .strategy import RoutingContext, RoutingDecision, RoutingResult
+from .strategy import DecisionType, RoutingContext, RoutingDecision, RoutingResult
 from .types import ChatRequest, ChatResponse
 
 if TYPE_CHECKING:
@@ -97,9 +97,18 @@ def _normalize_decision(
 
     Strategy may return backend-only decisions; this resolves the model
     so "auto"/"default" aliases work correctly for any backend.
+
+    For fallback decisions, uses the target backend's default model rather
+    than the original request's model (which may be provider-specific).
     """
     base_request = decision.updated_request or request
-    resolved = router.resolve(model=base_request.model, backend=decision.backend)
+
+    # For fallback, use target backend's default model
+    model_to_resolve = base_request.model
+    if decision.decision_type == DecisionType.FALLBACK:
+        model_to_resolve = None
+
+    resolved = router.resolve(model=model_to_resolve, backend=decision.backend)
     updated = dataclasses.replace(base_request, model=resolved.model)
     return RoutingDecision(
         backend=resolved.backend,
