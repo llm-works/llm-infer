@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`DecisionType` enum**: Explicit decision type for routing decisions (`INITIAL`, `RETRY_SAME`,
+  `FALLBACK`). Custom strategies should set this to control model resolution behavior.
+
 ### Fixed
 
 - **Fallback model resolution**: When falling back to a different provider (e.g., grok → anthropic),

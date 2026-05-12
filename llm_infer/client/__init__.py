@@ -81,6 +81,7 @@ from .strategies import (
     FallbackStrategyFactory,
 )
 from .strategy import (
+    DecisionType,
     DefaultTransientDetector,
     RoutingContext,
     RoutingDecision,
@@ -118,6 +119,7 @@ __all__ = [
     "RoutingContext",
     "RoutingDecision",
     "RoutingResult",
+    "DecisionType",
     "StrategyFactory",
     "TransientAction",
     "TransientDetector",

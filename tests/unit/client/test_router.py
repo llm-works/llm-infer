@@ -515,10 +515,8 @@ class TestFallbackModelResolution:
 
     def test_fallback_uses_target_backend_default_model(self, mock_lg: Logger) -> None:
         """When falling back, should use target backend's default model, not source's."""
-        from appinfra.dot_dict import DotDict
-
         from llm_infer.client.router_helper import _normalize_decision
-        from llm_infer.client.strategy import RoutingDecision
+        from llm_infer.client.strategy import DecisionType, RoutingDecision
 
         client_grok = make_client(mock_lg, "grok", default_model="grok-model")
         client_anthropic = make_client(
@@ -534,7 +532,7 @@ class TestFallbackModelResolution:
         )
         fallback_decision = RoutingDecision(
             backend="anthropic",
-            metadata=DotDict(reason="fallback", previous="grok"),
+            decision_type=DecisionType.FALLBACK,
         )
 
         normalized = _normalize_decision(router, request, fallback_decision)

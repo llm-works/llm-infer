@@ -14,7 +14,7 @@ from appinfra.dot_dict import DotDict
 
 from .client import LLMClient
 from .errors import BackendError
-from .strategy import RoutingContext, RoutingDecision, RoutingResult
+from .strategy import DecisionType, RoutingContext, RoutingDecision, RoutingResult
 from .types import ChatRequest, ChatResponse
 
 if TYPE_CHECKING:
@@ -105,7 +105,7 @@ def _normalize_decision(
 
     # For fallback, use target backend's default model
     model_to_resolve = base_request.model
-    if decision.metadata and decision.metadata.get("reason") == "fallback":
+    if decision.decision_type == DecisionType.FALLBACK:
         model_to_resolve = None
 
     resolved = router.resolve(model=model_to_resolve, backend=decision.backend)
