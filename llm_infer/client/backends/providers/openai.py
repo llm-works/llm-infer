@@ -379,6 +379,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             "stream": stream,
         }
         if stream:
+            # Request usage stats in final chunk. May break non-compliant backends
+            # that reject unknown params, but required for billing/cost tracking.
             payload["stream_options"] = {"include_usage": True}
         self._add_optional_params(payload, request)
         # Add extra params, filtering out reserved keys to prevent override

@@ -120,6 +120,18 @@ class TestOpenAICompatibleBackendHelpers:
         }
         backend.close()
 
+    def test_build_payload_stream_includes_stream_options(
+        self, mock_lg: Logger
+    ) -> None:
+        """Test streaming payload includes stream_options for usage reporting."""
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+        messages = [{"role": "user", "content": "Hi"}]
+        request = ChatRequest(messages=messages, model="test-model", temperature=0.7)
+        payload = backend._build_payload(request, messages, stream=True)
+        assert payload["stream"] is True
+        assert payload["stream_options"] == {"include_usage": True}
+        backend.close()
+
     def test_build_payload_with_llm_infer_extensions(self, mock_lg: Logger) -> None:
         """Test payload includes llm-infer extensions."""
         backend = OpenAICompatibleBackend(mock_lg, "test")
