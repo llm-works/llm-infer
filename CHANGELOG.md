@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Streaming usage reporting**: OpenAI-compatible backends now include `stream_options` with
+  `include_usage: true` when streaming, so `response.usage` is populated. Previously, streaming
+  requests returned `usage=None`, causing silent billing failures in downstream cost tracking.
 - **Fallback model resolution**: When falling back to a different provider (e.g., grok → anthropic),
   the router now uses the target backend's configured `default_model` instead of passing the source
   provider's model name, which would cause 404 errors.
