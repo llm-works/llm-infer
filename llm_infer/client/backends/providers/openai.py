@@ -378,6 +378,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             "temperature": request.temperature,
             "stream": stream,
         }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
         self._add_optional_params(payload, request)
         # Add extra params, filtering out reserved keys to prevent override
         if request.extra:
