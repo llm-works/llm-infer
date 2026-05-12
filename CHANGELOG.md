@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fallback model resolution**: When falling back to a different provider (e.g., grok → anthropic),
+  the router now uses the target backend's configured `default_model` instead of passing the source
+  provider's model name, which would cause 404 errors.
+
 ## [0.4.0] - 2026-05-10
 
 ### Added
