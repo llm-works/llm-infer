@@ -91,7 +91,14 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             base_url: Base URL override (for proxies).
             max_tokens: Default max tokens for responses.
             thinking_budget: Fraction of max_tokens for thinking (0.0-1.0, default 0.8).
+
+        Raises:
+            ValueError: If thinking_budget is not in (0, 1].
         """
+        if not (0 < thinking_budget <= 1):
+            raise ValueError(
+                f"thinking_budget must be in (0, 1], got {thinking_budget}"
+            )
         self._thinking_budget = thinking_budget
         super().__init__(lg, name, ctx, default_model)
         try:
@@ -299,15 +306,16 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         if request.tool_choice:
             self._apply_tool_choice(request_kwargs, request.tool_choice)
 
-        if request.think:
-            self._apply_extended_thinking(request_kwargs, request)
-
         extra = dict(request.extra) if request.extra else {}
         self._apply_response_format(request_kwargs, extra)
 
         for key, value in extra.items():
             if value is not None and key not in ("stream",):
                 request_kwargs[key] = value
+
+        # Apply extended thinking after extra merge so max_tokens from extra is used
+        if request.think:
+            self._apply_extended_thinking(request_kwargs)
 
         return request_kwargs
 
@@ -444,16 +452,21 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                 "name": tool_choice["function"].get("name", ""),
             }
 
-    def _apply_extended_thinking(
-        self, request_kwargs: dict[str, Any], request: ChatRequest
-    ) -> None:
+    def _apply_extended_thinking(self, request_kwargs: dict[str, Any]) -> None:
         """Apply extended thinking configuration.
 
         Maps the llm-infer `think` flag to Anthropic's extended thinking API.
         Budget tokens are thinking_budget fraction of max_tokens.
+
+        Raises:
+            ValueError: If max_tokens is too small for thinking mode.
         """
-        max_tokens = request_kwargs.get("max_tokens", self._max_tokens)
-        budget_tokens = min(int(max_tokens * self._thinking_budget), max_tokens - 1)
+        max_tokens = int(request_kwargs.get("max_tokens", self._max_tokens))
+        if max_tokens <= 1:
+            raise ValueError(f"think=True requires max_tokens >= 2, got {max_tokens}")
+        budget_tokens = max(
+            1, min(int(max_tokens * self._thinking_budget), max_tokens - 1)
+        )
         request_kwargs["thinking"] = {
             "type": "enabled",
             "budget_tokens": budget_tokens,

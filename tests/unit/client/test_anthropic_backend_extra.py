@@ -199,6 +199,54 @@ def test_chat_think_mode_small_max_tokens(mock_anthropic: Any, mock_lg: Logger) 
     assert call_kwargs["thinking"]["budget_tokens"] < 1000
 
 
+def test_thinking_budget_validation(mock_anthropic: Any, mock_lg: Logger) -> None:
+    """Test thinking_budget must be in (0, 1]."""
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        from llm_infer.client.backends.providers.anthropic import AnthropicBackend
+
+        # Valid values
+        AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=0.5)
+        AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=1.0)
+        AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=0.01)
+
+        # Invalid: zero
+        with pytest.raises(ValueError, match="thinking_budget must be in"):
+            AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=0)
+
+        # Invalid: negative
+        with pytest.raises(ValueError, match="thinking_budget must be in"):
+            AnthropicBackend(
+                lg=mock_lg, name="test", api_key="key", thinking_budget=-0.5
+            )
+
+        # Invalid: > 1
+        with pytest.raises(ValueError, match="thinking_budget must be in"):
+            AnthropicBackend(
+                lg=mock_lg, name="test", api_key="key", thinking_budget=1.5
+            )
+
+
+def test_chat_think_mode_uses_extra_max_tokens(
+    mock_anthropic: Any, mock_lg: Logger
+) -> None:
+    """Test thinking budget uses max_tokens from extra if provided."""
+    backend = _make_backend(mock_anthropic, mock_lg)
+    backend._client.messages.create.return_value = _mock_response()
+    # Pass max_tokens via extra - should override the request.max_tokens
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "hi"}],
+        think=True,
+        max_tokens=4096,
+        extra={"max_tokens": 2000},
+    )
+    backend.chat(request)
+
+    call_kwargs = backend._client.messages.create.call_args[1]
+    # Budget should be 80% of extra max_tokens (2000 * 0.8 = 1600), not 4096 * 0.8
+    assert call_kwargs["max_tokens"] == 2000
+    assert call_kwargs["thinking"]["budget_tokens"] == 1600
+
+
 def test_chat_adapter_param_ignored(mock_anthropic: Any, mock_lg: Logger) -> None:
     """Adapter param is silently ignored for Anthropic."""
     backend = _make_backend(mock_anthropic, mock_lg)
