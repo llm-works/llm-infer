@@ -11,8 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`DecisionType` enum**: Explicit decision type for routing decisions (`INITIAL`, `RETRY_SAME`,
   `FALLBACK`). Custom strategies should set this to control model resolution behavior.
+- **`GeminiBackend`**: Specialized backend for Google Gemini via OpenAI-compatible API. Normalizes
+  thinking behavior to match other providers (disabled by default, enabled via `think=True`).
+- **Anthropic extended thinking**: `think=True` now enables extended thinking for Anthropic backend.
+  Budget allocation configurable via `thinking_budget` (default 0.8 = 80% of `max_tokens`).
 
 ### Fixed
+
+- **Gemini structured output truncation**: Gemini 2.5 models have thinking enabled by default, which
+  consumed `max_output_tokens` budget and caused JSON truncation. `GeminiBackend` now sets
+  `reasoning_effort: "none"` by default, giving full token budget to output.
+- **Gemini `think` field rejection**: Gemini API rejects unknown fields. `GeminiBackend` now maps
+  `think=True` to `reasoning_effort: "medium"` and strips the `think` field from payloads.
+
+### Changed
 
 - **Streaming usage reporting**: OpenAI-compatible backends now include `stream_options` with
   `include_usage: true` when streaming, so `response.usage` is populated. Previously, streaming

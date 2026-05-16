@@ -8,7 +8,7 @@ structured output, and from_config. This file fills in:
 - _StreamState
 - _parse_response variants
 - close() / aclose()
-- last_response / think NotImplementedError
+- last_response / extended thinking
 """
 
 from __future__ import annotations
@@ -145,11 +145,106 @@ def test_chat_with_thinking(mock_anthropic: Any, mock_lg: Logger) -> None:
     assert result.thinking == "reasoning"
 
 
-def test_chat_think_mode_raises(mock_anthropic: Any, mock_lg: Logger) -> None:
+def test_chat_think_mode_applies_extended_thinking(
+    mock_anthropic: Any, mock_lg: Logger
+) -> None:
+    """Test think=True applies extended thinking parameters."""
     backend = _make_backend(mock_anthropic, mock_lg)
-    request = ChatRequest(messages=[{"role": "user", "content": "hi"}], think=True)
-    with pytest.raises(NotImplementedError, match="think mode"):
-        backend.chat(request)
+    backend._client.messages.create.return_value = _mock_response()
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "hi"}], think=True, max_tokens=4096
+    )
+    backend.chat(request)
+
+    # Verify thinking parameter was passed
+    call_kwargs = backend._client.messages.create.call_args[1]
+    assert "thinking" in call_kwargs
+    assert call_kwargs["thinking"]["type"] == "enabled"
+    # Budget should be default 80% of max_tokens (4096 * 0.8 = 3276)
+    assert call_kwargs["thinking"]["budget_tokens"] == 3276
+
+
+def test_chat_think_mode_custom_budget(mock_anthropic: Any, mock_lg: Logger) -> None:
+    """Test thinking_budget is configurable."""
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        from llm_infer.client.backends.providers.anthropic import AnthropicBackend
+
+        backend = AnthropicBackend(
+            lg=mock_lg, name="test", api_key="test-key", thinking_budget=0.5
+        )
+    backend._client.messages.create.return_value = _mock_response()
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "hi"}], think=True, max_tokens=4096
+    )
+    backend.chat(request)
+
+    call_kwargs = backend._client.messages.create.call_args[1]
+    # Budget should be 50% of max_tokens (4096 * 0.5 = 2048)
+    assert call_kwargs["thinking"]["budget_tokens"] == 2048
+
+
+def test_chat_think_mode_small_max_tokens(mock_anthropic: Any, mock_lg: Logger) -> None:
+    """Test thinking works with small max_tokens (budget_tokens < max_tokens)."""
+    backend = _make_backend(mock_anthropic, mock_lg)
+    backend._client.messages.create.return_value = _mock_response()
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "hi"}], think=True, max_tokens=1000
+    )
+    backend.chat(request)
+
+    call_kwargs = backend._client.messages.create.call_args[1]
+    # Budget should be 80% of max_tokens (1000 * 0.8 = 800)
+    # Must be < max_tokens to satisfy Anthropic API
+    assert call_kwargs["thinking"]["budget_tokens"] == 800
+    assert call_kwargs["thinking"]["budget_tokens"] < 1000
+
+
+def test_thinking_budget_validation(mock_anthropic: Any, mock_lg: Logger) -> None:
+    """Test thinking_budget must be in (0, 1]."""
+    with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+        from llm_infer.client.backends.providers.anthropic import AnthropicBackend
+
+        # Valid values
+        AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=0.5)
+        AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=1.0)
+        AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=0.01)
+
+        # Invalid: zero
+        with pytest.raises(ValueError, match="thinking_budget must be in"):
+            AnthropicBackend(lg=mock_lg, name="test", api_key="key", thinking_budget=0)
+
+        # Invalid: negative
+        with pytest.raises(ValueError, match="thinking_budget must be in"):
+            AnthropicBackend(
+                lg=mock_lg, name="test", api_key="key", thinking_budget=-0.5
+            )
+
+        # Invalid: > 1
+        with pytest.raises(ValueError, match="thinking_budget must be in"):
+            AnthropicBackend(
+                lg=mock_lg, name="test", api_key="key", thinking_budget=1.5
+            )
+
+
+def test_chat_think_mode_uses_extra_max_tokens(
+    mock_anthropic: Any, mock_lg: Logger
+) -> None:
+    """Test thinking budget uses max_tokens from extra if provided."""
+    backend = _make_backend(mock_anthropic, mock_lg)
+    backend._client.messages.create.return_value = _mock_response()
+    # Pass max_tokens via extra - should override the request.max_tokens
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "hi"}],
+        think=True,
+        max_tokens=4096,
+        extra={"max_tokens": 2000},
+    )
+    backend.chat(request)
+
+    call_kwargs = backend._client.messages.create.call_args[1]
+    # Budget should be 80% of extra max_tokens (2000 * 0.8 = 1600), not 4096 * 0.8
+    assert call_kwargs["max_tokens"] == 2000
+    assert call_kwargs["thinking"]["budget_tokens"] == 1600
 
 
 def test_chat_adapter_param_ignored(mock_anthropic: Any, mock_lg: Logger) -> None:
