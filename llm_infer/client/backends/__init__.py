@@ -9,7 +9,7 @@ from .context import BackendContext, RetryConfig
 from .factory import BackendFactory
 from .mixins import AsyncRequestTrackingMixin
 from .provider import Provider, ProviderDetector
-from .providers import AnthropicBackend, OpenAICompatibleBackend
+from .providers import AnthropicBackend, GeminiBackend, OpenAICompatibleBackend
 
 __all__ = [
     "AnthropicBackend",
@@ -17,6 +17,7 @@ __all__ = [
     "Backend",
     "BackendContext",
     "BackendFactory",
+    "GeminiBackend",
     "OpenAICompatibleBackend",
     "Provider",
     "ProviderDetector",

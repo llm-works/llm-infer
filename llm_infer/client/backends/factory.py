@@ -10,6 +10,7 @@ from appinfra.rate_limit import RateLimiter
 
 from .base import Backend
 from .context import BackendContext, RetryConfig
+from .provider import Provider, ProviderDetector
 
 
 class BackendFactory:
@@ -79,17 +80,32 @@ class BackendFactory:
         default_model: str | None,
         config: DotDict,
     ) -> Backend:
-        """Create OpenAI-compatible backend."""
+        """Create OpenAI-compatible backend.
+
+        Detects provider from URL/key and returns specialized backend if available
+        (e.g., GeminiBackend for Google).
+        """
+        base_url = config.get("base_url", "http://localhost:8000/v1")
+        api_key = config.get("api_key")
+        provider = ProviderDetector.detect(base_url, api_key)
+
+        kwargs = {
+            "lg": self._lg,
+            "name": name,
+            "ctx": ctx,
+            "default_model": default_model,
+            "base_url": base_url,
+            "api_key": api_key,
+        }
+
+        if provider == Provider.GOOGLE:
+            from .providers.gemini import GeminiBackend
+
+            return GeminiBackend(**kwargs)
+
         from .providers.openai import OpenAICompatibleBackend
 
-        return OpenAICompatibleBackend(
-            lg=self._lg,
-            name=name,
-            ctx=ctx,
-            default_model=default_model,
-            base_url=config.get("base_url", "http://localhost:8000/v1"),
-            api_key=config.get("api_key"),
-        )
+        return OpenAICompatibleBackend(**kwargs)
 
     def _create_anthropic(
         self,
@@ -111,4 +127,6 @@ class BackendFactory:
         }
         if config.get("max_tokens") is not None:
             kwargs["max_tokens"] = config["max_tokens"]
+        if config.get("thinking_budget") is not None:
+            kwargs["thinking_budget"] = config["thinking_budget"]
         return AnthropicBackend(**kwargs)
