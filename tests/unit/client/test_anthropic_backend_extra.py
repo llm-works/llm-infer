@@ -183,6 +183,22 @@ def test_chat_think_mode_custom_budget(mock_anthropic: Any, mock_lg: Logger) -> 
     assert call_kwargs["thinking"]["budget_tokens"] == 2048
 
 
+def test_chat_think_mode_small_max_tokens(mock_anthropic: Any, mock_lg: Logger) -> None:
+    """Test thinking works with small max_tokens (budget_tokens < max_tokens)."""
+    backend = _make_backend(mock_anthropic, mock_lg)
+    backend._client.messages.create.return_value = _mock_response()
+    request = ChatRequest(
+        messages=[{"role": "user", "content": "hi"}], think=True, max_tokens=1000
+    )
+    backend.chat(request)
+
+    call_kwargs = backend._client.messages.create.call_args[1]
+    # Budget should be 80% of max_tokens (1000 * 0.8 = 800)
+    # Must be < max_tokens to satisfy Anthropic API
+    assert call_kwargs["thinking"]["budget_tokens"] == 800
+    assert call_kwargs["thinking"]["budget_tokens"] < 1000
+
+
 def test_chat_adapter_param_ignored(mock_anthropic: Any, mock_lg: Logger) -> None:
     """Adapter param is silently ignored for Anthropic."""
     backend = _make_backend(mock_anthropic, mock_lg)

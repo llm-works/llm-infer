@@ -450,10 +450,10 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         """Apply extended thinking configuration.
 
         Maps the llm-infer `think` flag to Anthropic's extended thinking API.
-        Budget tokens are thinking_budget fraction of max_tokens, minimum 1024.
+        Budget tokens are thinking_budget fraction of max_tokens.
         """
         max_tokens = request_kwargs.get("max_tokens", self._max_tokens)
-        budget_tokens = max(1024, int(max_tokens * self._thinking_budget))
+        budget_tokens = min(int(max_tokens * self._thinking_budget), max_tokens - 1)
         request_kwargs["thinking"] = {
             "type": "enabled",
             "budget_tokens": budget_tokens,
