@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`EmbeddingsClient`**: Client for generating vector embeddings via OpenAI-compatible API. Supports
+- **`EmbeddingClient`**: Client for generating vector embeddings via OpenAI-compatible API. Supports
   sync/async operations (`embed`, `embed_async`, `embed_batch`, `embed_batch_async`) with retry for
   transient errors (5xx, 429, 529). Includes model discovery to get actual model name from server.
   Exported from `llm_infer.client` along with `EmbeddingResult` and `RetryConfig`.

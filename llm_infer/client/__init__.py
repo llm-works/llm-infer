@@ -64,7 +64,7 @@ from .base import ChatClient
 from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .embeddings import EmbeddingResult, EmbeddingsClient
+from .embeddings import EmbeddingClient, EmbeddingResult
 from .errors import (
     BackendError,
     BackendRequestError,
@@ -111,7 +111,7 @@ __all__ = [
     "BoundChatClient",
     "LLMClient",
     # Embeddings client
-    "EmbeddingsClient",
+    "EmbeddingClient",
     "EmbeddingResult",
     # Retry configuration
     "RetryConfig",

@@ -4,23 +4,23 @@ Provides sync and async APIs with retry support for transient errors.
 
 Usage:
     from appinfra.log import Logger
-    from llm_infer.client import EmbeddingsClient
+    from llm_infer.client import EmbeddingClient
     from llm_infer.client.backends import RetryConfig
 
     lg = Logger("my-app")
 
     # Simple usage without retry
-    with EmbeddingsClient(lg, base_url="http://localhost:8001/v1") as client:
+    with EmbeddingClient(lg, base_url="http://localhost:8001/v1") as client:
         result = client.embed("Hello world")
         print(result.embedding)  # list[float]
 
-    # With retry for transient errors
-    retry = RetryConfig(base=1.0, factor=2.0, max_delay=30.0, timeout=120.0)
-    with EmbeddingsClient(lg, base_url="http://localhost:8001/v1", retry=retry) as client:
+    # With retry for transient errors (retry for up to 2 minutes)
+    retry = RetryConfig(timeout=120.0)
+    with EmbeddingClient(lg, base_url="http://localhost:8001/v1", retry=retry) as client:
         results = client.embed_batch(["text1", "text2"])
 
     # Async usage
-    async with EmbeddingsClient(lg, base_url="http://localhost:8001/v1") as client:
+    async with EmbeddingClient(lg, base_url="http://localhost:8001/v1") as client:
         result = await client.embed_async("Hello world")
 """
 
@@ -33,13 +33,11 @@ from dataclasses import dataclass
 from typing import Any, Self
 
 import httpx
-from appinfra import Backoff
 from appinfra.log import Logger
 
 from .backends import RetryConfig
 from .errors import BackendRequestError, BackendTimeoutError, BackendUnavailableError
-
-TRANSIENT_4XX_CODES: frozenset[int] = frozenset({429, 529})
+from .retry import RetryBase
 
 
 @dataclass
@@ -51,7 +49,7 @@ class EmbeddingResult:
     prompt_tokens: int
 
 
-class EmbeddingsClient:
+class EmbeddingClient:
     """Client for generating embeddings via OpenAI-compatible API.
 
     Supports both sync and async operations with optional retry for transient
@@ -66,7 +64,7 @@ class EmbeddingsClient:
         lg: Logger,
         base_url: str = "http://localhost:8001/v1",
         model: str = "default",
-        timeout: float = 30.0,
+        timeout: float = 120.0,
         retry: RetryConfig | None = None,
     ) -> None:
         """Initialize the embeddings client.
@@ -75,7 +73,7 @@ class EmbeddingsClient:
             lg: Logger for retry/error logging.
             base_url: Base URL for the embedding API (e.g., "http://localhost:8001/v1").
             model: Model name to send in requests (server may override).
-            timeout: Request timeout in seconds.
+            timeout: Request timeout in seconds (default matches chat clients).
             retry: Retry configuration for transient errors. None disables retry.
         """
         self._lg = lg
@@ -84,6 +82,7 @@ class EmbeddingsClient:
         self._discovered_model: str | None = None
         self._timeout = timeout
         self._retry = retry
+        self._retry_base = RetryBase(lg)
         self._client = httpx.Client(timeout=timeout)
         self._async_client: httpx.AsyncClient | None = None
 
@@ -102,60 +101,6 @@ class EmbeddingsClient:
         if self._async_client is None:
             self._async_client = httpx.AsyncClient(timeout=self._timeout)
         return self._async_client
-
-    # =========================================================================
-    # Error handling
-    # =========================================================================
-
-    def _is_transient(self, exc: Exception) -> bool:
-        """Check if exception is a transient error that should be retried."""
-        if isinstance(exc, BackendUnavailableError):
-            return True
-        if isinstance(exc, BackendRequestError):
-            code = exc.status_code
-            if code is None:
-                return True
-            if 500 <= code < 600:
-                return True
-            return code in TRANSIENT_4XX_CODES
-        return False
-
-    def _should_retry(
-        self, e: BackendUnavailableError | BackendRequestError, start_time: float
-    ) -> bool:
-        """Check if error should be retried."""
-        if self._retry is None:
-            return False
-        if not self._is_transient(e):
-            return False
-        if (
-            self._retry.timeout > 0
-            and (time.monotonic() - start_time) >= self._retry.timeout
-        ):
-            return False
-        return True
-
-    def _create_backoff(self) -> Backoff:
-        """Create a fresh Backoff instance from RetryConfig."""
-        assert self._retry is not None
-        return Backoff(
-            self._lg,
-            base=self._retry.base,
-            factor=self._retry.factor,
-            max_delay=self._retry.max_delay,
-        )
-
-    def _compute_delay(
-        self, backoff: Backoff, timeout: float, start_time: float
-    ) -> float | None:
-        """Compute delay for next retry, or None if timeout exceeded."""
-        delay: float = backoff.next_delay()
-        if timeout > 0:
-            remaining = timeout - (time.monotonic() - start_time)
-            if remaining <= 0:
-                return None
-            delay = min(delay, remaining)
-        return delay
 
     # =========================================================================
     # HTTP execution with error translation
@@ -223,16 +168,20 @@ class EmbeddingsClient:
         if self._retry is None:
             return self._execute_sync(texts)
 
-        backoff = self._create_backoff()
+        backoff = self._retry_base.create_backoff(self._retry)
         start_time = time.monotonic()
         retry_count = 0
         while True:
             try:
                 return self._execute_sync(texts)
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self._should_retry(e, start_time):
+                if not self._retry_base.should_retry(
+                    e, start_time, self._retry.timeout
+                ):
                     raise
-                delay = self._compute_delay(backoff, self._retry.timeout, start_time)
+                delay = self._retry_base.compute_delay(
+                    backoff, self._retry.timeout, start_time
+                )
                 if delay is None:
                     raise
                 retry_count += 1
@@ -247,16 +196,20 @@ class EmbeddingsClient:
         if self._retry is None:
             return await self._execute_async(texts)
 
-        backoff = self._create_backoff()
+        backoff = self._retry_base.create_backoff(self._retry)
         start_time = time.monotonic()
         retry_count = 0
         while True:
             try:
                 return await self._execute_async(texts)
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self._should_retry(e, start_time):
+                if not self._retry_base.should_retry(
+                    e, start_time, self._retry.timeout
+                ):
                     raise
-                delay = self._compute_delay(backoff, self._retry.timeout, start_time)
+                delay = self._retry_base.compute_delay(
+                    backoff, self._retry.timeout, start_time
+                )
                 if delay is None:
                     raise
                 retry_count += 1

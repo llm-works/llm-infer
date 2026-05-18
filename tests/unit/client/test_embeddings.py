@@ -1,4 +1,4 @@
-"""Unit tests for EmbeddingsClient."""
+"""Unit tests for EmbeddingClient."""
 
 import json
 from unittest.mock import MagicMock, patch
@@ -11,8 +11,8 @@ from llm_infer.client import (
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
+    EmbeddingClient,
     EmbeddingResult,
-    EmbeddingsClient,
     RetryConfig,
 )
 
@@ -42,22 +42,22 @@ def make_embedding_response(
     }
 
 
-class TestEmbeddingsClientInit:
-    """Test EmbeddingsClient initialization."""
+class TestEmbeddingClientInit:
+    """Test EmbeddingClient initialization."""
 
     def test_defaults(self, mock_lg: Logger) -> None:
         """Test default configuration."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
         assert client._base_url == "http://localhost:8001/v1"
         assert client._request_model == "default"
-        assert client._timeout == 30.0
+        assert client._timeout == 120.0
         assert client._retry is None
         client.close()
 
     def test_custom_configuration(self, mock_lg: Logger) -> None:
         """Test custom configuration."""
         retry = RetryConfig(base=1.0, factor=2.0, timeout=60.0)
-        client = EmbeddingsClient(
+        client = EmbeddingClient(
             mock_lg,
             base_url="http://localhost:8000/v1/",  # trailing slash should be stripped
             model="custom-model",
@@ -71,20 +71,20 @@ class TestEmbeddingsClientInit:
         client.close()
 
 
-class TestEmbeddingsClientModel:
+class TestEmbeddingClientModel:
     """Test model discovery and caching."""
 
     def test_model_returns_request_model_before_discovery(
         self, mock_lg: Logger
     ) -> None:
         """Test model property returns request model before any requests."""
-        client = EmbeddingsClient(mock_lg, model="my-model")
+        client = EmbeddingClient(mock_lg, model="my-model")
         assert client.model == "my-model"
         client.close()
 
     def test_model_returns_discovered_model(self, mock_lg: Logger) -> None:
         """Test model property returns discovered model after request."""
-        client = EmbeddingsClient(mock_lg, model="requested")
+        client = EmbeddingClient(mock_lg, model="requested")
 
         response = make_embedding_response([[0.1, 0.2]], model="actual-model")
 
@@ -100,12 +100,12 @@ class TestEmbeddingsClientModel:
         client.close()
 
 
-class TestEmbeddingsClientEmbed:
+class TestEmbeddingClientEmbed:
     """Test embed method."""
 
     def test_embed_single_text(self, mock_lg: Logger) -> None:
         """Test embedding a single text."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         embedding = [0.1, 0.2, 0.3]
         response = make_embedding_response([embedding], prompt_tokens=5)
@@ -131,7 +131,7 @@ class TestEmbeddingsClientEmbed:
 
     def test_embed_empty_text(self, mock_lg: Logger) -> None:
         """Test embedding empty text (model discovery probe)."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         response = make_embedding_response([[]], prompt_tokens=0)
 
@@ -148,12 +148,12 @@ class TestEmbeddingsClientEmbed:
         client.close()
 
 
-class TestEmbeddingsClientEmbedBatch:
+class TestEmbeddingClientEmbedBatch:
     """Test embed_batch method."""
 
     def test_embed_batch_multiple_texts(self, mock_lg: Logger) -> None:
         """Test embedding multiple texts."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         embeddings = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]
         response = make_embedding_response(embeddings, prompt_tokens=15)
@@ -181,7 +181,7 @@ class TestEmbeddingsClientEmbedBatch:
 
     def test_embed_batch_empty_list(self, mock_lg: Logger) -> None:
         """Test embedding empty list returns empty list without API call."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         with patch.object(client._client, "post") as mock_post:
             results = client.embed_batch([])
@@ -192,7 +192,7 @@ class TestEmbeddingsClientEmbedBatch:
 
     def test_embed_batch_preserves_order(self, mock_lg: Logger) -> None:
         """Test batch results maintain input order even if server returns different order."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         # Server returns out of order
         response = {
@@ -221,12 +221,12 @@ class TestEmbeddingsClientEmbedBatch:
         client.close()
 
 
-class TestEmbeddingsClientErrorHandling:
+class TestEmbeddingClientErrorHandling:
     """Test error translation."""
 
     def test_connection_error_raises_unavailable(self, mock_lg: Logger) -> None:
         """Test connection error is translated to BackendUnavailableError."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         with patch.object(client._client, "post") as mock_post:
             mock_post.side_effect = httpx.ConnectError("Connection refused")
@@ -238,7 +238,7 @@ class TestEmbeddingsClientErrorHandling:
 
     def test_timeout_error_raises_timeout(self, mock_lg: Logger) -> None:
         """Test timeout is translated to BackendTimeoutError."""
-        client = EmbeddingsClient(mock_lg, timeout=5.0)
+        client = EmbeddingClient(mock_lg, timeout=5.0)
 
         with patch.object(client._client, "post") as mock_post:
             mock_post.side_effect = httpx.TimeoutException("Timed out")
@@ -250,7 +250,7 @@ class TestEmbeddingsClientErrorHandling:
 
     def test_http_error_raises_request_error(self, mock_lg: Logger) -> None:
         """Test HTTP error is translated to BackendRequestError with status code."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         with patch.object(client._client, "post") as mock_post:
             mock_response = MagicMock()
@@ -269,7 +269,7 @@ class TestEmbeddingsClientErrorHandling:
 
     def test_json_decode_error_raises_request_error(self, mock_lg: Logger) -> None:
         """Test JSON decode error is translated to BackendRequestError."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         with patch.object(client._client, "post") as mock_post:
             mock_response = MagicMock()
@@ -283,13 +283,13 @@ class TestEmbeddingsClientErrorHandling:
         client.close()
 
 
-class TestEmbeddingsClientRetry:
+class TestEmbeddingClientRetry:
     """Test retry behavior."""
 
     def test_retry_on_5xx_error(self, mock_lg: Logger) -> None:
         """Test retry on 5xx server error."""
         retry = RetryConfig(base=0.01, factor=1.0, timeout=10.0)
-        client = EmbeddingsClient(mock_lg, retry=retry)
+        client = EmbeddingClient(mock_lg, retry=retry)
 
         response_ok = make_embedding_response([[0.1]])
 
@@ -322,7 +322,7 @@ class TestEmbeddingsClientRetry:
     def test_retry_on_429_rate_limit(self, mock_lg: Logger) -> None:
         """Test retry on 429 rate limit."""
         retry = RetryConfig(base=0.01, factor=1.0, timeout=10.0)
-        client = EmbeddingsClient(mock_lg, retry=retry)
+        client = EmbeddingClient(mock_lg, retry=retry)
 
         response_ok = make_embedding_response([[0.1]])
 
@@ -354,7 +354,7 @@ class TestEmbeddingsClientRetry:
     def test_no_retry_on_4xx_client_error(self, mock_lg: Logger) -> None:
         """Test no retry on 4xx client errors (except 429, 529)."""
         retry = RetryConfig(base=0.01, factor=1.0, timeout=10.0)
-        client = EmbeddingsClient(mock_lg, retry=retry)
+        client = EmbeddingClient(mock_lg, retry=retry)
 
         call_count = 0
 
@@ -382,7 +382,7 @@ class TestEmbeddingsClientRetry:
 
     def test_no_retry_when_disabled(self, mock_lg: Logger) -> None:
         """Test no retry when retry config is None."""
-        client = EmbeddingsClient(mock_lg, retry=None)
+        client = EmbeddingClient(mock_lg, retry=None)
 
         call_count = 0
 
@@ -406,13 +406,13 @@ class TestEmbeddingsClientRetry:
         client.close()
 
 
-class TestEmbeddingsClientAsync:
+class TestEmbeddingClientAsync:
     """Test async methods."""
 
     @pytest.mark.asyncio
     async def test_embed_async(self, mock_lg: Logger) -> None:
         """Test async embedding."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         response = make_embedding_response([[0.1, 0.2]])
 
@@ -436,7 +436,7 @@ class TestEmbeddingsClientAsync:
     @pytest.mark.asyncio
     async def test_embed_batch_async_empty(self, mock_lg: Logger) -> None:
         """Test async batch with empty list."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         results = await client.embed_batch_async([])
 
@@ -444,12 +444,12 @@ class TestEmbeddingsClientAsync:
         await client.aclose()
 
 
-class TestEmbeddingsClientDiscovery:
+class TestEmbeddingClientDiscovery:
     """Test model discovery methods."""
 
     def test_discover_makes_probe_request(self, mock_lg: Logger) -> None:
         """Test discover() makes a probe request and returns model."""
-        client = EmbeddingsClient(mock_lg, model="requested")
+        client = EmbeddingClient(mock_lg, model="requested")
 
         response = make_embedding_response([[]], model="actual-model")
 
@@ -471,7 +471,7 @@ class TestEmbeddingsClientDiscovery:
 
     def test_discover_caches_result(self, mock_lg: Logger) -> None:
         """Test discover() only probes once."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
 
         response = make_embedding_response([[]], model="discovered")
 
@@ -489,33 +489,33 @@ class TestEmbeddingsClientDiscovery:
         client.close()
 
 
-class TestEmbeddingsClientContextManager:
+class TestEmbeddingClientContextManager:
     """Test context manager support."""
 
     def test_sync_context_manager(self, mock_lg: Logger) -> None:
         """Test sync context manager."""
-        with EmbeddingsClient(mock_lg) as client:
-            assert isinstance(client, EmbeddingsClient)
+        with EmbeddingClient(mock_lg) as client:
+            assert isinstance(client, EmbeddingClient)
         # Client should be closed after context exits
         assert client._client.is_closed
 
     @pytest.mark.asyncio
     async def test_async_context_manager(self, mock_lg: Logger) -> None:
         """Test async context manager."""
-        async with EmbeddingsClient(mock_lg) as client:
-            assert isinstance(client, EmbeddingsClient)
+        async with EmbeddingClient(mock_lg) as client:
+            assert isinstance(client, EmbeddingClient)
         # Sync client should be closed
         assert client._client.is_closed
 
     def test_close_is_idempotent(self, mock_lg: Logger) -> None:
         """Test close() can be called multiple times."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
         client.close()
         client.close()  # Should not raise
 
     @pytest.mark.asyncio
     async def test_aclose_is_idempotent(self, mock_lg: Logger) -> None:
         """Test aclose() can be called multiple times."""
-        client = EmbeddingsClient(mock_lg)
+        client = EmbeddingClient(mock_lg)
         await client.aclose()
         await client.aclose()  # Should not raise

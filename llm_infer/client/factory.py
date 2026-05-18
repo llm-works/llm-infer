@@ -37,9 +37,10 @@ from typing import TYPE_CHECKING, Any, cast
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 
-from .backends import Backend, BackendFactory
+from .backends import Backend, BackendFactory, RetryConfig
 from .client import LLMClient
 from .discovery import ModelDiscovery
+from .embeddings import EmbeddingClient
 from .router import LLMRouter
 from .types import LLMCallbacks
 
@@ -455,3 +456,31 @@ class Factory:
         if rate_limit:
             config["rate_limit"] = rate_limit
         return self.from_backend_config(config, "anthropic", callbacks)
+
+    def embeddings(
+        self,
+        base_url: str = "http://localhost:8001/v1",
+        model: str = "default",
+        timeout: float = 120.0,
+        retry: RetryConfig | None = None,
+    ) -> EmbeddingClient:
+        """Create EmbeddingClient for OpenAI-compatible embeddings API.
+
+        Works with OpenAI, llm-infer, vLLM, and other compatible servers.
+
+        Args:
+            base_url: API base URL for embeddings endpoint.
+            model: Model name to send in requests (server may override).
+            timeout: Request timeout in seconds.
+            retry: Retry configuration for transient errors. None disables retry.
+
+        Returns:
+            EmbeddingClient configured for the embeddings API.
+        """
+        return EmbeddingClient(
+            self._lg,
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            retry=retry,
+        )
