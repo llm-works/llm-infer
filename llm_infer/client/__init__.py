@@ -59,11 +59,12 @@ llm-infer Extensions:
     - tools/tool_choice: Function calling support
 """
 
-from .backends import Backend, OpenAICompatibleBackend
+from .backends import Backend, OpenAICompatibleBackend, RetryConfig
 from .base import ChatClient
 from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
+from .embeddings import EmbeddingResult, EmbeddingsClient
 from .errors import (
     BackendError,
     BackendRequestError,
@@ -109,6 +110,11 @@ __all__ = [
     "ChatClient",
     "BoundChatClient",
     "LLMClient",
+    # Embeddings client
+    "EmbeddingsClient",
+    "EmbeddingResult",
+    # Retry configuration
+    "RetryConfig",
     # Router (multi-backend)
     "LLMRouter",
     "ResolvedTarget",
