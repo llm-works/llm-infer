@@ -225,11 +225,13 @@ class EmbeddingClient:
 
     def _parse_single_response(self, data: dict[str, Any]) -> EmbeddingResult:
         """Parse response for single embedding."""
-        response_model = data.get("model", self._request_model)
-        self._update_model(response_model)
+        response_model = data.get("model")
+        if response_model:
+            self._update_model(response_model)
+        model = response_model or self._request_model
         return EmbeddingResult(
             embedding=data["data"][0]["embedding"],
-            model=response_model,
+            model=model,
             prompt_tokens=data.get("usage", {}).get("prompt_tokens", 0),
         )
 
@@ -237,13 +239,21 @@ class EmbeddingClient:
         self, data: dict[str, Any], num_texts: int
     ) -> list[EmbeddingResult]:
         """Parse batch embedding response into EmbeddingResult list."""
-        model = data.get("model", self.model)
-        self._update_model(model)
+        embeddings_data = data["data"]
+        if len(embeddings_data) != num_texts:
+            raise BackendRequestError(
+                f"Expected {num_texts} embeddings, got {len(embeddings_data)}"
+            )
+
+        response_model = data.get("model")
+        if response_model:
+            self._update_model(response_model)
+        model = response_model or self.model
         prompt_tokens = data.get("usage", {}).get("prompt_tokens", 0)
         tokens_per_text = prompt_tokens // num_texts if num_texts else 0
 
         results = []
-        for item in sorted(data["data"], key=lambda x: x["index"]):
+        for item in sorted(embeddings_data, key=lambda x: x["index"]):
             results.append(
                 EmbeddingResult(
                     embedding=item["embedding"],

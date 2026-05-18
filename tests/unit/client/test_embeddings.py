@@ -99,6 +99,38 @@ class TestEmbeddingClientModel:
         assert client.model == "actual-model"
         client.close()
 
+    def test_model_not_cached_when_response_omits_model(self, mock_lg: Logger) -> None:
+        """Test model is not cached when response omits model field."""
+        client = EmbeddingClient(mock_lg, model="requested")
+
+        # First response omits "model" key
+        response_no_model = make_embedding_response([[0.1]], model="ignored")
+        del response_no_model["model"]
+
+        # Second response includes "model" key
+        response_with_model = make_embedding_response([[0.2]], model="actual-model")
+
+        with patch.object(client._client, "post") as mock_post:
+            mock_r1 = MagicMock()
+            mock_r1.json.return_value = response_no_model
+            mock_r1.raise_for_status = MagicMock()
+
+            mock_r2 = MagicMock()
+            mock_r2.json.return_value = response_with_model
+            mock_r2.raise_for_status = MagicMock()
+
+            mock_post.side_effect = [mock_r1, mock_r2]
+
+            # After first request (no model in response), should still use request model
+            client.embed("first")
+            assert client.model == "requested"
+
+            # After second request (model in response), should use discovered model
+            client.embed("second")
+            assert client.model == "actual-model"
+
+        client.close()
+
 
 class TestEmbeddingClientEmbed:
     """Test embed method."""
