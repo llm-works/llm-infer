@@ -75,14 +75,10 @@ class TestEmbeddingClientEmbed:
         from llm_infer.client.backends.embedding import BatchEmbeddingResult
 
         expected = BatchEmbeddingResult(
-            results=[
-                EmbeddingResult(
-                    embedding=[0.1], model="model", dimensions=1, prompt_tokens=None
-                ),
-                EmbeddingResult(
-                    embedding=[0.2], model="model", dimensions=1, prompt_tokens=None
-                ),
-            ],
+            embeddings=[[0.1], [0.2]],
+            model="model",
+            dimensions=1,
+            size=2,
             total_prompt_tokens=10,
         )
         mock_backend.embed_batch.return_value = expected
@@ -102,7 +98,7 @@ class TestEmbeddingClientEmbed:
         client = EmbeddingClient(mock_lg, mock_backend)
         result = client.embed_batch([])
 
-        assert result.results == []
+        assert result.embeddings == []
         mock_backend.embed_batch.assert_not_called()
         client.close()
 
@@ -230,7 +226,7 @@ class TestEmbeddingClientAsync:
         client = EmbeddingClient(mock_lg, mock_backend)
         result = await client.embed_batch_async([])
 
-        assert result.results == []
+        assert result.embeddings == []
         mock_backend.embed_batch_async.assert_not_called()
         await client.aclose()
 

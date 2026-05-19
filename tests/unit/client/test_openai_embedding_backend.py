@@ -127,12 +127,13 @@ class TestOpenAIEmbeddingBackendEmbedBatch:
 
             result = backend.embed_batch(["a", "b", "c"])
 
-        assert len(result.results) == 3
-        assert result.results[0].embedding == [0.1, 0.2]
-        assert result.results[1].embedding == [0.3, 0.4]
-        assert result.results[2].embedding == [0.5, 0.6]
+        assert len(result.embeddings) == 3
+        assert result.embeddings[0] == [0.1, 0.2]
+        assert result.embeddings[1] == [0.3, 0.4]
+        assert result.embeddings[2] == [0.5, 0.6]
+        assert result.model == "text-embedding-model"
+        assert result.dimensions == 2
         assert result.total_prompt_tokens == 15
-        assert all(r.prompt_tokens is None for r in result.results)
 
         mock_post.assert_called_once_with(
             "http://localhost:8001/v1/embeddings",
@@ -149,7 +150,7 @@ class TestOpenAIEmbeddingBackendEmbedBatch:
         with patch.object(backend._client, "post") as mock_post:
             result = backend.embed_batch([])
 
-        assert result.results == []
+        assert result.embeddings == []
         assert result.total_prompt_tokens == 0
         mock_post.assert_not_called()
         backend.close()
@@ -179,9 +180,9 @@ class TestOpenAIEmbeddingBackendEmbedBatch:
 
             result = backend.embed_batch(["a", "b", "c"])
 
-        assert result.results[0].embedding == [0.1]
-        assert result.results[1].embedding == [0.2]
-        assert result.results[2].embedding == [0.3]
+        assert result.embeddings[0] == [0.1]
+        assert result.embeddings[1] == [0.2]
+        assert result.embeddings[2] == [0.3]
         backend.close()
 
 
@@ -296,7 +297,7 @@ class TestOpenAIEmbeddingBackendAsync:
 
         result = await backend.embed_batch_async([])
 
-        assert result.results == []
+        assert result.embeddings == []
         assert result.total_prompt_tokens == 0
         await backend.aclose()
 

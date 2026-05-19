@@ -816,22 +816,23 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             prompt_tokens=data.get("usage", {}).get("prompt_tokens"),
         )
 
-    def _parse_batch_item(
-        self, item: dict[str, Any], model: str, requested_dims: int | None
-    ) -> EmbeddingResult:
-        """Parse single item from batch response."""
-        embedding = item["embedding"]
-        actual_dims = len(embedding)
-        if requested_dims is not None and actual_dims != requested_dims:
-            raise BackendRequestError(
-                f"Requested {requested_dims} dimensions but got {actual_dims}"
-            )
-        return EmbeddingResult(
-            embedding=embedding,
-            model=model,
-            dimensions=actual_dims,
-            prompt_tokens=None,
-        )
+    def _extract_batch_embeddings(
+        self, items: list[dict[str, Any]], requested_dims: int | None
+    ) -> tuple[list[list[float]], int]:
+        """Extract embeddings from sorted batch items, validate dimensions."""
+        embeddings = []
+        actual_dims = 0
+        for i, item in enumerate(sorted(items, key=lambda x: x["index"])):
+            embedding = item["embedding"]
+            dims = len(embedding)
+            if requested_dims is not None and dims != requested_dims:
+                raise BackendRequestError(
+                    f"Requested {requested_dims} dimensions but got {dims}"
+                )
+            if i == 0:
+                actual_dims = dims
+            embeddings.append(embedding)
+        return embeddings, actual_dims
 
     def _parse_batch(
         self, data: dict[str, Any], num_texts: int, requested_dims: int | None = None
@@ -846,19 +847,19 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
                 f"Expected {num_texts} embeddings, got {len(embeddings_data)}"
             )
 
-        model = data.get("model", self._model)
-        total_prompt_tokens = data.get("usage", {}).get("prompt_tokens")
-
         try:
-            sorted_data = sorted(embeddings_data, key=lambda x: x["index"])
-            results = [
-                self._parse_batch_item(item, model, requested_dims)
-                for item in sorted_data
-            ]
+            embeddings, actual_dims = self._extract_batch_embeddings(
+                embeddings_data, requested_dims
+            )
         except (KeyError, TypeError) as e:
             raise BackendRequestError(f"Malformed response: {e}") from e
+
         return BatchEmbeddingResult(
-            results=results, total_prompt_tokens=total_prompt_tokens
+            embeddings=embeddings,
+            model=data.get("model", self._model),
+            dimensions=actual_dims,
+            size=num_texts,
+            total_prompt_tokens=data.get("usage", {}).get("prompt_tokens"),
         )
 
     # =========================================================================
@@ -874,7 +875,13 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         self, texts: list[str], *, dimensions: int | None = None
     ) -> BatchEmbeddingResult:
         if not texts:
-            return BatchEmbeddingResult(results=[], total_prompt_tokens=0)
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=self._model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=0,
+            )
         self._wait_rate_limit()
         data = self._execute_sync(texts, dimensions)
         return self._parse_batch(data, len(texts), dimensions)
@@ -890,7 +897,13 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         self, texts: list[str], *, dimensions: int | None = None
     ) -> BatchEmbeddingResult:
         if not texts:
-            return BatchEmbeddingResult(results=[], total_prompt_tokens=0)
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=self._model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=0,
+            )
         await self._wait_rate_limit_async()
         data = await self._execute_async(texts, dimensions)
         return self._parse_batch(data, len(texts), dimensions)

@@ -179,7 +179,7 @@ class EmbeddingClient:
             dimensions: Output dimensions. None uses model default.
 
         Returns:
-            BatchEmbeddingResult with results list and total_prompt_tokens.
+            BatchEmbeddingResult with embeddings and metadata.
 
         Raises:
             BackendUnavailableError: If the backend is unreachable.
@@ -187,7 +187,13 @@ class EmbeddingClient:
             BackendRequestError: If the backend returns an error.
         """
         if not texts:
-            return BatchEmbeddingResult(results=[], total_prompt_tokens=0)
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=self._backend.model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=0,
+            )
         return self._call_with_retry(
             lambda: self._backend.embed_batch(texts, dimensions=dimensions)
         )
@@ -227,7 +233,7 @@ class EmbeddingClient:
             dimensions: Output dimensions. None uses model default.
 
         Returns:
-            BatchEmbeddingResult with results list and total_prompt_tokens.
+            BatchEmbeddingResult with embeddings and metadata.
 
         Raises:
             BackendUnavailableError: If the backend is unreachable.
@@ -235,7 +241,13 @@ class EmbeddingClient:
             BackendRequestError: If the backend returns an error.
         """
         if not texts:
-            return BatchEmbeddingResult(results=[], total_prompt_tokens=0)
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=self._backend.model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=0,
+            )
         return await self._call_with_retry_async(
             lambda: self._backend.embed_batch_async(texts, dimensions=dimensions)
         )

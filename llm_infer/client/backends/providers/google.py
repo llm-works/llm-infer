@@ -241,38 +241,48 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             prompt_tokens=None,  # Use count_tokens() to get token counts
         )
 
+    def _extract_embedding(
+        self, emb: dict[str, Any], index: int, requested_dims: int | None
+    ) -> tuple[list[float], int]:
+        """Extract embedding vector and validate dimensions."""
+        try:
+            embedding: list[float] = emb["values"]
+            dims = len(embedding)
+        except (KeyError, TypeError) as e:
+            raise BackendRequestError(
+                f"Malformed response at index {index}: {e}"
+            ) from e
+        if requested_dims is not None and dims != requested_dims:
+            raise BackendRequestError(
+                f"Requested {requested_dims} dimensions but got {dims}"
+            )
+        return embedding, dims
+
     def _parse_batch(
         self, data: dict[str, Any], num_texts: int, requested_dims: int | None = None
     ) -> BatchEmbeddingResult:
         """Parse batch embedding response."""
-        embeddings = data.get("embeddings", [])
-        if len(embeddings) != num_texts:
+        raw_embeddings = data.get("embeddings", [])
+        if len(raw_embeddings) != num_texts:
             raise BackendRequestError(
-                f"Expected {num_texts} embeddings, got {len(embeddings)}"
+                f"Expected {num_texts} embeddings, got {len(raw_embeddings)}"
             )
 
-        results = []
-        for i, emb in enumerate(embeddings):
-            try:
-                embedding = emb["values"]
-                actual_dims = len(embedding)
-            except (KeyError, TypeError) as e:
-                raise BackendRequestError(
-                    f"Malformed response at index {i}: {e}"
-                ) from e
-            if requested_dims is not None and actual_dims != requested_dims:
-                raise BackendRequestError(
-                    f"Requested {requested_dims} dimensions but got {actual_dims}"
-                )
-            results.append(
-                EmbeddingResult(
-                    embedding=embedding,
-                    model=self._model,
-                    dimensions=actual_dims,
-                    prompt_tokens=None,
-                )
-            )
-        return BatchEmbeddingResult(results=results, total_prompt_tokens=None)
+        embeddings = []
+        actual_dims = 0
+        for i, emb in enumerate(raw_embeddings):
+            embedding, dims = self._extract_embedding(emb, i, requested_dims)
+            if i == 0:
+                actual_dims = dims
+            embeddings.append(embedding)
+
+        return BatchEmbeddingResult(
+            embeddings=embeddings,
+            model=self._model,
+            dimensions=actual_dims,
+            size=num_texts,
+            total_prompt_tokens=None,
+        )
 
     # =========================================================================
     # Public API
@@ -287,7 +297,13 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         self, texts: list[str], *, dimensions: int | None = None
     ) -> BatchEmbeddingResult:
         if not texts:
-            return BatchEmbeddingResult(results=[], total_prompt_tokens=None)
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=self._model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=None,
+            )
         if len(texts) > self.MAX_BATCH_SIZE:
             raise BackendRequestError(
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"
@@ -307,7 +323,13 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         self, texts: list[str], *, dimensions: int | None = None
     ) -> BatchEmbeddingResult:
         if not texts:
-            return BatchEmbeddingResult(results=[], total_prompt_tokens=None)
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=self._model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=None,
+            )
         if len(texts) > self.MAX_BATCH_SIZE:
             raise BackendRequestError(
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"

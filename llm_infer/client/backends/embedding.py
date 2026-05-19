@@ -62,11 +62,17 @@ class BatchEmbeddingResult:
     """Result from batch embedding generation.
 
     Attributes:
-        results: List of individual embedding results (prompt_tokens is None per-item).
+        embeddings: List of embedding vectors.
+        model: Model name that generated the embeddings.
+        dimensions: Number of dimensions in each embedding vector.
+        size: Number of embeddings requested.
         total_prompt_tokens: Total token count for the entire batch.
     """
 
-    results: list[EmbeddingResult]
+    embeddings: list[list[float]]
+    model: str
+    dimensions: int
+    size: int
     total_prompt_tokens: int | None
 
 
