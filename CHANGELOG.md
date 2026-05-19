@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`EmbeddingClient`**: Client for generating vector embeddings via OpenAI-compatible API. Supports
+- **Embedding backends**: New backend architecture for embeddings with OpenAI and Google providers.
+  Per-request `dimensions` parameter for reduced output (e.g., 384 instead of 1536). Token counting
+  via `count_tokens()` — OpenAI uses tiktoken locally, Google calls countTokens API. Validates
+  response dimensions match request.
+- **`EmbeddingClient`**: Client wrapper with retry support for embedding backends. Supports
   sync/async operations (`embed`, `embed_async`, `embed_batch`, `embed_batch_async`) with retry for
-  transient errors (5xx, 429, 529). Includes model discovery to get actual model name from server.
-  Create via `Factory.embeddings()` or direct instantiation. Exported from `llm_infer.client`
-  along with `EmbeddingResult` and `RetryConfig`.
+  transient errors (5xx, 429, 529). Exported from `llm_infer.client` along with `EmbeddingResult`
+  and `RetryConfig`.
+- **`[embedding]` extra**: New optional dependency for OpenAI token counting via tiktoken. Included
+  in `[client]` extra.
 - **`DecisionType` enum**: Explicit decision type for routing decisions (`INITIAL`, `RETRY_SAME`,
   `FALLBACK`). Custom strategies should set this to control model resolution behavior.
 - **`GeminiBackend`**: Specialized backend for Google Gemini via OpenAI-compatible API. Normalizes

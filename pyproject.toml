@@ -31,10 +31,15 @@ anthropic = [
 saia = [
     "llm-saia>=0.2.0",
 ]
-# Client: all client backends (anthropic + saia)
+# Embedding: token counting for OpenAI embeddings
+embedding = [
+    "tiktoken>=0.7.0,<1.0.0",
+]
+# Client: all client backends (anthropic + saia + embedding)
 client = [
     "llm-infer[anthropic]",
     "llm-infer[saia]",
+    "llm-infer[embedding]",
 ]
 # Runtime: CPU serving (includes FastAPI)
 runtime = [
