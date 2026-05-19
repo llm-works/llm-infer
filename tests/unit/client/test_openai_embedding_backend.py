@@ -12,6 +12,7 @@ from llm_infer.client import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
+from llm_infer.client.backends import BackendContext
 from llm_infer.client.backends.embedding import EmbeddingResult
 from llm_infer.client.backends.providers import OpenAIEmbeddingBackend
 
@@ -124,13 +125,14 @@ class TestOpenAIEmbeddingBackendEmbedBatch:
             mock_response.raise_for_status = MagicMock()
             mock_post.return_value = mock_response
 
-            results = backend.embed_batch(["a", "b", "c"])
+            result = backend.embed_batch(["a", "b", "c"])
 
-        assert len(results) == 3
-        assert results[0].embedding == [0.1, 0.2]
-        assert results[1].embedding == [0.3, 0.4]
-        assert results[2].embedding == [0.5, 0.6]
-        assert all(r.prompt_tokens == 5 for r in results)
+        assert len(result.results) == 3
+        assert result.results[0].embedding == [0.1, 0.2]
+        assert result.results[1].embedding == [0.3, 0.4]
+        assert result.results[2].embedding == [0.5, 0.6]
+        assert result.total_prompt_tokens == 15
+        assert all(r.prompt_tokens is None for r in result.results)
 
         mock_post.assert_called_once_with(
             "http://localhost:8001/v1/embeddings",
@@ -139,15 +141,16 @@ class TestOpenAIEmbeddingBackendEmbedBatch:
         backend.close()
 
     def test_embed_batch_empty_list(self, mock_lg: Logger) -> None:
-        """Test embedding empty list returns empty list without API call."""
+        """Test embedding empty list returns empty result without API call."""
         backend = OpenAIEmbeddingBackend(
             mock_lg, base_url="http://localhost:8001/v1", model="default"
         )
 
         with patch.object(backend._client, "post") as mock_post:
-            results = backend.embed_batch([])
+            result = backend.embed_batch([])
 
-        assert results == []
+        assert result.results == []
+        assert result.total_prompt_tokens == 0
         mock_post.assert_not_called()
         backend.close()
 
@@ -174,11 +177,11 @@ class TestOpenAIEmbeddingBackendEmbedBatch:
             mock_response.raise_for_status = MagicMock()
             mock_post.return_value = mock_response
 
-            results = backend.embed_batch(["a", "b", "c"])
+            result = backend.embed_batch(["a", "b", "c"])
 
-        assert results[0].embedding == [0.1]
-        assert results[1].embedding == [0.2]
-        assert results[2].embedding == [0.3]
+        assert result.results[0].embedding == [0.1]
+        assert result.results[1].embedding == [0.2]
+        assert result.results[2].embedding == [0.3]
         backend.close()
 
 
@@ -205,7 +208,7 @@ class TestOpenAIEmbeddingBackendErrorHandling:
             mock_lg,
             base_url="http://localhost:8001/v1",
             model="default",
-            timeout=5.0,
+            ctx=BackendContext(request_timeout=5.0),
         )
 
         with patch.object(backend._client, "post") as mock_post:
@@ -290,9 +293,10 @@ class TestOpenAIEmbeddingBackendAsync:
             mock_lg, base_url="http://localhost:8001/v1", model="default"
         )
 
-        results = await backend.embed_batch_async([])
+        result = await backend.embed_batch_async([])
 
-        assert results == []
+        assert result.results == []
+        assert result.total_prompt_tokens == 0
         await backend.aclose()
 
 

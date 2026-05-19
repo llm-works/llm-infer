@@ -60,7 +60,7 @@ llm-infer Extensions:
 """
 
 from .backends import Backend, OpenAICompatibleBackend, RetryConfig
-from .backends.embedding import EmbeddingResult
+from .backends.embedding import BatchEmbeddingResult, EmbeddingResult
 from .base import ChatClient
 from .bound import BoundChatClient
 from .client import LLMClient
@@ -114,6 +114,7 @@ __all__ = [
     # Embeddings client
     "EmbeddingClient",
     "EmbeddingResult",
+    "BatchEmbeddingResult",
     # Retry configuration
     "RetryConfig",
     # Router (multi-backend)

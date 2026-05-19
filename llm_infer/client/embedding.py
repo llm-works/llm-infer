@@ -40,7 +40,7 @@ from typing import Any, Self, TypeVar
 from appinfra.log import Logger
 
 from .backends import RetryConfig
-from .backends.embedding import Backend, EmbeddingResult
+from .backends.embedding import Backend, BatchEmbeddingResult, EmbeddingResult
 from .errors import BackendRequestError, BackendUnavailableError
 from .retry import RetryBase
 
@@ -171,7 +171,7 @@ class EmbeddingClient:
 
     def embed_batch(
         self, texts: list[str], *, dimensions: int | None = None
-    ) -> list[EmbeddingResult]:
+    ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts.
 
         Args:
@@ -179,7 +179,7 @@ class EmbeddingClient:
             dimensions: Output dimensions. None uses model default.
 
         Returns:
-            List of EmbeddingResult, one per input text.
+            BatchEmbeddingResult with results list and total_prompt_tokens.
 
         Raises:
             BackendUnavailableError: If the backend is unreachable.
@@ -187,7 +187,7 @@ class EmbeddingClient:
             BackendRequestError: If the backend returns an error.
         """
         if not texts:
-            return []
+            return BatchEmbeddingResult(results=[], total_prompt_tokens=0)
         return self._call_with_retry(
             lambda: self._backend.embed_batch(texts, dimensions=dimensions)
         )
@@ -219,7 +219,7 @@ class EmbeddingClient:
 
     async def embed_batch_async(
         self, texts: list[str], *, dimensions: int | None = None
-    ) -> list[EmbeddingResult]:
+    ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts (async).
 
         Args:
@@ -227,7 +227,7 @@ class EmbeddingClient:
             dimensions: Output dimensions. None uses model default.
 
         Returns:
-            List of EmbeddingResult, one per input text.
+            BatchEmbeddingResult with results list and total_prompt_tokens.
 
         Raises:
             BackendUnavailableError: If the backend is unreachable.
@@ -235,7 +235,7 @@ class EmbeddingClient:
             BackendRequestError: If the backend returns an error.
         """
         if not texts:
-            return []
+            return BatchEmbeddingResult(results=[], total_prompt_tokens=0)
         return await self._call_with_retry_async(
             lambda: self._backend.embed_batch_async(texts, dimensions=dimensions)
         )

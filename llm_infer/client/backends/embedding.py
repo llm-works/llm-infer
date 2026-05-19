@@ -36,6 +36,8 @@ from typing import Any, Self
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
 
+from .context import BackendContext
+
 
 @dataclass
 class EmbeddingResult:
@@ -53,6 +55,19 @@ class EmbeddingResult:
     model: str
     dimensions: int
     prompt_tokens: int | None
+
+
+@dataclass
+class BatchEmbeddingResult:
+    """Result from batch embedding generation.
+
+    Attributes:
+        results: List of individual embedding results (prompt_tokens is None per-item).
+        total_prompt_tokens: Total token count for the entire batch.
+    """
+
+    results: list[EmbeddingResult]
+    total_prompt_tokens: int | None
 
 
 class Backend(ABC):
@@ -76,18 +91,18 @@ class Backend(ABC):
         self,
         lg: Logger,
         model: str,
-        rate_limiter: RateLimiter | None = None,
+        ctx: BackendContext | None = None,
     ) -> None:
         """Initialize backend with common configuration.
 
         Args:
             lg: Logger instance.
             model: Model name to use for embeddings.
-            rate_limiter: Optional rate limiter for request throttling.
+            ctx: Backend context with rate limiter and timeouts.
         """
         self._lg = lg
         self._model = model
-        self._rate_limiter = rate_limiter
+        self._ctx = ctx or BackendContext()
 
     @property
     def model(self) -> str:
@@ -97,26 +112,32 @@ class Backend(ABC):
     @property
     def rate_limiter(self) -> RateLimiter | None:
         """Rate limiter for this backend."""
-        return self._rate_limiter
+        return self._ctx.rate_limiter
+
+    @property
+    def max_batch_size(self) -> int | None:
+        """Maximum batch size for embed_batch, or None if unlimited."""
+        return None
 
     def can_call(self) -> bool:
         """Check if a call would be allowed right now (non-blocking).
 
         Returns False if rate limited.
         """
-        if self._rate_limiter is not None and not self._rate_limiter.can_proceed():
+        rl = self._ctx.rate_limiter
+        if rl is not None and not rl.can_proceed():
             return False
         return True
 
     def _wait_rate_limit(self) -> None:
         """Wait for rate limiter (sync)."""
-        if self._rate_limiter is not None:
-            self._rate_limiter.next()
+        if self._ctx.rate_limiter is not None:
+            self._ctx.rate_limiter.next()
 
     async def _wait_rate_limit_async(self) -> None:
         """Wait for rate limiter (async)."""
-        if self._rate_limiter is not None:
-            await asyncio.to_thread(self._rate_limiter.next)
+        if self._ctx.rate_limiter is not None:
+            await asyncio.to_thread(self._ctx.rate_limiter.next)
 
     @property
     @abstractmethod
@@ -149,7 +170,7 @@ class Backend(ABC):
     @abstractmethod
     def embed_batch(
         self, texts: list[str], *, dimensions: int | None = None
-    ) -> list[EmbeddingResult]:
+    ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts.
 
         Args:
@@ -157,7 +178,7 @@ class Backend(ABC):
             dimensions: Output dimensions. None uses model default.
 
         Returns:
-            List of EmbeddingResult, one per input text.
+            BatchEmbeddingResult with results list and total_prompt_tokens.
 
         Raises:
             BackendUnavailableError: Backend is unreachable.
@@ -193,7 +214,7 @@ class Backend(ABC):
     @abstractmethod
     async def embed_batch_async(
         self, texts: list[str], *, dimensions: int | None = None
-    ) -> list[EmbeddingResult]:
+    ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts (async).
 
         Args:
@@ -201,7 +222,7 @@ class Backend(ABC):
             dimensions: Output dimensions. None uses model default.
 
         Returns:
-            List of EmbeddingResult, one per input text.
+            BatchEmbeddingResult with results list and total_prompt_tokens.
 
         Raises:
             BackendUnavailableError: Backend is unreachable.
@@ -332,5 +353,8 @@ def __getattr__(name: str) -> type:
 
 __all__ = [
     "Backend",
+    "BatchEmbeddingResult",
     "EmbeddingResult",
+    "GoogleBackend",  # noqa: F822 - lazy import via __getattr__
+    "OpenAIBackend",  # noqa: F822 - lazy import via __getattr__
 ]

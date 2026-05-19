@@ -12,11 +12,11 @@ from typing import Any
 
 import httpx
 from appinfra.log import Logger
-from appinfra.rate_limit import RateLimiter
 
 from ...errors import BackendRequestError, BackendTimeoutError, BackendUnavailableError
+from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
-from ..embedding import EmbeddingResult
+from ..embedding import BatchEmbeddingResult, EmbeddingResult
 
 
 class GoogleEmbeddingTaskType(StrEnum):
@@ -55,8 +55,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         api_key: str,
         model: str = "gemini-embedding-001",
         task_type: GoogleEmbeddingTaskType = GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
-        timeout: float = 120.0,
-        rate_limiter: RateLimiter | None = None,
+        ctx: BackendContext | None = None,
     ) -> None:
         """Initialize Google embedding backend.
 
@@ -65,16 +64,14 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             api_key: Google API key.
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings.
-            timeout: Request timeout in seconds.
-            rate_limiter: Optional rate limiter for request throttling.
+            ctx: Backend context with rate limiter and timeouts.
         """
-        super().__init__(lg, model, rate_limiter)
+        super().__init__(lg, model, ctx)
         self._api_key = api_key
         self._task_type = task_type
-        self._timeout = timeout
 
         headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
-        self._client = httpx.Client(timeout=timeout, headers=headers)
+        self._client = httpx.Client(timeout=self._ctx.request_timeout, headers=headers)
         self._async_client: httpx.AsyncClient | None = None
         self._headers = headers
 
@@ -87,11 +84,16 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         """Current task type for embeddings."""
         return self._task_type
 
+    @property
+    def max_batch_size(self) -> int:
+        """Maximum batch size (100 for Google API)."""
+        return self.MAX_BATCH_SIZE
+
     def _get_async_client(self) -> httpx.AsyncClient:
         """Get or create the async HTTP client (lazy initialization)."""
         if self._async_client is None:
             self._async_client = httpx.AsyncClient(
-                timeout=self._timeout, headers=self._headers
+                timeout=self._ctx.request_timeout, headers=self._headers
             )
         return self._async_client
 
@@ -161,7 +163,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             raise BackendUnavailableError("Failed to connect to Google API") from e
         except httpx.TimeoutException as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
             raise BackendRequestError(
@@ -203,7 +205,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             raise BackendUnavailableError("Failed to connect to Google API") from e
         except httpx.TimeoutException as e:
             raise BackendTimeoutError(
-                f"Request timed out after {self._timeout}s"
+                f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
             raise BackendRequestError(
@@ -238,7 +240,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
 
     def _parse_batch(
         self, data: dict[str, Any], num_texts: int, requested_dims: int | None = None
-    ) -> list[EmbeddingResult]:
+    ) -> BatchEmbeddingResult:
         """Parse batch embedding response."""
         embeddings = data.get("embeddings", [])
         if len(embeddings) != num_texts:
@@ -262,7 +264,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
                     prompt_tokens=None,
                 )
             )
-        return results
+        return BatchEmbeddingResult(results=results, total_prompt_tokens=None)
 
     # =========================================================================
     # Public API
@@ -275,9 +277,9 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
 
     def embed_batch(
         self, texts: list[str], *, dimensions: int | None = None
-    ) -> list[EmbeddingResult]:
+    ) -> BatchEmbeddingResult:
         if not texts:
-            return []
+            return BatchEmbeddingResult(results=[], total_prompt_tokens=None)
         if len(texts) > self.MAX_BATCH_SIZE:
             raise BackendRequestError(
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"
@@ -295,9 +297,9 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
 
     async def embed_batch_async(
         self, texts: list[str], *, dimensions: int | None = None
-    ) -> list[EmbeddingResult]:
+    ) -> BatchEmbeddingResult:
         if not texts:
-            return []
+            return BatchEmbeddingResult(results=[], total_prompt_tokens=None)
         if len(texts) > self.MAX_BATCH_SIZE:
             raise BackendRequestError(
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"

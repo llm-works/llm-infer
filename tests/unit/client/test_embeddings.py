@@ -94,9 +94,9 @@ class TestEmbeddingClientEmbed:
     ) -> None:
         """Test embed_batch with empty list doesn't call backend."""
         client = EmbeddingClient(mock_lg, mock_backend)
-        results = client.embed_batch([])
+        result = client.embed_batch([])
 
-        assert results == []
+        assert result.results == []
         mock_backend.embed_batch.assert_not_called()
         client.close()
 
@@ -222,9 +222,9 @@ class TestEmbeddingClientAsync:
     ) -> None:
         """Test embed_batch_async with empty list."""
         client = EmbeddingClient(mock_lg, mock_backend)
-        results = await client.embed_batch_async([])
+        result = await client.embed_batch_async([])
 
-        assert results == []
+        assert result.results == []
         await client.aclose()
 
 

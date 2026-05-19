@@ -12,6 +12,7 @@ from llm_infer.client import (
     BackendTimeoutError,
     BackendUnavailableError,
 )
+from llm_infer.client.backends import BackendContext
 from llm_infer.client.backends.embedding import EmbeddingResult
 from llm_infer.client.backends.providers import (
     GoogleEmbeddingBackend,
@@ -55,11 +56,11 @@ class TestGoogleEmbeddingBackendInit:
             api_key="test-key",
             model="custom-model",
             task_type=GoogleEmbeddingTaskType.RETRIEVAL_QUERY,
-            timeout=60.0,
+            ctx=BackendContext(request_timeout=60.0),
         )
         assert backend.model == "custom-model"
         assert backend.task_type == GoogleEmbeddingTaskType.RETRIEVAL_QUERY
-        assert backend._timeout == 60.0
+        assert backend._ctx.request_timeout == 60.0
         backend.close()
 
     def test_api_key_sets_header(self, mock_lg: Logger) -> None:
@@ -155,12 +156,13 @@ class TestGoogleEmbeddingBackendEmbedBatch:
             mock_response.raise_for_status = MagicMock()
             mock_post.return_value = mock_response
 
-            results = backend.embed_batch(["a", "b", "c"])
+            result = backend.embed_batch(["a", "b", "c"])
 
-        assert len(results) == 3
-        assert results[0].embedding == [0.1, 0.2]
-        assert results[1].embedding == [0.3, 0.4]
-        assert results[2].embedding == [0.5, 0.6]
+        assert len(result.results) == 3
+        assert result.results[0].embedding == [0.1, 0.2]
+        assert result.results[1].embedding == [0.3, 0.4]
+        assert result.results[2].embedding == [0.5, 0.6]
+        assert result.total_prompt_tokens is None  # Google API doesn't return tokens
 
         mock_post.assert_called_once()
         call_url = mock_post.call_args[0][0]
@@ -171,13 +173,14 @@ class TestGoogleEmbeddingBackendEmbedBatch:
         backend.close()
 
     def test_embed_batch_empty_list(self, mock_lg: Logger) -> None:
-        """Test embedding empty list returns empty list without API call."""
+        """Test embedding empty list returns empty result without API call."""
         backend = GoogleEmbeddingBackend(mock_lg, api_key="test-key")
 
         with patch.object(backend._client, "post") as mock_post:
-            results = backend.embed_batch([])
+            result = backend.embed_batch([])
 
-        assert results == []
+        assert result.results == []
+        assert result.total_prompt_tokens is None
         mock_post.assert_not_called()
         backend.close()
 
@@ -210,7 +213,9 @@ class TestGoogleEmbeddingBackendErrorHandling:
 
     def test_timeout_error_raises_timeout(self, mock_lg: Logger) -> None:
         """Test timeout is translated to BackendTimeoutError."""
-        backend = GoogleEmbeddingBackend(mock_lg, api_key="test-key", timeout=5.0)
+        backend = GoogleEmbeddingBackend(
+            mock_lg, api_key="test-key", ctx=BackendContext(request_timeout=5.0)
+        )
 
         with patch.object(backend._client, "post") as mock_post:
             mock_post.side_effect = httpx.TimeoutException("Timed out")
@@ -286,9 +291,10 @@ class TestGoogleEmbeddingBackendAsync:
         """Test async batch with empty list."""
         backend = GoogleEmbeddingBackend(mock_lg, api_key="test-key")
 
-        results = await backend.embed_batch_async([])
+        result = await backend.embed_batch_async([])
 
-        assert results == []
+        assert result.results == []
+        assert result.total_prompt_tokens is None
         await backend.aclose()
 
     @pytest.mark.asyncio

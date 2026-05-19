@@ -38,7 +38,7 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
 
-from .backends import Backend, BackendFactory, RetryConfig
+from .backends import Backend, BackendContext, BackendFactory, RetryConfig
 from .client import LLMClient
 from .discovery import ModelDiscovery
 from .embedding import EmbeddingClient
@@ -485,13 +485,13 @@ class Factory:
         from .backends.embedding import OpenAIBackend
 
         rate_limiter = self._create_rate_limiter(rate_limit)
+        ctx = BackendContext(rate_limiter=rate_limiter, request_timeout=timeout)
         backend = OpenAIBackend(
             self._lg,
             base_url=base_url,
             model=model,
             api_key=api_key,
-            timeout=timeout,
-            rate_limiter=rate_limiter,
+            ctx=ctx,
         )
         return EmbeddingClient(self._lg, backend, retry=retry)
 
@@ -523,13 +523,13 @@ class Factory:
         from .backends.providers.google import GoogleEmbeddingTaskType
 
         rate_limiter = self._create_rate_limiter(rate_limit)
+        ctx = BackendContext(rate_limiter=rate_limiter, request_timeout=timeout)
         backend = GoogleBackend(
             self._lg,
             api_key=api_key,
             model=model,
             task_type=GoogleEmbeddingTaskType(task_type),
-            timeout=timeout,
-            rate_limiter=rate_limiter,
+            ctx=ctx,
         )
         return EmbeddingClient(self._lg, backend, retry=retry)
 
