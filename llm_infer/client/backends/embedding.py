@@ -19,7 +19,7 @@ Usage:
     backend = embedding.GoogleBackend(
         lg=logger,
         api_key="AIza...",
-        model="text-embedding-004",
+        model="gemini-embedding-001",
         task_type=GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
     )
 

@@ -1,6 +1,6 @@
 """Google Generative AI embedding backend.
 
-Supports Google's text-embedding-004 and other embedding models via the
+Supports Google's gemini-embedding-001 and other embedding models via the
 Generative AI API.
 """
 
@@ -39,7 +39,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         backend = GoogleEmbeddingBackend(
             lg=logger,
             api_key="AIza...",
-            model="text-embedding-004",
+            model="gemini-embedding-001",
             task_type=GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
         )
         result = backend.embed("Hello world")
@@ -52,7 +52,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         self,
         lg: Logger,
         api_key: str,
-        model: str = "text-embedding-004",
+        model: str = "gemini-embedding-001",
         task_type: GoogleEmbeddingTaskType = GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
         timeout: float = 120.0,
     ) -> None:
@@ -61,7 +61,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         Args:
             lg: Logger instance.
             api_key: Google API key.
-            model: Model name (default: text-embedding-004).
+            model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings.
             timeout: Request timeout in seconds.
         """

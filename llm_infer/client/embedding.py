@@ -24,7 +24,7 @@ Usage:
 
     # Google embeddings
     backend = embedding.GoogleBackend(
-        lg, api_key="AIza...", model="text-embedding-004",
+        lg, api_key="AIza...", model="gemini-embedding-001",
         task_type=embedding.TaskType.RETRIEVAL_DOCUMENT
     )
     result = backend.embed("Hello world")

@@ -43,7 +43,7 @@ class TestGoogleEmbeddingBackendInit:
     def test_defaults(self, mock_lg: Logger) -> None:
         """Test default configuration."""
         backend = GoogleEmbeddingBackend(mock_lg, api_key="test-key")
-        assert backend.model == "text-embedding-004"
+        assert backend.model == "gemini-embedding-001"
         assert backend.task_type == GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT
         assert backend.provider == "google"
         backend.close()
@@ -103,7 +103,7 @@ class TestGoogleEmbeddingBackendEmbed:
 
         assert isinstance(result, EmbeddingResult)
         assert result.embedding == embedding
-        assert result.model == "text-embedding-004"
+        assert result.model == "gemini-embedding-001"
         assert result.dimensions == 3
         assert result.prompt_tokens is None  # Google doesn't return token counts
 
@@ -111,7 +111,7 @@ class TestGoogleEmbeddingBackendEmbed:
         call_url = mock_post.call_args[0][0]
         call_json = mock_post.call_args[1]["json"]
 
-        assert "models/text-embedding-004:embedContent" in call_url
+        assert "models/gemini-embedding-001:embedContent" in call_url
         assert call_json["content"]["parts"][0]["text"] == "hello world"
         assert call_json["taskType"] == "RETRIEVAL_DOCUMENT"
         backend.close()
