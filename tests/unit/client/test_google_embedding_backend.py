@@ -188,7 +188,7 @@ class TestGoogleEmbeddingBackendEmbedBatch:
         """Test batch exceeding max size raises error."""
         backend = GoogleEmbeddingBackend(mock_lg, api_key="test-key")
 
-        texts = ["text"] * 101  # Exceeds MAX_BATCH_SIZE of 100
+        texts = ["text"] * (backend.max_batch_size + 1)
 
         with pytest.raises(BackendRequestError, match="exceeds maximum"):
             backend.embed_batch(texts)
@@ -285,6 +285,7 @@ class TestGoogleEmbeddingBackendAsync:
 
         assert result.embedding == [0.1, 0.2]
         await backend.aclose()
+        assert async_client.is_closed
 
     @pytest.mark.asyncio
     async def test_embed_batch_async_empty(self, mock_lg: Logger) -> None:
@@ -302,7 +303,7 @@ class TestGoogleEmbeddingBackendAsync:
         """Test async batch exceeding max size raises error."""
         backend = GoogleEmbeddingBackend(mock_lg, api_key="test-key")
 
-        texts = ["text"] * 101
+        texts = ["text"] * (backend.max_batch_size + 1)
 
         with pytest.raises(BackendRequestError, match="exceeds maximum"):
             await backend.embed_batch_async(texts)
@@ -324,4 +325,6 @@ class TestGoogleEmbeddingBackendContextManager:
         """Test async context manager."""
         async with GoogleEmbeddingBackend(mock_lg, api_key="test-key") as backend:
             assert isinstance(backend, GoogleEmbeddingBackend)
+            async_client = backend._get_async_client()
         assert backend._client.is_closed
+        assert async_client.is_closed

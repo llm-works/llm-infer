@@ -1,6 +1,6 @@
 """Unit tests for EmbeddingClient."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from appinfra.log import Logger
@@ -72,20 +72,26 @@ class TestEmbeddingClientEmbed:
         self, mock_lg: Logger, mock_backend: MagicMock
     ) -> None:
         """Test embed_batch delegates to backend."""
-        expected = [
-            EmbeddingResult(
-                embedding=[0.1], model="model", dimensions=1, prompt_tokens=5
-            ),
-            EmbeddingResult(
-                embedding=[0.2], model="model", dimensions=1, prompt_tokens=5
-            ),
-        ]
+        from llm_infer.client.backends.embedding import BatchEmbeddingResult
+
+        expected = BatchEmbeddingResult(
+            results=[
+                EmbeddingResult(
+                    embedding=[0.1], model="model", dimensions=1, prompt_tokens=None
+                ),
+                EmbeddingResult(
+                    embedding=[0.2], model="model", dimensions=1, prompt_tokens=None
+                ),
+            ],
+            total_prompt_tokens=10,
+        )
         mock_backend.embed_batch.return_value = expected
 
         client = EmbeddingClient(mock_lg, mock_backend)
-        results = client.embed_batch(["a", "b"])
+        result = client.embed_batch(["a", "b"])
 
-        assert results is expected
+        assert result is expected
+        assert result.total_prompt_tokens == 10
         mock_backend.embed_batch.assert_called_once_with(["a", "b"], dimensions=None)
         client.close()
 
@@ -225,6 +231,7 @@ class TestEmbeddingClientAsync:
         result = await client.embed_batch_async([])
 
         assert result.results == []
+        mock_backend.embed_batch_async.assert_not_called()
         await client.aclose()
 
 
@@ -244,14 +251,12 @@ class TestEmbeddingClientContextManager:
         self, mock_lg: Logger, mock_backend: MagicMock
     ) -> None:
         """Test async context manager."""
-
-        async def mock_aclose():
-            pass
-
-        mock_backend.aclose = mock_aclose
+        mock_backend.aclose = AsyncMock()
 
         async with EmbeddingClient(mock_lg, mock_backend) as client:
             assert isinstance(client, EmbeddingClient)
+
+        mock_backend.aclose.assert_awaited_once()
 
 
 class TestEmbeddingClientFactory:

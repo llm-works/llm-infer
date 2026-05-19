@@ -225,8 +225,11 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         self, data: dict[str, Any], requested_dims: int | None = None
     ) -> EmbeddingResult:
         """Parse response for single embedding."""
-        embedding = data["embedding"]["values"]
-        actual_dims = len(embedding)
+        try:
+            embedding = data["embedding"]["values"]
+            actual_dims = len(embedding)
+        except (KeyError, TypeError) as e:
+            raise BackendRequestError(f"Malformed response: {e}") from e
         if requested_dims is not None and actual_dims != requested_dims:
             raise BackendRequestError(
                 f"Requested {requested_dims} dimensions but got {actual_dims}"
@@ -249,9 +252,14 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             )
 
         results = []
-        for emb in embeddings:
-            embedding = emb["values"]
-            actual_dims = len(embedding)
+        for i, emb in enumerate(embeddings):
+            try:
+                embedding = emb["values"]
+                actual_dims = len(embedding)
+            except (KeyError, TypeError) as e:
+                raise BackendRequestError(
+                    f"Malformed response at index {i}: {e}"
+                ) from e
             if requested_dims is not None and actual_dims != requested_dims:
                 raise BackendRequestError(
                     f"Requested {requested_dims} dimensions but got {actual_dims}"
@@ -331,19 +339,23 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         return total
 
     def count_tokens(self, text: str) -> int:
+        self._wait_rate_limit()
         return self._count_tokens_sync([text])
 
     def count_tokens_batch(self, texts: list[str]) -> int:
         if not texts:
             return 0
+        self._wait_rate_limit()
         return self._count_tokens_sync(texts)
 
     async def count_tokens_async(self, text: str) -> int:
+        await self._wait_rate_limit_async()
         return await self._count_tokens_async([text])
 
     async def count_tokens_batch_async(self, texts: list[str]) -> int:
         if not texts:
             return 0
+        await self._wait_rate_limit_async()
         return await self._count_tokens_async(texts)
 
     # =========================================================================

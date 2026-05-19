@@ -285,6 +285,7 @@ class TestOpenAIEmbeddingBackendAsync:
 
         assert result.embedding == [0.1, 0.2]
         await backend.aclose()
+        assert async_client.is_closed
 
     @pytest.mark.asyncio
     async def test_embed_batch_async_empty(self, mock_lg: Logger) -> None:
@@ -318,4 +319,6 @@ class TestOpenAIEmbeddingBackendContextManager:
             mock_lg, base_url="http://localhost:8001/v1", model="default"
         ) as backend:
             assert isinstance(backend, OpenAIEmbeddingBackend)
+            async_client = backend._get_async_client()
         assert backend._client.is_closed
+        assert async_client.is_closed

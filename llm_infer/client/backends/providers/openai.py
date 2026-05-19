@@ -800,8 +800,11 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         self, data: dict[str, Any], requested_dims: int | None = None
     ) -> EmbeddingResult:
         """Parse response for single embedding."""
-        embedding = data["data"][0]["embedding"]
-        actual_dims = len(embedding)
+        try:
+            embedding = data["data"][0]["embedding"]
+            actual_dims = len(embedding)
+        except (KeyError, IndexError, TypeError) as e:
+            raise BackendRequestError(f"Malformed response: {e}") from e
         if requested_dims is not None and actual_dims != requested_dims:
             raise BackendRequestError(
                 f"Requested {requested_dims} dimensions but got {actual_dims}"
@@ -810,14 +813,34 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             embedding=embedding,
             model=data.get("model", self._model),
             dimensions=actual_dims,
-            prompt_tokens=data.get("usage", {}).get("prompt_tokens", 0),
+            prompt_tokens=data.get("usage", {}).get("prompt_tokens"),
+        )
+
+    def _parse_batch_item(
+        self, item: dict[str, Any], model: str, requested_dims: int | None
+    ) -> EmbeddingResult:
+        """Parse single item from batch response."""
+        embedding = item["embedding"]
+        actual_dims = len(embedding)
+        if requested_dims is not None and actual_dims != requested_dims:
+            raise BackendRequestError(
+                f"Requested {requested_dims} dimensions but got {actual_dims}"
+            )
+        return EmbeddingResult(
+            embedding=embedding,
+            model=model,
+            dimensions=actual_dims,
+            prompt_tokens=None,
         )
 
     def _parse_batch(
         self, data: dict[str, Any], num_texts: int, requested_dims: int | None = None
     ) -> BatchEmbeddingResult:
         """Parse batch embedding response."""
-        embeddings_data = data["data"]
+        try:
+            embeddings_data = data["data"]
+        except (KeyError, TypeError) as e:
+            raise BackendRequestError(f"Malformed response: {e}") from e
         if len(embeddings_data) != num_texts:
             raise BackendRequestError(
                 f"Expected {num_texts} embeddings, got {len(embeddings_data)}"
@@ -826,22 +849,14 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         model = data.get("model", self._model)
         total_prompt_tokens = data.get("usage", {}).get("prompt_tokens")
 
-        results = []
-        for item in sorted(embeddings_data, key=lambda x: x["index"]):
-            embedding = item["embedding"]
-            actual_dims = len(embedding)
-            if requested_dims is not None and actual_dims != requested_dims:
-                raise BackendRequestError(
-                    f"Requested {requested_dims} dimensions but got {actual_dims}"
-                )
-            results.append(
-                EmbeddingResult(
-                    embedding=embedding,
-                    model=model,
-                    dimensions=actual_dims,
-                    prompt_tokens=None,
-                )
-            )
+        try:
+            sorted_data = sorted(embeddings_data, key=lambda x: x["index"])
+            results = [
+                self._parse_batch_item(item, model, requested_dims)
+                for item in sorted_data
+            ]
+        except (KeyError, TypeError) as e:
+            raise BackendRequestError(f"Malformed response: {e}") from e
         return BatchEmbeddingResult(
             results=results, total_prompt_tokens=total_prompt_tokens
         )

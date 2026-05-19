@@ -534,7 +534,11 @@ class Factory:
         return EmbeddingClient(self._lg, backend, retry=retry)
 
     def _create_rate_limiter(self, config: dict[str, Any] | None) -> RateLimiter | None:
-        """Create rate limiter from config."""
+        """Create rate limiter from config.
+
+        Args:
+            config: Rate limit config with "per_minute" key. Defaults to 60 if not specified.
+        """
         if not config:
             return None
         per_minute = config.get("per_minute", 60)
