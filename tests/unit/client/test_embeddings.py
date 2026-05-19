@@ -65,7 +65,7 @@ class TestEmbeddingClientEmbed:
         result = client.embed("hello")
 
         assert result is expected
-        mock_backend.embed.assert_called_once_with("hello", dimensions=None)
+        mock_backend.embed.assert_called_once_with("hello", model=None, dimensions=None)
         client.close()
 
     def test_embed_batch_delegates_to_backend(
@@ -88,7 +88,9 @@ class TestEmbeddingClientEmbed:
 
         assert result is expected
         assert result.total_prompt_tokens == 10
-        mock_backend.embed_batch.assert_called_once_with(["a", "b"], dimensions=None)
+        mock_backend.embed_batch.assert_called_once_with(
+            ["a", "b"], model=None, dimensions=None
+        )
         client.close()
 
     def test_embed_batch_empty_list(
@@ -118,7 +120,7 @@ class TestEmbeddingClientRetry:
         )
         call_count = 0
 
-        def side_effect(text, *, dimensions=None):
+        def side_effect(text, *, model=None, dimensions=None):
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -179,7 +181,7 @@ class TestEmbeddingClientRetry:
         )
         call_count = 0
 
-        def side_effect(text, *, dimensions=None):
+        def side_effect(text, *, model=None, dimensions=None):
             nonlocal call_count
             call_count += 1
             if call_count < 2:
@@ -207,7 +209,7 @@ class TestEmbeddingClientAsync:
             embedding=[0.1], model="model", dimensions=1, prompt_tokens=5
         )
 
-        async def mock_embed_async(text, *, dimensions=None):
+        async def mock_embed_async(text, *, model=None, dimensions=None):
             return expected
 
         mock_backend.embed_async = mock_embed_async

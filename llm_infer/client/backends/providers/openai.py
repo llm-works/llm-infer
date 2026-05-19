@@ -732,11 +732,14 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
     # =========================================================================
 
     def _execute_sync(
-        self, texts: str | list[str], dimensions: int | None = None
+        self,
+        texts: str | list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Execute sync request with error translation."""
         url = f"{self._base_url}/embeddings"
-        payload: dict[str, Any] = {"model": self._model, "input": texts}
+        payload: dict[str, Any] = {"model": model or self._model, "input": texts}
         if dimensions is not None:
             payload["dimensions"] = dimensions
         try:
@@ -762,11 +765,14 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
 
     async def _execute_async(
-        self, texts: str | list[str], dimensions: int | None = None
+        self,
+        texts: str | list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Execute async request with error translation."""
         url = f"{self._base_url}/embeddings"
-        payload: dict[str, Any] = {"model": self._model, "input": texts}
+        payload: dict[str, Any] = {"model": model or self._model, "input": texts}
         if dimensions is not None:
             payload["dimensions"] = dimensions
         client = self._get_async_client()
@@ -797,7 +803,10 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
     # =========================================================================
 
     def _parse_single(
-        self, data: dict[str, Any], requested_dims: int | None = None
+        self,
+        data: dict[str, Any],
+        model: str | None = None,
+        requested_dims: int | None = None,
     ) -> EmbeddingResult:
         """Parse response for single embedding."""
         try:
@@ -811,7 +820,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             )
         return EmbeddingResult(
             embedding=embedding,
-            model=data.get("model", self._model),
+            model=data.get("model", model or self._model),
             dimensions=actual_dims,
             prompt_tokens=data.get("usage", {}).get("prompt_tokens"),
         )
@@ -835,7 +844,11 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         return embeddings, actual_dims
 
     def _parse_batch(
-        self, data: dict[str, Any], num_texts: int, requested_dims: int | None = None
+        self,
+        data: dict[str, Any],
+        num_texts: int,
+        model: str | None = None,
+        requested_dims: int | None = None,
     ) -> BatchEmbeddingResult:
         """Parse batch embedding response."""
         try:
@@ -856,7 +869,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
 
         return BatchEmbeddingResult(
             embeddings=embeddings,
-            model=data.get("model", self._model),
+            model=data.get("model", model or self._model),
             dimensions=actual_dims,
             size=num_texts,
             total_prompt_tokens=data.get("usage", {}).get("prompt_tokens"),
@@ -866,47 +879,65 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
     # Public API
     # =========================================================================
 
-    def embed(self, text: str, *, dimensions: int | None = None) -> EmbeddingResult:
+    def embed(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResult:
         self._wait_rate_limit()
-        data = self._execute_sync(text, dimensions)
-        return self._parse_single(data, dimensions)
+        data = self._execute_sync(text, model, dimensions)
+        return self._parse_single(data, model, dimensions)
 
     def embed_batch(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         if not texts:
             return BatchEmbeddingResult(
                 embeddings=[],
-                model=self._model,
+                model=model or self._model,
                 dimensions=0,
                 size=0,
                 total_prompt_tokens=0,
             )
         self._wait_rate_limit()
-        data = self._execute_sync(texts, dimensions)
-        return self._parse_batch(data, len(texts), dimensions)
+        data = self._execute_sync(texts, model, dimensions)
+        return self._parse_batch(data, len(texts), model, dimensions)
 
     async def embed_async(
-        self, text: str, *, dimensions: int | None = None
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> EmbeddingResult:
         await self._wait_rate_limit_async()
-        data = await self._execute_async(text, dimensions)
-        return self._parse_single(data, dimensions)
+        data = await self._execute_async(text, model, dimensions)
+        return self._parse_single(data, model, dimensions)
 
     async def embed_batch_async(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         if not texts:
             return BatchEmbeddingResult(
                 embeddings=[],
-                model=self._model,
+                model=model or self._model,
                 dimensions=0,
                 size=0,
                 total_prompt_tokens=0,
             )
         await self._wait_rate_limit_async()
-        data = await self._execute_async(texts, dimensions)
-        return self._parse_batch(data, len(texts), dimensions)
+        data = await self._execute_async(texts, model, dimensions)
+        return self._parse_batch(data, len(texts), model, dimensions)
 
     # =========================================================================
     # Token counting

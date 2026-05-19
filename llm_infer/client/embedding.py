@@ -61,6 +61,8 @@ class EmbeddingClient:
         lg: Logger,
         backend: Backend,
         retry: RetryConfig | None = None,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> None:
         """Initialize the embedding client.
 
@@ -68,16 +70,25 @@ class EmbeddingClient:
             lg: Logger for retry/error logging.
             backend: Embedding backend to use.
             retry: Retry configuration for transient errors. None disables retry.
+            model: Default model override. None uses backend default.
+            dimensions: Default output dimensions. None uses backend/provider default.
         """
         self._lg = lg
         self._backend = backend
         self._retry = retry
+        self._model = model
+        self._dimensions = dimensions
         self._retry_base = RetryBase(lg)
 
     @property
     def model(self) -> str:
-        """Model name from the backend."""
-        return self._backend.model
+        """Effective model name (client override or backend default)."""
+        return self._model or self._backend.model
+
+    @property
+    def dimensions(self) -> int | None:
+        """Default output dimensions (None uses provider default)."""
+        return self._dimensions
 
     @property
     def backend(self) -> Backend:
@@ -150,12 +161,19 @@ class EmbeddingClient:
     # Sync API
     # =========================================================================
 
-    def embed(self, text: str, *, dimensions: int | None = None) -> EmbeddingResult:
+    def embed(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResult:
         """Generate embedding for a single text.
 
         Args:
             text: Text to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses client/backend default.
+            dimensions: Output dimensions. None uses client/backend/provider default.
 
         Returns:
             EmbeddingResult with embedding vector and metadata.
@@ -165,18 +183,27 @@ class EmbeddingClient:
             BackendTimeoutError: If the request times out.
             BackendRequestError: If the backend returns an error.
         """
+        effective_model = model or self._model
+        effective_dims = dimensions if dimensions is not None else self._dimensions
         return self._call_with_retry(
-            lambda: self._backend.embed(text, dimensions=dimensions)
+            lambda: self._backend.embed(
+                text, model=effective_model, dimensions=effective_dims
+            )
         )
 
     def embed_batch(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts.
 
         Args:
             texts: List of texts to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses client/backend default.
+            dimensions: Output dimensions. None uses client/backend/provider default.
 
         Returns:
             BatchEmbeddingResult with embeddings and metadata.
@@ -186,16 +213,20 @@ class EmbeddingClient:
             BackendTimeoutError: If the request times out.
             BackendRequestError: If the backend returns an error.
         """
+        effective_model = model or self._model
+        effective_dims = dimensions if dimensions is not None else self._dimensions
         if not texts:
             return BatchEmbeddingResult(
                 embeddings=[],
-                model=self._backend.model,
+                model=effective_model or self._backend.model,
                 dimensions=0,
                 size=0,
                 total_prompt_tokens=0,
             )
         return self._call_with_retry(
-            lambda: self._backend.embed_batch(texts, dimensions=dimensions)
+            lambda: self._backend.embed_batch(
+                texts, model=effective_model, dimensions=effective_dims
+            )
         )
 
     # =========================================================================
@@ -203,13 +234,18 @@ class EmbeddingClient:
     # =========================================================================
 
     async def embed_async(
-        self, text: str, *, dimensions: int | None = None
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> EmbeddingResult:
         """Generate embedding for a single text (async).
 
         Args:
             text: Text to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses client/backend default.
+            dimensions: Output dimensions. None uses client/backend/provider default.
 
         Returns:
             EmbeddingResult with embedding vector and metadata.
@@ -219,18 +255,27 @@ class EmbeddingClient:
             BackendTimeoutError: If the request times out.
             BackendRequestError: If the backend returns an error.
         """
+        effective_model = model or self._model
+        effective_dims = dimensions if dimensions is not None else self._dimensions
         return await self._call_with_retry_async(
-            lambda: self._backend.embed_async(text, dimensions=dimensions)
+            lambda: self._backend.embed_async(
+                text, model=effective_model, dimensions=effective_dims
+            )
         )
 
     async def embed_batch_async(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts (async).
 
         Args:
             texts: List of texts to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses client/backend default.
+            dimensions: Output dimensions. None uses client/backend/provider default.
 
         Returns:
             BatchEmbeddingResult with embeddings and metadata.
@@ -240,16 +285,20 @@ class EmbeddingClient:
             BackendTimeoutError: If the request times out.
             BackendRequestError: If the backend returns an error.
         """
+        effective_model = model or self._model
+        effective_dims = dimensions if dimensions is not None else self._dimensions
         if not texts:
             return BatchEmbeddingResult(
                 embeddings=[],
-                model=self._backend.model,
+                model=effective_model or self._backend.model,
                 dimensions=0,
                 size=0,
                 total_prompt_tokens=0,
             )
         return await self._call_with_retry_async(
-            lambda: self._backend.embed_batch_async(texts, dimensions=dimensions)
+            lambda: self._backend.embed_batch_async(
+                texts, model=effective_model, dimensions=effective_dims
+            )
         )
 
     # =========================================================================
