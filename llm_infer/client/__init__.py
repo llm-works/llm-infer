@@ -60,11 +60,12 @@ llm-infer Extensions:
 """
 
 from .backends import Backend, OpenAICompatibleBackend, RetryConfig
+from .backends.embedding import EmbeddingResult
 from .base import ChatClient
 from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .embeddings import EmbeddingClient, EmbeddingResult
+from .embedding import EmbeddingClient
 from .errors import (
     BackendError,
     BackendRequestError,

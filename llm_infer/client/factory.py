@@ -40,7 +40,7 @@ from appinfra.log import Logger
 from .backends import Backend, BackendFactory, RetryConfig
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .embeddings import EmbeddingClient
+from .embedding import EmbeddingClient
 from .router import LLMRouter
 from .types import LLMCallbacks
 
@@ -461,6 +461,7 @@ class Factory:
         self,
         base_url: str = "http://localhost:8001/v1",
         model: str = "default",
+        api_key: str | None = None,
         timeout: float = 120.0,
         retry: RetryConfig | None = None,
     ) -> EmbeddingClient:
@@ -470,17 +471,55 @@ class Factory:
 
         Args:
             base_url: API base URL for embeddings endpoint.
-            model: Model name to send in requests (server may override).
+            model: Model name to send in requests.
+            api_key: Optional API key for Authorization header.
             timeout: Request timeout in seconds.
             retry: Retry configuration for transient errors. None disables retry.
 
         Returns:
             EmbeddingClient configured for the embeddings API.
         """
-        return EmbeddingClient(
+        from .backends.embedding import OpenAIBackend
+
+        backend = OpenAIBackend(
             self._lg,
             base_url=base_url,
             model=model,
+            api_key=api_key,
             timeout=timeout,
-            retry=retry,
         )
+        return EmbeddingClient(self._lg, backend, retry=retry)
+
+    def embeddings_google(
+        self,
+        api_key: str,
+        model: str = "text-embedding-004",
+        task_type: str = "RETRIEVAL_DOCUMENT",
+        timeout: float = 120.0,
+        retry: RetryConfig | None = None,
+    ) -> EmbeddingClient:
+        """Create EmbeddingClient for Google Generative AI embeddings.
+
+        Args:
+            api_key: Google API key.
+            model: Model name (default: text-embedding-004).
+            task_type: Task type for optimized embeddings. One of:
+                RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
+                CLASSIFICATION, CLUSTERING, QUESTION_ANSWERING, FACT_VERIFICATION.
+            timeout: Request timeout in seconds.
+            retry: Retry configuration for transient errors. None disables retry.
+
+        Returns:
+            EmbeddingClient configured for Google embeddings.
+        """
+        from .backends.embedding import GoogleBackend
+        from .backends.providers.google import GoogleEmbeddingTaskType
+
+        backend = GoogleBackend(
+            self._lg,
+            api_key=api_key,
+            model=model,
+            task_type=GoogleEmbeddingTaskType(task_type),
+            timeout=timeout,
+        )
+        return EmbeddingClient(self._lg, backend, retry=retry)

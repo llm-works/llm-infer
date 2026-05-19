@@ -41,6 +41,8 @@ from ...errors import (
 from ...types import AdapterInfo, ChatRequest, ChatResponse, ResponseHolder
 from ..base import Backend
 from ..context import BackendContext
+from ..embedding import Backend as EmbeddingBackend
+from ..embedding import EmbeddingResult
 from ..mixins import AsyncRequestTrackingMixin
 from ..provider import ProviderDetector
 
@@ -663,3 +665,261 @@ def _parse_adapter_info(data: dict[str, Any] | None) -> AdapterInfo | None:
         mtime=data.get("mtime"),
         md5=data.get("md5"),
     )
+
+
+# =============================================================================
+# Embedding Backend
+# =============================================================================
+
+
+class OpenAIEmbeddingBackend(EmbeddingBackend):
+    """OpenAI-compatible embedding backend.
+
+    Works with OpenAI, Azure OpenAI, and any API following the /v1/embeddings format.
+
+    Example:
+        backend = OpenAIEmbeddingBackend(
+            lg=logger,
+            base_url="https://api.openai.com/v1",
+            api_key="sk-...",
+            model="text-embedding-3-small",
+        )
+        result = backend.embed("Hello world")
+    """
+
+    def __init__(
+        self,
+        lg: Logger,
+        base_url: str,
+        model: str,
+        api_key: str | None = None,
+        timeout: float = 120.0,
+    ) -> None:
+        """Initialize OpenAI-compatible embedding backend.
+
+        Args:
+            lg: Logger instance.
+            base_url: Base URL (e.g., "https://api.openai.com/v1").
+            model: Model name (e.g., "text-embedding-3-small").
+            api_key: Optional API key for Authorization header.
+            timeout: Request timeout in seconds.
+        """
+        super().__init__(lg, model)
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout
+
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        self._client = httpx.Client(timeout=timeout, headers=headers)
+        self._async_client: httpx.AsyncClient | None = None
+        self._headers = headers
+
+    @property
+    def provider(self) -> str:
+        return "openai"
+
+    def _get_async_client(self) -> httpx.AsyncClient:
+        """Get or create the async HTTP client (lazy initialization)."""
+        if self._async_client is None:
+            self._async_client = httpx.AsyncClient(
+                timeout=self._timeout, headers=self._headers
+            )
+        return self._async_client
+
+    # =========================================================================
+    # HTTP execution
+    # =========================================================================
+
+    def _execute_sync(
+        self, texts: str | list[str], dimensions: int | None = None
+    ) -> dict[str, Any]:
+        """Execute sync request with error translation."""
+        url = f"{self._base_url}/embeddings"
+        payload: dict[str, Any] = {"model": self._model, "input": texts}
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        try:
+            resp = self._client.post(url, json=payload)
+            resp.raise_for_status()
+            result: dict[str, Any] = resp.json()
+            return result
+        except httpx.ConnectError as e:
+            raise BackendUnavailableError(
+                f"Failed to connect to {self._base_url}"
+            ) from e
+        except httpx.TimeoutException as e:
+            raise BackendTimeoutError(
+                f"Request timed out after {self._timeout}s"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise BackendRequestError(
+                f"Backend error: {e.response.text}", status_code=e.response.status_code
+            ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+
+    async def _execute_async(
+        self, texts: str | list[str], dimensions: int | None = None
+    ) -> dict[str, Any]:
+        """Execute async request with error translation."""
+        url = f"{self._base_url}/embeddings"
+        payload: dict[str, Any] = {"model": self._model, "input": texts}
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        client = self._get_async_client()
+        try:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            result: dict[str, Any] = resp.json()
+            return result
+        except httpx.ConnectError as e:
+            raise BackendUnavailableError(
+                f"Failed to connect to {self._base_url}"
+            ) from e
+        except httpx.TimeoutException as e:
+            raise BackendTimeoutError(
+                f"Request timed out after {self._timeout}s"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise BackendRequestError(
+                f"Backend error: {e.response.text}", status_code=e.response.status_code
+            ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+
+    # =========================================================================
+    # Response parsing
+    # =========================================================================
+
+    def _parse_single(
+        self, data: dict[str, Any], requested_dims: int | None = None
+    ) -> EmbeddingResult:
+        """Parse response for single embedding."""
+        embedding = data["data"][0]["embedding"]
+        actual_dims = len(embedding)
+        if requested_dims is not None and actual_dims != requested_dims:
+            raise BackendRequestError(
+                f"Requested {requested_dims} dimensions but got {actual_dims}"
+            )
+        return EmbeddingResult(
+            embedding=embedding,
+            model=data.get("model", self._model),
+            dimensions=actual_dims,
+            prompt_tokens=data.get("usage", {}).get("prompt_tokens", 0),
+        )
+
+    def _parse_batch(
+        self, data: dict[str, Any], num_texts: int, requested_dims: int | None = None
+    ) -> list[EmbeddingResult]:
+        """Parse batch embedding response."""
+        embeddings_data = data["data"]
+        if len(embeddings_data) != num_texts:
+            raise BackendRequestError(
+                f"Expected {num_texts} embeddings, got {len(embeddings_data)}"
+            )
+
+        model = data.get("model", self._model)
+        prompt_tokens = data.get("usage", {}).get("prompt_tokens", 0)
+        tokens_per_text = prompt_tokens // num_texts if num_texts else 0
+
+        results = []
+        for item in sorted(embeddings_data, key=lambda x: x["index"]):
+            embedding = item["embedding"]
+            actual_dims = len(embedding)
+            if requested_dims is not None and actual_dims != requested_dims:
+                raise BackendRequestError(
+                    f"Requested {requested_dims} dimensions but got {actual_dims}"
+                )
+            results.append(
+                EmbeddingResult(
+                    embedding=embedding,
+                    model=model,
+                    dimensions=actual_dims,
+                    prompt_tokens=tokens_per_text,
+                )
+            )
+        return results
+
+    # =========================================================================
+    # Public API
+    # =========================================================================
+
+    def embed(self, text: str, *, dimensions: int | None = None) -> EmbeddingResult:
+        data = self._execute_sync(text, dimensions)
+        return self._parse_single(data, dimensions)
+
+    def embed_batch(
+        self, texts: list[str], *, dimensions: int | None = None
+    ) -> list[EmbeddingResult]:
+        if not texts:
+            return []
+        data = self._execute_sync(texts, dimensions)
+        return self._parse_batch(data, len(texts), dimensions)
+
+    async def embed_async(
+        self, text: str, *, dimensions: int | None = None
+    ) -> EmbeddingResult:
+        data = await self._execute_async(text, dimensions)
+        return self._parse_single(data, dimensions)
+
+    async def embed_batch_async(
+        self, texts: list[str], *, dimensions: int | None = None
+    ) -> list[EmbeddingResult]:
+        if not texts:
+            return []
+        data = await self._execute_async(texts, dimensions)
+        return self._parse_batch(data, len(texts), dimensions)
+
+    # =========================================================================
+    # Token counting
+    # =========================================================================
+
+    def _get_tokenizer(self) -> Any:
+        """Get tiktoken encoding for this model."""
+        try:
+            import tiktoken
+        except ImportError as e:
+            raise ImportError(
+                "tiktoken is required for token counting. "
+                "Install with: pip install tiktoken"
+            ) from e
+
+        try:
+            return tiktoken.encoding_for_model(self._model)
+        except KeyError:
+            return tiktoken.get_encoding("cl100k_base")
+
+    def count_tokens(self, text: str) -> int:
+        enc = self._get_tokenizer()
+        return len(enc.encode(text))
+
+    def count_tokens_batch(self, texts: list[str]) -> int:
+        if not texts:
+            return 0
+        enc = self._get_tokenizer()
+        return sum(len(enc.encode(text)) for text in texts)
+
+    async def count_tokens_async(self, text: str) -> int:
+        return self.count_tokens(text)
+
+    async def count_tokens_batch_async(self, texts: list[str]) -> int:
+        return self.count_tokens_batch(texts)
+
+    # =========================================================================
+    # Resource management
+    # =========================================================================
+
+    def close(self) -> None:
+        self._client.close()
+
+    async def aclose(self) -> None:
+        self._client.close()
+        if self._async_client is not None:
+            await self._async_client.aclose()
+            self._async_client = None
