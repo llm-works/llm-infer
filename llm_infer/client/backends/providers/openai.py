@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 from appinfra.log import Logger
+from appinfra.rate_limit import RateLimiter
 
 from ....schemas.openai import (
     ChatCompletionUsage,
@@ -694,6 +695,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         model: str,
         api_key: str | None = None,
         timeout: float = 120.0,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         """Initialize OpenAI-compatible embedding backend.
 
@@ -703,8 +705,9 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             model: Model name (e.g., "text-embedding-3-small").
             api_key: Optional API key for Authorization header.
             timeout: Request timeout in seconds.
+            rate_limiter: Optional rate limiter for request throttling.
         """
-        super().__init__(lg, model)
+        super().__init__(lg, model, rate_limiter)
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
 
@@ -851,6 +854,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
     # =========================================================================
 
     def embed(self, text: str, *, dimensions: int | None = None) -> EmbeddingResult:
+        self._wait_rate_limit()
         data = self._execute_sync(text, dimensions)
         return self._parse_single(data, dimensions)
 
@@ -859,12 +863,14 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
     ) -> list[EmbeddingResult]:
         if not texts:
             return []
+        self._wait_rate_limit()
         data = self._execute_sync(texts, dimensions)
         return self._parse_batch(data, len(texts), dimensions)
 
     async def embed_async(
         self, text: str, *, dimensions: int | None = None
     ) -> EmbeddingResult:
+        await self._wait_rate_limit_async()
         data = await self._execute_async(text, dimensions)
         return self._parse_single(data, dimensions)
 
@@ -873,6 +879,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
     ) -> list[EmbeddingResult]:
         if not texts:
             return []
+        await self._wait_rate_limit_async()
         data = await self._execute_async(texts, dimensions)
         return self._parse_batch(data, len(texts), dimensions)
 

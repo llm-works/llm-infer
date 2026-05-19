@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
+from appinfra.rate_limit import RateLimiter
 
 from .backends import Backend, BackendFactory, RetryConfig
 from .client import LLMClient
@@ -464,6 +465,7 @@ class Factory:
         api_key: str | None = None,
         timeout: float = 120.0,
         retry: RetryConfig | None = None,
+        rate_limit: dict[str, Any] | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for OpenAI-compatible embeddings API.
 
@@ -475,18 +477,21 @@ class Factory:
             api_key: Optional API key for Authorization header.
             timeout: Request timeout in seconds.
             retry: Retry configuration for transient errors. None disables retry.
+            rate_limit: Rate limit config (e.g., {"per_minute": 60}).
 
         Returns:
             EmbeddingClient configured for the embeddings API.
         """
         from .backends.embedding import OpenAIBackend
 
+        rate_limiter = self._create_rate_limiter(rate_limit)
         backend = OpenAIBackend(
             self._lg,
             base_url=base_url,
             model=model,
             api_key=api_key,
             timeout=timeout,
+            rate_limiter=rate_limiter,
         )
         return EmbeddingClient(self._lg, backend, retry=retry)
 
@@ -497,6 +502,7 @@ class Factory:
         task_type: str = "RETRIEVAL_DOCUMENT",
         timeout: float = 120.0,
         retry: RetryConfig | None = None,
+        rate_limit: dict[str, Any] | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for Google Generative AI embeddings.
 
@@ -508,6 +514,7 @@ class Factory:
                 CLASSIFICATION, CLUSTERING, QUESTION_ANSWERING, FACT_VERIFICATION.
             timeout: Request timeout in seconds.
             retry: Retry configuration for transient errors. None disables retry.
+            rate_limit: Rate limit config (e.g., {"per_minute": 60}).
 
         Returns:
             EmbeddingClient configured for Google embeddings.
@@ -515,14 +522,23 @@ class Factory:
         from .backends.embedding import GoogleBackend
         from .backends.providers.google import GoogleEmbeddingTaskType
 
+        rate_limiter = self._create_rate_limiter(rate_limit)
         backend = GoogleBackend(
             self._lg,
             api_key=api_key,
             model=model,
             task_type=GoogleEmbeddingTaskType(task_type),
             timeout=timeout,
+            rate_limiter=rate_limiter,
         )
         return EmbeddingClient(self._lg, backend, retry=retry)
+
+    def _create_rate_limiter(self, config: dict[str, Any] | None) -> RateLimiter | None:
+        """Create rate limiter from config."""
+        if not config:
+            return None
+        per_minute = config.get("per_minute", 60)
+        return RateLimiter(self._lg, per_minute=per_minute)
 
     def _parse_embedding_retry(self, cfg: DotDict) -> RetryConfig | None:
         """Parse retry config for embeddings."""
@@ -546,6 +562,8 @@ class Factory:
             model: text-embedding-3-small
             timeout: 120.0            # Optional, default 120.0
             task_type: RETRIEVAL_DOCUMENT  # Google only
+            rate_limit:               # Optional
+              per_minute: 60
             retry:                    # Optional
               base: 1.0
               max_delay: 60
@@ -564,6 +582,7 @@ class Factory:
         backend_type = cfg.get("type", "openai")
         timeout = cfg.get("timeout", 120.0)
         retry = self._parse_embedding_retry(cfg)
+        rate_limit = cfg.get("rate_limit")
 
         if backend_type in ("openai", "openai_compatible"):
             if not cfg.get("base_url"):
@@ -574,6 +593,7 @@ class Factory:
                 api_key=cfg.get("api_key"),
                 timeout=timeout,
                 retry=retry,
+                rate_limit=rate_limit,
             )
         elif backend_type == "google":
             if not cfg.get("api_key"):
@@ -584,6 +604,7 @@ class Factory:
                 task_type=cfg.get("task_type", "RETRIEVAL_DOCUMENT"),
                 timeout=timeout,
                 retry=retry,
+                rate_limit=rate_limit,
             )
         else:
             raise ValueError(f"Unknown embedding backend type: {backend_type}")

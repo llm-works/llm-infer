@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 from appinfra.log import Logger
+from appinfra.rate_limit import RateLimiter
 
 from ...errors import BackendRequestError, BackendTimeoutError, BackendUnavailableError
 from ..embedding import Backend as EmbeddingBackend
@@ -55,6 +56,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         model: str = "gemini-embedding-001",
         task_type: GoogleEmbeddingTaskType = GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
         timeout: float = 120.0,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         """Initialize Google embedding backend.
 
@@ -64,8 +66,9 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings.
             timeout: Request timeout in seconds.
+            rate_limiter: Optional rate limiter for request throttling.
         """
-        super().__init__(lg, model)
+        super().__init__(lg, model, rate_limiter)
         self._api_key = api_key
         self._task_type = task_type
         self._timeout = timeout
@@ -266,6 +269,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     # =========================================================================
 
     def embed(self, text: str, *, dimensions: int | None = None) -> EmbeddingResult:
+        self._wait_rate_limit()
         data = self._execute_single_sync(text, dimensions)
         return self._parse_single(data, dimensions)
 
@@ -278,12 +282,14 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             raise BackendRequestError(
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"
             )
+        self._wait_rate_limit()
         data = self._execute_batch_sync(texts, dimensions)
         return self._parse_batch(data, len(texts), dimensions)
 
     async def embed_async(
         self, text: str, *, dimensions: int | None = None
     ) -> EmbeddingResult:
+        await self._wait_rate_limit_async()
         data = await self._execute_single_async(text, dimensions)
         return self._parse_single(data, dimensions)
 
@@ -296,6 +302,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             raise BackendRequestError(
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"
             )
+        await self._wait_rate_limit_async()
         data = await self._execute_batch_async(texts, dimensions)
         return self._parse_batch(data, len(texts), dimensions)
 

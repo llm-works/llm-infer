@@ -28,11 +28,13 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Self
 
 from appinfra.log import Logger
+from appinfra.rate_limit import RateLimiter
 
 
 @dataclass
@@ -70,20 +72,51 @@ class Backend(ABC):
             result = await backend.embed_async("Hello world")
     """
 
-    def __init__(self, lg: Logger, model: str) -> None:
+    def __init__(
+        self,
+        lg: Logger,
+        model: str,
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
         """Initialize backend with common configuration.
 
         Args:
             lg: Logger instance.
             model: Model name to use for embeddings.
+            rate_limiter: Optional rate limiter for request throttling.
         """
         self._lg = lg
         self._model = model
+        self._rate_limiter = rate_limiter
 
     @property
     def model(self) -> str:
         """Model name used for embeddings."""
         return self._model
+
+    @property
+    def rate_limiter(self) -> RateLimiter | None:
+        """Rate limiter for this backend."""
+        return self._rate_limiter
+
+    def can_call(self) -> bool:
+        """Check if a call would be allowed right now (non-blocking).
+
+        Returns False if rate limited.
+        """
+        if self._rate_limiter is not None and not self._rate_limiter.can_proceed():
+            return False
+        return True
+
+    def _wait_rate_limit(self) -> None:
+        """Wait for rate limiter (sync)."""
+        if self._rate_limiter is not None:
+            self._rate_limiter.next()
+
+    async def _wait_rate_limit_async(self) -> None:
+        """Wait for rate limiter (async)."""
+        if self._rate_limiter is not None:
+            await asyncio.to_thread(self._rate_limiter.next)
 
     @property
     @abstractmethod
