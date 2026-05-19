@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   response dimensions match request.
 - **`EmbeddingClient`**: Client wrapper with retry support for embedding backends. Supports
   sync/async operations (`embed`, `embed_async`, `embed_batch`, `embed_batch_async`) with retry for
-  transient errors (5xx, 429, 529). Exported from `llm_infer.client` along with `EmbeddingResult`
-  and `RetryConfig`.
+  transient errors (5xx, 429, 529). Client-level `model` and `dimensions` defaults (per-call
+  overrides take precedence). Exported from `llm_infer.client` along with `EmbeddingResult` and
+  `RetryConfig`.
 - **`[embedding]` extra**: New optional dependency for OpenAI token counting via tiktoken. Included
   in `[client]` extra.
 - **`DecisionType` enum**: Explicit decision type for routing decisions (`INITIAL`, `RETRY_SAME`,

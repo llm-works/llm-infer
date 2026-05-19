@@ -102,11 +102,15 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     # =========================================================================
 
     def _build_single_request(
-        self, text: str, dimensions: int | None = None
+        self,
+        text: str,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Build request payload for single embedding."""
+        effective_model = model or self._model
         request: dict[str, Any] = {
-            "model": f"models/{self._model}",
+            "model": f"models/{effective_model}",
             "content": {"parts": [{"text": text}]},
             "taskType": self._task_type.value,
         }
@@ -115,11 +119,15 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         return request
 
     def _build_batch_request(
-        self, texts: list[str], dimensions: int | None = None
+        self,
+        texts: list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Build request payload for batch embedding."""
+        effective_model = model or self._model
         base_request: dict[str, Any] = {
-            "model": f"models/{self._model}",
+            "model": f"models/{effective_model}",
             "taskType": self._task_type.value,
         }
         if dimensions is not None:
@@ -137,19 +145,27 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     # =========================================================================
 
     def _execute_single_sync(
-        self, text: str, dimensions: int | None = None
+        self,
+        text: str,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Execute sync request for single embedding."""
-        url = f"{self.BASE_URL}/models/{self._model}:embedContent"
-        payload = self._build_single_request(text, dimensions)
+        effective_model = model or self._model
+        url = f"{self.BASE_URL}/models/{effective_model}:embedContent"
+        payload = self._build_single_request(text, model, dimensions)
         return self._do_request_sync(url, payload)
 
     def _execute_batch_sync(
-        self, texts: list[str], dimensions: int | None = None
+        self,
+        texts: list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Execute sync request for batch embedding."""
-        url = f"{self.BASE_URL}/models/{self._model}:batchEmbedContents"
-        payload = self._build_batch_request(texts, dimensions)
+        effective_model = model or self._model
+        url = f"{self.BASE_URL}/models/{effective_model}:batchEmbedContents"
+        payload = self._build_batch_request(texts, model, dimensions)
         return self._do_request_sync(url, payload)
 
     def _do_request_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -176,19 +192,27 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
 
     async def _execute_single_async(
-        self, text: str, dimensions: int | None = None
+        self,
+        text: str,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Execute async request for single embedding."""
-        url = f"{self.BASE_URL}/models/{self._model}:embedContent"
-        payload = self._build_single_request(text, dimensions)
+        effective_model = model or self._model
+        url = f"{self.BASE_URL}/models/{effective_model}:embedContent"
+        payload = self._build_single_request(text, model, dimensions)
         return await self._do_request_async(url, payload)
 
     async def _execute_batch_async(
-        self, texts: list[str], dimensions: int | None = None
+        self,
+        texts: list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """Execute async request for batch embedding."""
-        url = f"{self.BASE_URL}/models/{self._model}:batchEmbedContents"
-        payload = self._build_batch_request(texts, dimensions)
+        effective_model = model or self._model
+        url = f"{self.BASE_URL}/models/{effective_model}:batchEmbedContents"
+        payload = self._build_batch_request(texts, model, dimensions)
         return await self._do_request_async(url, payload)
 
     async def _do_request_async(
@@ -222,7 +246,10 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     # =========================================================================
 
     def _parse_single(
-        self, data: dict[str, Any], requested_dims: int | None = None
+        self,
+        data: dict[str, Any],
+        model: str | None = None,
+        requested_dims: int | None = None,
     ) -> EmbeddingResult:
         """Parse response for single embedding."""
         try:
@@ -236,9 +263,9 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             )
         return EmbeddingResult(
             embedding=embedding,
-            model=self._model,
+            model=model or self._model,
             dimensions=actual_dims,
-            prompt_tokens=None,  # Use count_tokens() to get token counts
+            prompt_tokens=None,
         )
 
     def _extract_embedding(
@@ -259,7 +286,11 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         return embedding, dims
 
     def _parse_batch(
-        self, data: dict[str, Any], num_texts: int, requested_dims: int | None = None
+        self,
+        data: dict[str, Any],
+        num_texts: int,
+        model: str | None = None,
+        requested_dims: int | None = None,
     ) -> BatchEmbeddingResult:
         """Parse batch embedding response."""
         raw_embeddings = data.get("embeddings", [])
@@ -278,7 +309,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
 
         return BatchEmbeddingResult(
             embeddings=embeddings,
-            model=self._model,
+            model=model or self._model,
             dimensions=actual_dims,
             size=num_texts,
             total_prompt_tokens=None,
@@ -288,18 +319,28 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     # Public API
     # =========================================================================
 
-    def embed(self, text: str, *, dimensions: int | None = None) -> EmbeddingResult:
+    def embed(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResult:
         self._wait_rate_limit()
-        data = self._execute_single_sync(text, dimensions)
-        return self._parse_single(data, dimensions)
+        data = self._execute_single_sync(text, model, dimensions)
+        return self._parse_single(data, model, dimensions)
 
     def embed_batch(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         if not texts:
             return BatchEmbeddingResult(
                 embeddings=[],
-                model=self._model,
+                model=model or self._model,
                 dimensions=0,
                 size=0,
                 total_prompt_tokens=None,
@@ -309,23 +350,31 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"
             )
         self._wait_rate_limit()
-        data = self._execute_batch_sync(texts, dimensions)
-        return self._parse_batch(data, len(texts), dimensions)
+        data = self._execute_batch_sync(texts, model, dimensions)
+        return self._parse_batch(data, len(texts), model, dimensions)
 
     async def embed_async(
-        self, text: str, *, dimensions: int | None = None
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> EmbeddingResult:
         await self._wait_rate_limit_async()
-        data = await self._execute_single_async(text, dimensions)
-        return self._parse_single(data, dimensions)
+        data = await self._execute_single_async(text, model, dimensions)
+        return self._parse_single(data, model, dimensions)
 
     async def embed_batch_async(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         if not texts:
             return BatchEmbeddingResult(
                 embeddings=[],
-                model=self._model,
+                model=model or self._model,
                 dimensions=0,
                 size=0,
                 total_prompt_tokens=None,
@@ -335,8 +384,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
                 f"Batch size {len(texts)} exceeds maximum of {self.MAX_BATCH_SIZE}"
             )
         await self._wait_rate_limit_async()
-        data = await self._execute_batch_async(texts, dimensions)
-        return self._parse_batch(data, len(texts), dimensions)
+        data = await self._execute_batch_async(texts, model, dimensions)
+        return self._parse_batch(data, len(texts), model, dimensions)
 
     # =========================================================================
     # Token counting

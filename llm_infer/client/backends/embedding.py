@@ -156,12 +156,19 @@ class Backend(ABC):
     # =========================================================================
 
     @abstractmethod
-    def embed(self, text: str, *, dimensions: int | None = None) -> EmbeddingResult:
+    def embed(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResult:
         """Generate embedding for a single text.
 
         Args:
             text: Text to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses backend default.
+            dimensions: Output dimensions. None uses backend/provider default.
 
         Returns:
             EmbeddingResult with embedding vector and metadata.
@@ -175,13 +182,18 @@ class Backend(ABC):
 
     @abstractmethod
     def embed_batch(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts.
 
         Args:
             texts: List of texts to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses backend default.
+            dimensions: Output dimensions. None uses backend/provider default.
 
         Returns:
             BatchEmbeddingResult with results list and total_prompt_tokens.
@@ -199,13 +211,18 @@ class Backend(ABC):
 
     @abstractmethod
     async def embed_async(
-        self, text: str, *, dimensions: int | None = None
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> EmbeddingResult:
         """Generate embedding for a single text (async).
 
         Args:
             text: Text to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses backend default.
+            dimensions: Output dimensions. None uses backend/provider default.
 
         Returns:
             EmbeddingResult with embedding vector and metadata.
@@ -219,13 +236,18 @@ class Backend(ABC):
 
     @abstractmethod
     async def embed_batch_async(
-        self, texts: list[str], *, dimensions: int | None = None
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
     ) -> BatchEmbeddingResult:
         """Generate embeddings for multiple texts (async).
 
         Args:
             texts: List of texts to embed.
-            dimensions: Output dimensions. None uses model default.
+            model: Model override. None uses backend default.
+            dimensions: Output dimensions. None uses backend/provider default.
 
         Returns:
             BatchEmbeddingResult with results list and total_prompt_tokens.

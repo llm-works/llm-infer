@@ -466,6 +466,7 @@ class Factory:
         timeout: float = 120.0,
         retry: RetryConfig | None = None,
         rate_limit: dict[str, Any] | None = None,
+        dimensions: int | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for OpenAI-compatible embeddings API.
 
@@ -478,6 +479,7 @@ class Factory:
             timeout: Request timeout in seconds.
             retry: Retry configuration for transient errors. None disables retry.
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
+            dimensions: Default output dimensions. None uses provider default.
 
         Returns:
             EmbeddingClient configured for the embeddings API.
@@ -493,7 +495,9 @@ class Factory:
             api_key=api_key,
             ctx=ctx,
         )
-        return EmbeddingClient(self._lg, backend, retry=retry)
+        return EmbeddingClient(
+            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+        )
 
     def embeddings_google(
         self,
@@ -503,6 +507,7 @@ class Factory:
         timeout: float = 120.0,
         retry: RetryConfig | None = None,
         rate_limit: dict[str, Any] | None = None,
+        dimensions: int | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for Google Generative AI embeddings.
 
@@ -515,6 +520,7 @@ class Factory:
             timeout: Request timeout in seconds.
             retry: Retry configuration for transient errors. None disables retry.
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
+            dimensions: Default output dimensions. None uses provider default.
 
         Returns:
             EmbeddingClient configured for Google embeddings.
@@ -531,7 +537,9 @@ class Factory:
             task_type=GoogleEmbeddingTaskType(task_type),
             ctx=ctx,
         )
-        return EmbeddingClient(self._lg, backend, retry=retry)
+        return EmbeddingClient(
+            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+        )
 
     def _create_rate_limiter(self, config: dict[str, Any] | None) -> RateLimiter | None:
         """Create rate limiter from config.
@@ -556,6 +564,46 @@ class Factory:
             timeout=retry_cfg.get("timeout", 120.0),
         )
 
+    def _embeddings_openai_from_config(
+        self,
+        cfg: DotDict,
+        timeout: float,
+        retry: RetryConfig | None,
+        dimensions: int | None,
+    ) -> EmbeddingClient:
+        """Create OpenAI embedding client from config."""
+        if not cfg.get("base_url"):
+            raise ValueError("base_url required for openai embedding backend")
+        return self.embeddings(
+            base_url=cfg.base_url,
+            model=cfg.get("model", "default"),
+            api_key=cfg.get("api_key"),
+            timeout=timeout,
+            retry=retry,
+            rate_limit=cfg.get("rate_limit"),
+            dimensions=dimensions,
+        )
+
+    def _embeddings_google_from_config(
+        self,
+        cfg: DotDict,
+        timeout: float,
+        retry: RetryConfig | None,
+        dimensions: int | None,
+    ) -> EmbeddingClient:
+        """Create Google embedding client from config."""
+        if not cfg.get("api_key"):
+            raise ValueError("api_key required for google embedding backend")
+        return self.embeddings_google(
+            api_key=cfg.api_key,
+            model=cfg.get("model", "gemini-embedding-001"),
+            task_type=cfg.get("task_type", "RETRIEVAL_DOCUMENT"),
+            timeout=timeout,
+            retry=retry,
+            rate_limit=cfg.get("rate_limit"),
+            dimensions=dimensions,
+        )
+
     def embeddings_from_config(self, config: dict[str, Any]) -> EmbeddingClient:
         """Create EmbeddingClient from configuration dict.
 
@@ -564,6 +612,7 @@ class Factory:
             base_url: http://...      # Required for openai
             api_key: sk-...           # Optional for openai, required for google
             model: text-embedding-3-small
+            dimensions: 384           # Optional, reduces output from native size
             timeout: 120.0            # Optional, default 120.0
             task_type: RETRIEVAL_DOCUMENT  # Google only
             rate_limit:               # Optional
@@ -586,29 +635,11 @@ class Factory:
         backend_type = cfg.get("type", "openai")
         timeout = cfg.get("timeout", 120.0)
         retry = self._parse_embedding_retry(cfg)
-        rate_limit = cfg.get("rate_limit")
+        dimensions = cfg.get("dimensions")
 
         if backend_type in ("openai", "openai_compatible"):
-            if not cfg.get("base_url"):
-                raise ValueError("base_url required for openai embedding backend")
-            return self.embeddings(
-                base_url=cfg.base_url,
-                model=cfg.get("model", "default"),
-                api_key=cfg.get("api_key"),
-                timeout=timeout,
-                retry=retry,
-                rate_limit=rate_limit,
-            )
+            return self._embeddings_openai_from_config(cfg, timeout, retry, dimensions)
         elif backend_type == "google":
-            if not cfg.get("api_key"):
-                raise ValueError("api_key required for google embedding backend")
-            return self.embeddings_google(
-                api_key=cfg.api_key,
-                model=cfg.get("model", "gemini-embedding-001"),
-                task_type=cfg.get("task_type", "RETRIEVAL_DOCUMENT"),
-                timeout=timeout,
-                retry=retry,
-                rate_limit=rate_limit,
-            )
+            return self._embeddings_google_from_config(cfg, timeout, retry, dimensions)
         else:
             raise ValueError(f"Unknown embedding backend type: {backend_type}")
