@@ -495,7 +495,9 @@ class Factory:
             api_key=api_key,
             ctx=ctx,
         )
-        return EmbeddingClient(self._lg, backend, retry=retry, dimensions=dimensions)
+        return EmbeddingClient(
+            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+        )
 
     def embeddings_google(
         self,
@@ -535,7 +537,9 @@ class Factory:
             task_type=GoogleEmbeddingTaskType(task_type),
             ctx=ctx,
         )
-        return EmbeddingClient(self._lg, backend, retry=retry, dimensions=dimensions)
+        return EmbeddingClient(
+            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+        )
 
     def _create_rate_limiter(self, config: dict[str, Any] | None) -> RateLimiter | None:
         """Create rate limiter from config.

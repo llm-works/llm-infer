@@ -104,6 +104,49 @@ class TestEmbeddingClientEmbed:
         mock_backend.embed_batch.assert_not_called()
         client.close()
 
+    def test_client_level_defaults_forwarded(
+        self, mock_lg: Logger, mock_backend: MagicMock
+    ) -> None:
+        """Test client-level model and dimensions defaults are forwarded to backend."""
+        expected = EmbeddingResult(
+            embedding=[0.1, 0.2],
+            model="override-model",
+            dimensions=256,
+            prompt_tokens=5,
+        )
+        mock_backend.embed.return_value = expected
+
+        client = EmbeddingClient(
+            mock_lg, mock_backend, model="override-model", dimensions=256
+        )
+        result = client.embed("hello")
+
+        assert result is expected
+        mock_backend.embed.assert_called_once_with(
+            "hello", model="override-model", dimensions=256
+        )
+        client.close()
+
+    def test_per_call_overrides_client_defaults(
+        self, mock_lg: Logger, mock_backend: MagicMock
+    ) -> None:
+        """Test per-call parameters override client-level defaults."""
+        expected = EmbeddingResult(
+            embedding=[0.1], model="call-model", dimensions=128, prompt_tokens=3
+        )
+        mock_backend.embed.return_value = expected
+
+        client = EmbeddingClient(
+            mock_lg, mock_backend, model="client-model", dimensions=256
+        )
+        result = client.embed("hello", model="call-model", dimensions=128)
+
+        assert result is expected
+        mock_backend.embed.assert_called_once_with(
+            "hello", model="call-model", dimensions=128
+        )
+        client.close()
+
 
 class TestEmbeddingClientRetry:
     """Test retry behavior."""
