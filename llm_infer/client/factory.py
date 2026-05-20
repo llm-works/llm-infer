@@ -508,6 +508,7 @@ class Factory:
         retry: RetryConfig | None = None,
         rate_limit: dict[str, Any] | None = None,
         dimensions: int | None = None,
+        count_tokens: bool = False,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for Google Generative AI embeddings.
 
@@ -521,6 +522,7 @@ class Factory:
             retry: Retry configuration for transient errors. None disables retry.
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
             dimensions: Default output dimensions. None uses provider default.
+            count_tokens: If True, populate prompt_tokens via countTokens API (extra call).
 
         Returns:
             EmbeddingClient configured for Google embeddings.
@@ -536,6 +538,7 @@ class Factory:
             model=model,
             task_type=GoogleEmbeddingTaskType(task_type),
             ctx=ctx,
+            count_tokens=count_tokens,
         )
         return EmbeddingClient(
             self._lg, backend, retry=retry, model=model, dimensions=dimensions
@@ -590,6 +593,7 @@ class Factory:
         timeout: float,
         retry: RetryConfig | None,
         dimensions: int | None,
+        count_tokens: bool,
     ) -> EmbeddingClient:
         """Create Google embedding client from config."""
         if not cfg.get("api_key"):
@@ -602,6 +606,7 @@ class Factory:
             retry=retry,
             rate_limit=cfg.get("rate_limit"),
             dimensions=dimensions,
+            count_tokens=count_tokens,
         )
 
     def embeddings_from_config(self, config: dict[str, Any]) -> EmbeddingClient:
@@ -615,6 +620,7 @@ class Factory:
             dimensions: 384           # Optional, reduces output from native size
             timeout: 120.0            # Optional, default 120.0
             task_type: RETRIEVAL_DOCUMENT  # Google only
+            count_tokens: true        # Google only, populate prompt_tokens (extra API call)
             rate_limit:               # Optional
               per_minute: 60
             retry:                    # Optional
@@ -636,10 +642,13 @@ class Factory:
         timeout = cfg.get("timeout", 120.0)
         retry = self._parse_embedding_retry(cfg)
         dimensions = cfg.get("dimensions")
+        count_tokens = cfg.get("count_tokens", False)
 
         if backend_type in ("openai", "openai_compatible"):
             return self._embeddings_openai_from_config(cfg, timeout, retry, dimensions)
         elif backend_type == "google":
-            return self._embeddings_google_from_config(cfg, timeout, retry, dimensions)
+            return self._embeddings_google_from_config(
+                cfg, timeout, retry, dimensions, count_tokens
+            )
         else:
             raise ValueError(f"Unknown embedding backend type: {backend_type}")

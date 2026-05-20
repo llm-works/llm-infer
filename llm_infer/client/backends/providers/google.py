@@ -56,6 +56,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         model: str = "gemini-embedding-001",
         task_type: GoogleEmbeddingTaskType = GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
         ctx: BackendContext | None = None,
+        count_tokens: bool = False,
     ) -> None:
         """Initialize Google embedding backend.
 
@@ -65,10 +66,12 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings.
             ctx: Backend context with rate limiter and timeouts.
+            count_tokens: If True, populate prompt_tokens via countTokens API (extra call).
         """
         super().__init__(lg, model, ctx)
         self._api_key = api_key
         self._task_type = task_type
+        self._count_tokens = count_tokens
 
         headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
         self._client = httpx.Client(timeout=self._ctx.request_timeout, headers=headers)
@@ -250,6 +253,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         data: dict[str, Any],
         model: str | None = None,
         requested_dims: int | None = None,
+        prompt_tokens: int | None = None,
     ) -> EmbeddingResult:
         """Parse response for single embedding."""
         try:
@@ -265,7 +269,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             embedding=embedding,
             model=model or self._model,
             dimensions=actual_dims,
-            prompt_tokens=None,
+            prompt_tokens=prompt_tokens,
         )
 
     def _extract_embedding(
@@ -291,6 +295,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         num_texts: int,
         model: str | None = None,
         requested_dims: int | None = None,
+        total_prompt_tokens: int | None = None,
     ) -> BatchEmbeddingResult:
         """Parse batch embedding response."""
         raw_embeddings = data.get("embeddings", [])
@@ -312,7 +317,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             model=model or self._model,
             dimensions=actual_dims,
             size=num_texts,
-            total_prompt_tokens=None,
+            total_prompt_tokens=total_prompt_tokens,
         )
 
     # =========================================================================
@@ -328,7 +333,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> EmbeddingResult:
         self._wait_rate_limit()
         data = self._execute_single_sync(text, model, dimensions)
-        return self._parse_single(data, model, dimensions)
+        tokens = self._count_tokens_sync([text]) if self._count_tokens else None
+        return self._parse_single(data, model, dimensions, tokens)
 
     def embed_batch(
         self,
@@ -343,7 +349,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
                 model=model or self._model,
                 dimensions=0,
                 size=0,
-                total_prompt_tokens=None,
+                total_prompt_tokens=0 if self._count_tokens else None,
             )
         if len(texts) > self.MAX_BATCH_SIZE:
             raise BackendRequestError(
@@ -351,7 +357,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             )
         self._wait_rate_limit()
         data = self._execute_batch_sync(texts, model, dimensions)
-        return self._parse_batch(data, len(texts), model, dimensions)
+        tokens = self._count_tokens_sync(texts) if self._count_tokens else None
+        return self._parse_batch(data, len(texts), model, dimensions, tokens)
 
     async def embed_async(
         self,
@@ -362,7 +369,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> EmbeddingResult:
         await self._wait_rate_limit_async()
         data = await self._execute_single_async(text, model, dimensions)
-        return self._parse_single(data, model, dimensions)
+        tokens = await self._count_tokens_async([text]) if self._count_tokens else None
+        return self._parse_single(data, model, dimensions, tokens)
 
     async def embed_batch_async(
         self,
@@ -377,7 +385,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
                 model=model or self._model,
                 dimensions=0,
                 size=0,
-                total_prompt_tokens=None,
+                total_prompt_tokens=0 if self._count_tokens else None,
             )
         if len(texts) > self.MAX_BATCH_SIZE:
             raise BackendRequestError(
@@ -385,7 +393,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             )
         await self._wait_rate_limit_async()
         data = await self._execute_batch_async(texts, model, dimensions)
-        return self._parse_batch(data, len(texts), model, dimensions)
+        tokens = await self._count_tokens_async(texts) if self._count_tokens else None
+        return self._parse_batch(data, len(texts), model, dimensions, tokens)
 
     # =========================================================================
     # Token counting
