@@ -19,7 +19,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 from appinfra.log import Logger
@@ -178,6 +178,26 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # Request execution
     # =========================================================================
 
+    def _raise_backend_error(self, e: Exception) -> NoReturn:
+        """Translate httpx/json exceptions to backend errors."""
+        if isinstance(e, httpx.ConnectError):
+            raise BackendUnavailableError(
+                f"Failed to connect to {self._base_url}"
+            ) from e
+        if isinstance(e, httpx.TimeoutException):
+            raise BackendTimeoutError(
+                f"Request timed out after {self._ctx.request_timeout}s"
+            ) from e
+        if isinstance(e, httpx.HTTPStatusError):
+            raise BackendRequestError(
+                f"Backend error: {e.response.text}", status_code=e.response.status_code
+            ) from e
+        if isinstance(e, httpx.RequestError):
+            raise BackendRequestError(f"Transport error: {e}") from e
+        if isinstance(e, json.JSONDecodeError):
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        raise e
+
     def _execute_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute sync request with error translation."""
         if self._ctx.rate_limiter is not None:
@@ -187,22 +207,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
 
     def _execute_stream_sync(
         self, url: str, payload: dict[str, Any]
@@ -214,25 +220,14 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             with self._client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
             ) as resp:
-                resp.raise_for_status()
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError:
+                    resp.read()
+                    raise
                 yield from self._parse_sse_stream_sync(resp)
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            e.response.read()  # Must read body for streaming responses
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
 
     async def _execute_async(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute async request with error translation."""
@@ -245,22 +240,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
         finally:
             self._release_async_request()
 
@@ -276,26 +257,15 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             async with client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
             ) as resp:
-                resp.raise_for_status()
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError:
+                    await resp.aread()
+                    raise
                 async for chunk in self._parse_sse_stream_async(resp):
                     yield chunk
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            await e.response.aread()  # Must read body for streaming responses
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
         finally:
             self._release_async_request()
 
