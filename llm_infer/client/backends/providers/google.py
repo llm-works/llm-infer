@@ -333,7 +333,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> EmbeddingResult:
         self._wait_rate_limit()
         data = self._execute_single_sync(text, model, dimensions)
-        tokens = self._count_tokens_sync([text]) if self._count_tokens else None
+        tokens = self._count_tokens_sync([text], model) if self._count_tokens else None
         return self._parse_single(data, model, dimensions, tokens)
 
     def embed_batch(
@@ -357,7 +357,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             )
         self._wait_rate_limit()
         data = self._execute_batch_sync(texts, model, dimensions)
-        tokens = self._count_tokens_sync(texts) if self._count_tokens else None
+        tokens = self._count_tokens_sync(texts, model) if self._count_tokens else None
         return self._parse_batch(data, len(texts), model, dimensions, tokens)
 
     async def embed_async(
@@ -369,7 +369,11 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> EmbeddingResult:
         await self._wait_rate_limit_async()
         data = await self._execute_single_async(text, model, dimensions)
-        tokens = await self._count_tokens_async([text]) if self._count_tokens else None
+        tokens = (
+            await self._count_tokens_async([text], model)
+            if self._count_tokens
+            else None
+        )
         return self._parse_single(data, model, dimensions, tokens)
 
     async def embed_batch_async(
@@ -393,49 +397,53 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
             )
         await self._wait_rate_limit_async()
         data = await self._execute_batch_async(texts, model, dimensions)
-        tokens = await self._count_tokens_async(texts) if self._count_tokens else None
+        tokens = (
+            await self._count_tokens_async(texts, model) if self._count_tokens else None
+        )
         return self._parse_batch(data, len(texts), model, dimensions, tokens)
 
     # =========================================================================
     # Token counting
     # =========================================================================
 
-    def _count_tokens_sync(self, texts: list[str]) -> int:
+    def _count_tokens_sync(self, texts: list[str], model: str | None = None) -> int:
         """Count tokens via API (sync)."""
-        url = f"{self.BASE_URL}/models/{self._model}:countTokens"
+        effective_model = model or self._model
+        url = f"{self.BASE_URL}/models/{effective_model}:countTokens"
         contents = [{"parts": [{"text": text}]} for text in texts]
         payload = {"contents": contents}
+        self._wait_rate_limit()
         data = self._do_request_sync(url, payload)
         total: int = data.get("totalTokens", 0)
         return total
 
-    async def _count_tokens_async(self, texts: list[str]) -> int:
+    async def _count_tokens_async(
+        self, texts: list[str], model: str | None = None
+    ) -> int:
         """Count tokens via API (async)."""
-        url = f"{self.BASE_URL}/models/{self._model}:countTokens"
+        effective_model = model or self._model
+        url = f"{self.BASE_URL}/models/{effective_model}:countTokens"
         contents = [{"parts": [{"text": text}]} for text in texts]
         payload = {"contents": contents}
+        await self._wait_rate_limit_async()
         data = await self._do_request_async(url, payload)
         total: int = data.get("totalTokens", 0)
         return total
 
     def count_tokens(self, text: str) -> int:
-        self._wait_rate_limit()
         return self._count_tokens_sync([text])
 
     def count_tokens_batch(self, texts: list[str]) -> int:
         if not texts:
             return 0
-        self._wait_rate_limit()
         return self._count_tokens_sync(texts)
 
     async def count_tokens_async(self, text: str) -> int:
-        await self._wait_rate_limit_async()
         return await self._count_tokens_async([text])
 
     async def count_tokens_batch_async(self, texts: list[str]) -> int:
         if not texts:
             return 0
-        await self._wait_rate_limit_async()
         return await self._count_tokens_async(texts)
 
     # =========================================================================
