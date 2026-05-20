@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reasoning_effort: "none"` by default, giving full token budget to output.
 - **Gemini `think` field rejection**: Gemini API rejects unknown fields. `GeminiBackend` now maps
   `think=True` to `reasoning_effort: "medium"` and strips the `think` field from payloads.
+- **Streaming error handler crash**: OpenAI backend streaming methods accessed `response.text` on
+  HTTP errors without reading the body first, causing `ResponseNotRead` exception that masked the
+  real error. Now reads body before accessing text.
 
 ### Changed
 

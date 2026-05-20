@@ -225,6 +225,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                 f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
+            e.response.read()  # Must read body for streaming responses
             raise BackendRequestError(
                 f"Backend error: {e.response.text}", status_code=e.response.status_code
             ) from e
@@ -287,6 +288,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                 f"Request timed out after {self._ctx.request_timeout}s"
             ) from e
         except httpx.HTTPStatusError as e:
+            await e.response.aread()  # Must read body for streaming responses
             raise BackendRequestError(
                 f"Backend error: {e.response.text}", status_code=e.response.status_code
             ) from e
