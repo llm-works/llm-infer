@@ -77,6 +77,7 @@ class FallbackClient(ChatClient):
                 model, e.g.: {"gpt-4o": "claude-sonnet-4-20250514"}
                 Chains are implicit: if claude-sonnet also has a fallback,
                 it will be tried after claude-sonnet fails.
+                Cycles (A->B->A) retry round-robin until one succeeds.
             detector: Custom transient error detector. Uses DefaultTransientDetector
                 if not provided.
         """
