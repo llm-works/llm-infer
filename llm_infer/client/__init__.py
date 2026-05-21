@@ -47,6 +47,7 @@ Classes:
     - ChatClient: Abstract base class for all chat clients
     - LLMClient: Single-backend client
     - LLMRouter: Multi-backend router with backend selection
+    - FallbackClient: Automatic model fallback on transient errors
     - Factory: Creates clients and routers from config
 
 Backends:
@@ -75,6 +76,7 @@ from .errors import (
     ModelConflictError,
 )
 from .factory import Factory
+from .fallback import FallbackClient
 from .router import LLMRouter, ResolvedTarget
 from .strategies import (
     DefaultStrategy,
@@ -110,6 +112,7 @@ __all__ = [
     # Client types
     "ChatClient",
     "BoundChatClient",
+    "FallbackClient",
     "LLMClient",
     # Embeddings client
     "EmbeddingClient",
