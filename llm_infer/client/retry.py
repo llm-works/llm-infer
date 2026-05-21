@@ -135,6 +135,28 @@ class RetryHelper(RetryBase):
         super().__init__(lg)
         self._ctx = ctx
 
+    def _log_retry(
+        self,
+        error: BackendUnavailableError | BackendRequestError,
+        attempt: int,
+        delay: float,
+    ) -> None:
+        """Log retry attempt with context."""
+        status_code = None
+        if isinstance(error, BackendRequestError):
+            status_code = error.status_code
+
+        self._lg.warning(
+            "transient error, retrying",
+            extra={
+                "error_type": type(error).__name__,
+                "status_code": status_code,
+                "error": str(error)[:200],
+                "retry_attempt": attempt,
+                "delay_seconds": round(delay, 2),
+            },
+        )
+
     def call(
         self,
         fn: Callable[[], T],
@@ -190,6 +212,7 @@ class RetryHelper(RetryBase):
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
+                self._log_retry(e, retry_count + 1, delay)
                 time.sleep(delay)
                 retry_count += 1
                 _fire_request(self._lg, callbacks, request, retry_count)
@@ -254,6 +277,7 @@ class RetryHelper(RetryBase):
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
+                self._log_retry(e, retry_count + 1, delay)
                 await asyncio.sleep(delay)
                 retry_count += 1
                 _fire_request(self._lg, callbacks, request, retry_count)

@@ -31,7 +31,7 @@ from appinfra.log import Logger
 
 from .base import ChatClient
 from .errors import BackendError
-from .fallback_helper import build_model_chain, detect_cycles
+from .fallback_helper import detect_cycles
 from .router import LLMRouter
 from .strategy import DefaultTransientDetector, TransientAction, TransientDetector
 from .types import (
@@ -107,14 +107,39 @@ class FallbackClient(ChatClient):
         action = self._detector.classify(error)
         return action == TransientAction.RETRY_NEXT
 
-    def _log_fallback(self, failed: str, fallback: str, error: BackendError) -> None:
-        """Log fallback attempt."""
+    def _log_fallback(
+        self,
+        failed: str,
+        fallback: str,
+        error: BackendError,
+        attempt: int,
+    ) -> None:
+        """Log fallback attempt with full context."""
+        from .errors import BackendRequestError
+
+        status_code = None
+        if isinstance(error, BackendRequestError):
+            status_code = error.status_code
+
         self._lg.warning(
-            "model failed, trying fallback",
+            "model request failed, trying fallback",
             extra={
                 "failed_model": failed,
                 "fallback_model": fallback,
+                "error_type": type(error).__name__,
+                "status_code": status_code,
                 "error": str(error)[:200],
+                "attempt": attempt,
+            },
+        )
+
+    def _log_chain_exhausted(self, model: str, error: BackendError) -> None:
+        """Log when all fallback models have failed."""
+        self._lg.error(
+            "all fallback models failed",
+            extra={
+                "original_model": model,
+                "final_error": str(error)[:200],
             },
         )
 
@@ -167,23 +192,27 @@ class FallbackClient(ChatClient):
         return self._chat_with_fallback(request)
 
     def _chat_with_fallback(self, request: ChatRequest) -> ChatResponse:
-        """Execute chat with fallback chain."""
-        models = build_model_chain(request.model, self._fallbacks)
-        last_error: BackendError | None = None
+        """Execute chat with fallback, following pairs until success or no fallback."""
+        model = request.model
+        original_model = model
+        attempt = 0
 
-        for i, model in enumerate(models):
+        while True:
+            attempt += 1
             try:
                 return self._call_with_model(request, model)
             except BackendError as e:
-                last_error = e
                 if not self._should_fallback(e):
                     raise
-                if i < len(models) - 1:
-                    self._log_fallback(str(model), str(models[i + 1]), e)
 
-        if last_error:
-            raise last_error
-        raise RuntimeError("No models to try")
+                # Look up fallback from pairs
+                next_model = self._fallbacks.get(model) if model else None
+                if next_model is None:
+                    self._log_chain_exhausted(str(original_model), e)
+                    raise
+
+                self._log_fallback(str(model), next_model, e, attempt)
+                model = next_model
 
     def chat_stream(
         self,
@@ -219,11 +248,13 @@ class FallbackClient(ChatClient):
     def _stream_with_fallback(
         self, request: ChatRequest, holder: ResponseHolder
     ) -> Iterator[str]:
-        """Execute streaming chat with fallback chain."""
-        models = build_model_chain(request.model, self._fallbacks)
-        last_error: BackendError | None = None
+        """Execute streaming chat with fallback, following pairs."""
+        model = request.model
+        original_model = model
+        attempt = 0
 
-        for i, model in enumerate(models):
+        while True:
+            attempt += 1
             streamed = False
             try:
                 resolved = self._router.resolve(model=model)
@@ -234,14 +265,17 @@ class FallbackClient(ChatClient):
                     yield token
                 return
             except BackendError as e:
-                last_error = e
                 if streamed or not self._should_fallback(e):
                     raise
-                if i < len(models) - 1:
-                    self._log_fallback(str(model), str(models[i + 1]), e)
 
-        if last_error:
-            raise last_error
+                # Look up fallback from pairs
+                next_model = self._fallbacks.get(model) if model else None
+                if next_model is None:
+                    self._log_chain_exhausted(str(original_model), e)
+                    raise
+
+                self._log_fallback(str(model), next_model, e, attempt)
+                model = next_model
 
     # =========================================================================
     # Async API
@@ -278,23 +312,27 @@ class FallbackClient(ChatClient):
         return await self._chat_async_with_fallback(request)
 
     async def _chat_async_with_fallback(self, request: ChatRequest) -> ChatResponse:
-        """Execute async chat with fallback chain."""
-        models = build_model_chain(request.model, self._fallbacks)
-        last_error: BackendError | None = None
+        """Execute async chat with fallback, following pairs until success or no fallback."""
+        model = request.model
+        original_model = model
+        attempt = 0
 
-        for i, model in enumerate(models):
+        while True:
+            attempt += 1
             try:
                 return await self._call_with_model_async(request, model)
             except BackendError as e:
-                last_error = e
                 if not self._should_fallback(e):
                     raise
-                if i < len(models) - 1:
-                    self._log_fallback(str(model), str(models[i + 1]), e)
 
-        if last_error:
-            raise last_error
-        raise RuntimeError("No models to try")
+                # Look up fallback from pairs
+                next_model = self._fallbacks.get(model) if model else None
+                if next_model is None:
+                    self._log_chain_exhausted(str(original_model), e)
+                    raise
+
+                self._log_fallback(str(model), next_model, e, attempt)
+                model = next_model
 
     def chat_stream_async(
         self,
@@ -330,11 +368,13 @@ class FallbackClient(ChatClient):
     async def _stream_async_with_fallback(
         self, request: ChatRequest, holder: ResponseHolder
     ) -> AsyncIterator[str]:
-        """Execute async streaming chat with fallback chain."""
-        models = build_model_chain(request.model, self._fallbacks)
-        last_error: BackendError | None = None
+        """Execute async streaming chat with fallback, following pairs."""
+        model = request.model
+        original_model = model
+        attempt = 0
 
-        for i, model in enumerate(models):
+        while True:
+            attempt += 1
             streamed = False
             try:
                 resolved = self._router.resolve(model=model)
@@ -345,14 +385,17 @@ class FallbackClient(ChatClient):
                     yield token
                 return
             except BackendError as e:
-                last_error = e
                 if streamed or not self._should_fallback(e):
                     raise
-                if i < len(models) - 1:
-                    self._log_fallback(str(model), str(models[i + 1]), e)
 
-        if last_error:
-            raise last_error
+                # Look up fallback from pairs
+                next_model = self._fallbacks.get(model) if model else None
+                if next_model is None:
+                    self._log_chain_exhausted(str(original_model), e)
+                    raise
+
+                self._log_fallback(str(model), next_model, e, attempt)
+                model = next_model
 
     # =========================================================================
     # Rate limiting

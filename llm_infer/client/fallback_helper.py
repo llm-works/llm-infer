@@ -63,34 +63,3 @@ def _build_cycle_path(start: str, fallbacks: Mapping[str, str]) -> str:
         current = next_model
 
     return " -> ".join(path)
-
-
-def build_model_chain(
-    model: str | None,
-    fallbacks: Mapping[str, str],
-) -> list[str | None]:
-    """Build list of models to try by following fallback pairs.
-
-    Args:
-        model: Starting model (or None for default).
-        fallbacks: Model fallback pairs.
-
-    Returns:
-        Ordered list of models to try.
-    """
-    if model is None:
-        return [None]
-
-    chain: list[str | None] = [model]
-    seen = {model}
-    current = model
-
-    while current in fallbacks:
-        next_model = fallbacks[current]
-        if next_model in seen:
-            break
-        chain.append(next_model)
-        seen.add(next_model)
-        current = next_model
-
-    return chain

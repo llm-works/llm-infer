@@ -334,10 +334,7 @@ class Factory:
 
         from appinfra.dot_dict import DotDict
 
-        from .strategies import (
-            DefaultStrategyFactory,
-            FallbackStrategyFactory,
-        )
+        from .strategies import DefaultStrategyFactory
 
         config = DotDict(strategy_config)
 
@@ -351,17 +348,15 @@ class Factory:
 
         # Built-in strategies
         strategy_type = config.get("type", "default")
-        factories: dict[
-            str, type[DefaultStrategyFactory] | type[FallbackStrategyFactory]
-        ] = {
+        factories: dict[str, type[DefaultStrategyFactory]] = {
             "default": DefaultStrategyFactory,
-            "fallback": FallbackStrategyFactory,
         }
 
         if strategy_type not in factories:
             raise ValueError(
                 f"Unknown strategy type '{strategy_type}'. "
-                f"Available: {list(factories.keys())}"
+                f"Available: {list(factories.keys())}. "
+                f"For fallback/resilience, use FallbackClient instead."
             )
 
         return factories[strategy_type]().create(self._lg, config)
