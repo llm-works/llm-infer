@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import AsyncIterator, Iterator, Mapping
-from typing import Any
+from typing import Any, Self
 
 from appinfra.log import Logger
 
@@ -97,9 +97,14 @@ class FallbackClient(ChatClient):
         return self._fallbacks
 
     def _should_fallback(self, error: BackendError) -> bool:
-        """Check if error should trigger fallback."""
+        """Check if error should trigger fallback.
+
+        Only RETRY_NEXT triggers fallback (5xx, timeout, unavailable).
+        RETRY_SAME (429 rate limit) should NOT trigger fallback - let the
+        error bubble up so the caller can decide to wait or abort.
+        """
         action = self._detector.classify(error)
-        return action in (TransientAction.RETRY_NEXT, TransientAction.RETRY_SAME)
+        return action == TransientAction.RETRY_NEXT
 
     def _log_fallback(self, failed: str, fallback: str, error: BackendError) -> None:
         """Log fallback attempt."""
@@ -116,7 +121,7 @@ class FallbackClient(ChatClient):
         """Call router's internal client with specific model."""
         resolved = self._router.resolve(model=model)
         req = dataclasses.replace(request, model=resolved.model)
-        return self._router._clients[resolved.backend]._chat(req)
+        return self._router.get_client(backend=resolved.backend)._chat(req)
 
     async def _call_with_model_async(
         self, request: ChatRequest, model: str | None
@@ -124,7 +129,7 @@ class FallbackClient(ChatClient):
         """Call router's internal client with specific model (async)."""
         resolved = self._router.resolve(model=model)
         req = dataclasses.replace(request, model=resolved.model)
-        return await self._router._clients[resolved.backend]._chat_async(req)
+        return await self._router.get_client(backend=resolved.backend)._chat_async(req)
 
     # =========================================================================
     # Sync API
@@ -222,7 +227,7 @@ class FallbackClient(ChatClient):
             try:
                 resolved = self._router.resolve(model=model)
                 req = dataclasses.replace(request, model=resolved.model)
-                client = self._router._clients[resolved.backend]
+                client = self._router.get_client(backend=resolved.backend)
                 for token in client._chat_stream(req, holder):
                     streamed = True
                     yield token
@@ -333,7 +338,7 @@ class FallbackClient(ChatClient):
             try:
                 resolved = self._router.resolve(model=model)
                 req = dataclasses.replace(request, model=resolved.model)
-                client = self._router._clients[resolved.backend]
+                client = self._router.get_client(backend=resolved.backend)
                 async for token in client._chat_stream_async(req, holder):
                     streamed = True
                     yield token
@@ -347,3 +352,49 @@ class FallbackClient(ChatClient):
 
         if last_error:
             raise last_error
+
+    # =========================================================================
+    # Rate limiting
+    # =========================================================================
+
+    def can_call(self) -> bool:
+        """Check if a call is allowed (delegates to router)."""
+        return self._router.can_call()
+
+    # =========================================================================
+    # Resource management
+    # =========================================================================
+
+    def close(self) -> None:
+        """Close sync resources (delegates to router)."""
+        self._router.close()
+
+    async def aclose(self) -> None:
+        """Close async resources (delegates to router)."""
+        await self._router.aclose()
+
+    def __enter__(self) -> Self:
+        """Enter sync context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Exit sync context manager."""
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        """Enter async context manager."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Exit async context manager."""
+        await self.aclose()
