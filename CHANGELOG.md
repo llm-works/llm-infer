@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`FallbackClient`**: Cross-provider model resilience. Wraps `LLMRouter` and falls back to
+  equivalent models on transient errors. Fallbacks defined as pairs (A → B) that chain implicitly.
+- **Request ID tracking**: `ChatRequest.id` field (8 hex chars) for log correlation across retries.
+- **Debug logging**: `LLMClient` logs request/response at DEBUG level (model, backend, timing,
+  tokens) for both streaming and non-streaming paths. `RetryHelper` logs retry attempts.
 - **Embedding backends**: New backend architecture for embeddings with OpenAI and Google providers.
   Per-request `dimensions` parameter for reduced output (e.g., 384 instead of 1536). Token counting
   via `count_tokens()` — OpenAI uses tiktoken locally, Google calls countTokens API. Validates
@@ -37,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Streaming error handler crash**: OpenAI backend streaming methods accessed `response.text` on
   HTTP errors without reading the body first, causing `ResponseNotRead` exception that masked the
   real error. Now reads body inside the stream context manager before it closes.
+
+### Removed
+
+- **`FallbackStrategy`**: Removed from router — fallback logic now lives in `FallbackClient`. Router
+  only handles model → backend routing.
 
 ### Changed
 

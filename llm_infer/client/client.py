@@ -401,6 +401,53 @@ class LLMClient(ChatClient):
         )
         return self._backend.last_response
 
+    def _fire_on_request(self, request: ChatRequest) -> None:
+        """Fire on_request callback with error handling."""
+        cb = self._callbacks
+        if cb and cb.on_request:
+            try:
+                cb.on_request(request, 0)
+            except Exception as e:
+                self._lg.warning("on_request callback failed", extra={"exception": e})
+
+    def _fire_on_response(self, request: ChatRequest, response: ChatResponse) -> None:
+        """Fire on_response callback with error handling."""
+        cb = self._callbacks
+        if cb and cb.on_response:
+            try:
+                cb.on_response(request, response)
+            except Exception as e:
+                self._lg.warning("on_response callback failed", extra={"exception": e})
+
+    def _fire_on_error(self, request: ChatRequest, error: Exception) -> None:
+        """Fire on_error callback with error handling."""
+        cb = self._callbacks
+        if cb and cb.on_error:
+            try:
+                cb.on_error(request, error)
+            except Exception as cb_err:
+                self._lg.warning(
+                    "on_error callback failed", extra={"exception": cb_err}
+                )
+
+    def _log_stream_response(
+        self, request: ChatRequest, start_t: float, response: ChatResponse | None
+    ) -> None:
+        """Log streaming response with timing and token counts."""
+        usage = response.usage if response else None
+        self._lg.debug(
+            "LLM chat response (streaming)",
+            extra={
+                "after": since(start_t),
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+                "tokens": {"in": usage.prompt_tokens, "out": usage.completion_tokens}
+                if usage
+                else None,
+            },
+        )
+
     def _chat(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (sync) with retry."""
         self._lg.debug(
@@ -437,32 +484,27 @@ class LLMClient(ChatClient):
     ) -> Iterator[str]:
         """Internal: stream chat request (sync).
 
-        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        Note: Streaming does not support retry. on_request fires before streaming;
+        on_response and on_error fire after stream completes.
         """
-        cb = self._callbacks
-        if cb and cb.on_request:
-            try:
-                cb.on_request(request, 0)
-            except Exception as e:
-                self._lg.warning("on_request callback failed", extra={"exception": e})
+        self._lg.debug(
+            "LLM chat request (streaming)...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        self._fire_on_request(request)
         try:
             yield from self._backend.chat_stream(request, holder)
             response = self._get_stream_response(holder)
-            if cb and cb.on_response and response:
-                try:
-                    cb.on_response(request, response)
-                except Exception as e:
-                    self._lg.warning(
-                        "on_response callback failed", extra={"exception": e}
-                    )
+            self._log_stream_response(request, start_t, response)
+            if response:
+                self._fire_on_response(request, response)
         except Exception as e:
-            if cb and cb.on_error:
-                try:
-                    cb.on_error(request, e)
-                except Exception as cb_err:
-                    self._lg.warning(
-                        "on_error callback failed", extra={"exception": cb_err}
-                    )
+            self._fire_on_error(request, e)
             raise
 
     async def _chat_async(self, request: ChatRequest) -> ChatResponse:
@@ -501,33 +543,28 @@ class LLMClient(ChatClient):
     ) -> AsyncIterator[str]:
         """Internal: stream chat request (async).
 
-        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        Note: Streaming does not support retry. on_request fires before streaming;
+        on_response and on_error fire after stream completes.
         """
-        cb = self._callbacks
-        if cb and cb.on_request:
-            try:
-                cb.on_request(request, 0)
-            except Exception as e:
-                self._lg.warning("on_request callback failed", extra={"exception": e})
+        self._lg.debug(
+            "LLM chat request (streaming)...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        self._fire_on_request(request)
         try:
             async for token in self._backend.chat_stream_async(request, holder):
                 yield token
             response = self._get_stream_response(holder)
-            if cb and cb.on_response and response:
-                try:
-                    cb.on_response(request, response)
-                except Exception as e:
-                    self._lg.warning(
-                        "on_response callback failed", extra={"exception": e}
-                    )
+            self._log_stream_response(request, start_t, response)
+            if response:
+                self._fire_on_response(request, response)
         except Exception as e:
-            if cb and cb.on_error:
-                try:
-                    cb.on_error(request, e)
-                except Exception as cb_err:
-                    self._lg.warning(
-                        "on_error callback failed", extra={"exception": cb_err}
-                    )
+            self._fire_on_error(request, e)
             raise
 
     # =========================================================================
