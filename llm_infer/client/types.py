@@ -77,8 +77,8 @@ class ChatStreamSync(Protocol):
 
 
 def _gen_req_id() -> str:
-    """Generate a 6-char request ID for log correlation."""
-    return uuid.uuid4().hex[:6]
+    """Generate an 8-char request ID for log correlation."""
+    return uuid.uuid4().hex[:8]
 
 
 @dataclass

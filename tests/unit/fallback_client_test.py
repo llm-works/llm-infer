@@ -265,3 +265,29 @@ class TestFallbackClientLogging:
         # Assert - no fallback logging (429 is not a fallback trigger)
         mock_logger.warning.assert_not_called()
         mock_logger.error.assert_not_called()
+
+    def test_cyclic_fallback_retries_until_success(
+        self, mock_router: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Cyclic fallback retries round-robin until one model succeeds."""
+        mock_client = MagicMock()
+        call_count = 0
+
+        def mock_chat(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 4:  # Fail first 3 attempts (a, b, a)
+                raise BackendRequestError("Service Unavailable", status_code=503)
+            return ChatResponse(content="success", model="b", provider="test")
+
+        mock_client._chat = mock_chat
+        mock_router.get_client = MagicMock(return_value=mock_client)
+
+        # Cyclic fallback: a -> b -> a (round-robin)
+        fallbacks = {"a": "b", "b": "a"}
+        client = FallbackClient(mock_logger, mock_router, fallbacks)
+
+        response = client.chat([{"role": "user", "content": "hello"}], model="a")
+
+        assert response.content == "success"
+        assert call_count == 4  # a fails, b fails, a fails, b succeeds
