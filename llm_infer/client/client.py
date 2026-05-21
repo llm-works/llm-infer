@@ -484,7 +484,8 @@ class LLMClient(ChatClient):
     ) -> Iterator[str]:
         """Internal: stream chat request (sync).
 
-        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        Note: Streaming does not support retry. on_request fires before streaming;
+        on_response and on_error fire after stream completes.
         """
         self._lg.debug(
             "LLM chat request (streaming)...",
@@ -542,7 +543,8 @@ class LLMClient(ChatClient):
     ) -> AsyncIterator[str]:
         """Internal: stream chat request (async).
 
-        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        Note: Streaming does not support retry. on_request fires before streaming;
+        on_response and on_error fire after stream completes.
         """
         self._lg.debug(
             "LLM chat request (streaming)...",
