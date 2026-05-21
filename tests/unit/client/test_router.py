@@ -510,39 +510,11 @@ class TestLLMRouterResolve:
             router.resolve(backend="unknown")
 
 
-class TestFallbackModelResolution:
-    """Test model resolution during fallback."""
+class TestNormalizeDecision:
+    """Test _normalize_decision model resolution."""
 
-    def test_fallback_uses_target_backend_default_model(self, mock_lg: Logger) -> None:
-        """When falling back, should use target backend's default model, not source's."""
-        from llm_infer.client.router_helper import _normalize_decision
-        from llm_infer.client.strategy import DecisionType, RoutingDecision
-
-        client_grok = make_client(mock_lg, "grok", default_model="grok-model")
-        client_anthropic = make_client(
-            mock_lg, "anthropic", default_model="claude-sonnet"
-        )
-        router = LLMRouter(
-            mock_lg, {"grok": client_grok, "anthropic": client_anthropic}, "grok"
-        )
-
-        request = ChatRequest(
-            messages=[{"role": "user", "content": "hi"}],
-            model="grok-model",
-        )
-        fallback_decision = RoutingDecision(
-            backend="anthropic",
-            decision_type=DecisionType.FALLBACK,
-        )
-
-        normalized = _normalize_decision(router, request, fallback_decision)
-
-        assert normalized.backend == "anthropic"
-        assert normalized.updated_request is not None
-        assert normalized.updated_request.model == "claude-sonnet"
-
-    def test_non_fallback_preserves_original_model(self, mock_lg: Logger) -> None:
-        """Non-fallback decisions should preserve the original model."""
+    def test_preserves_original_model(self, mock_lg: Logger) -> None:
+        """Decisions should preserve the original model from request."""
         from llm_infer.client.router_helper import _normalize_decision
         from llm_infer.client.strategy import RoutingDecision
 

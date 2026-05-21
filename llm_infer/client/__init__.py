@@ -81,8 +81,6 @@ from .router import LLMRouter, ResolvedTarget
 from .strategies import (
     DefaultStrategy,
     DefaultStrategyFactory,
-    FallbackStrategy,
-    FallbackStrategyFactory,
 )
 from .strategy import (
     DecisionType,
@@ -137,8 +135,6 @@ __all__ = [
     "DefaultTransientDetector",
     "DefaultStrategy",
     "DefaultStrategyFactory",
-    "FallbackStrategy",
-    "FallbackStrategyFactory",
     # Request/Response types
     "ChatRequest",
     "ChatResponse",
