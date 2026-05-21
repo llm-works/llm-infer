@@ -75,6 +75,7 @@ from .errors import (
     ModelConflictError,
 )
 from .factory import Factory
+from .fallback import FallbackClient
 from .router import LLMRouter, ResolvedTarget
 from .strategies import (
     DefaultStrategy,
@@ -110,6 +111,7 @@ __all__ = [
     # Client types
     "ChatClient",
     "BoundChatClient",
+    "FallbackClient",
     "LLMClient",
     # Embeddings client
     "EmbeddingClient",
