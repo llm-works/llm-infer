@@ -47,6 +47,7 @@ Classes:
     - ChatClient: Abstract base class for all chat clients
     - LLMClient: Single-backend client
     - LLMRouter: Multi-backend router with backend selection
+    - FallbackClient: Automatic model fallback on transient errors
     - Factory: Creates clients and routers from config
 
 Backends:

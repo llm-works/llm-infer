@@ -77,7 +77,7 @@ class TestDetectCycles:
         }
         lg = MagicMock()
         cycles = detect_cycles(fallbacks, lg)
-        assert "a" in cycles or "b" in cycles
+        assert cycles == {"a", "b"}
         lg.warning.assert_called_once()
         call_args = lg.warning.call_args
         assert "cycle" in call_args[1]["extra"]
@@ -91,8 +91,8 @@ class TestDetectCycles:
         }
         lg = MagicMock()
         cycles = detect_cycles(fallbacks, lg)
-        assert len(cycles) > 0
-        lg.warning.assert_called()
+        assert cycles == {"a", "b", "c"}
+        lg.warning.assert_called_once()
 
     def test_self_loop_detected(self) -> None:
         """Self-loop A->A is detected."""

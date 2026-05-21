@@ -26,6 +26,7 @@ def detect_cycles(fallbacks: Mapping[str, str], lg: Logger) -> set[str]:
         if start in cycle_models:
             continue
 
+        path: list[str] = []
         visited: set[str] = set()
         current = start
 
@@ -36,9 +37,12 @@ def detect_cycles(fallbacks: Mapping[str, str], lg: Logger) -> set[str]:
                     "cycle detected in fallback config",
                     extra={"cycle": cycle_path},
                 )
-                cycle_models.update(visited)
+                # Only add actual cycle members (from where current reappears)
+                cycle_start_idx = path.index(current)
+                cycle_models.update(path[cycle_start_idx:])
                 break
             visited.add(current)
+            path.append(current)
             current = fallbacks[current]
 
     return cycle_models

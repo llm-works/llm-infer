@@ -48,9 +48,10 @@ from .types import (
 class FallbackClient(ChatClient):
     """Client that wraps LLMRouter with automatic model fallback.
 
-    When a request fails with a transient error (5xx, timeout, rate limit),
+    When a request fails with a transient error (5xx, timeout, unavailable),
     FallbackClient consults the fallback pairs and retries with equivalent
-    models until one succeeds or the chain is exhausted.
+    models until one succeeds or the chain is exhausted. Rate limit errors
+    (429) are NOT retried via fallback - they bubble up for caller handling.
 
     Fallbacks are defined as pairs that chain implicitly:
         {"A": "B", "B": "C"} means A -> B -> C
