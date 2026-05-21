@@ -32,6 +32,7 @@ from copy import copy
 from typing import Any, Self
 
 from appinfra.log import Logger
+from appinfra.time import since, start
 
 from .backends import Backend
 from .base import ChatClient
@@ -402,11 +403,34 @@ class LLMClient(ChatClient):
 
     def _chat(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (sync) with retry."""
-        return self._retry.call(
+        self._lg.debug(
+            "LLM chat request...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        response = self._retry.call(
             lambda: self._backend.chat(request),
             request=request,
             callbacks=self._callbacks,
         )
+        usage = response.usage
+        self._lg.debug(
+            "LLM chat response",
+            extra={
+                "after": since(start_t),
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+                "tokens": {"in": usage.prompt_tokens, "out": usage.completion_tokens}
+                if usage
+                else None,
+            },
+        )
+        return response
 
     def _chat_stream(
         self, request: ChatRequest, holder: ResponseHolder | None = None
@@ -443,11 +467,34 @@ class LLMClient(ChatClient):
 
     async def _chat_async(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (async) with retry."""
-        return await self._retry.call_async(
+        self._lg.debug(
+            "LLM chat request...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        response = await self._retry.call_async(
             lambda: self._backend.chat_async(request),
             request=request,
             callbacks=self._callbacks,
         )
+        usage = response.usage
+        self._lg.debug(
+            "LLM chat response",
+            extra={
+                "after": since(start_t),
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+                "tokens": {"in": usage.prompt_tokens, "out": usage.completion_tokens}
+                if usage
+                else None,
+            },
+        )
+        return response
 
     async def _chat_stream_async(
         self, request: ChatRequest, holder: ResponseHolder | None = None

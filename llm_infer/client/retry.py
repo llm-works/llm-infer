@@ -140,22 +140,39 @@ class RetryHelper(RetryBase):
         error: BackendUnavailableError | BackendRequestError,
         attempt: int,
         delay: float,
+        req_id: str | None = None,
     ) -> None:
         """Log retry attempt with context."""
         status_code = None
         if isinstance(error, BackendRequestError):
             status_code = error.status_code
 
-        self._lg.warning(
-            "transient error, retrying",
-            extra={
-                "error_type": type(error).__name__,
-                "status_code": status_code,
-                "error": str(error)[:200],
-                "retry_attempt": attempt,
-                "delay_seconds": round(delay, 2),
-            },
-        )
+        extra: dict[str, Any] = {
+            "error_type": type(error).__name__,
+            "status_code": status_code,
+            "error": str(error)[:200],
+            "retry_attempt": attempt,
+            "delay_seconds": round(delay, 2),
+        }
+        if req_id:
+            extra["req"] = req_id
+
+        self._lg.warning("transient error, retrying", extra=extra)
+
+    def _log_retry_send(
+        self,
+        attempt: int,
+        model: str | None,
+        req_id: str | None = None,
+    ) -> None:
+        """Log debug message before retry send."""
+        extra: dict[str, Any] = {"attempt": attempt}
+        if model:
+            extra["model"] = model
+        if req_id:
+            extra["req"] = req_id
+
+        self._lg.debug("retrying request...", extra=extra)
 
     def call(
         self,
@@ -199,6 +216,8 @@ class RetryHelper(RetryBase):
         """Execute with retry loop, firing callbacks."""
         backoff = self.create_backoff(retry)
         start_time = time.monotonic()
+        req_id = request.id if request else None
+        model = request.model if request else None
         while True:
             try:
                 result = fn()
@@ -212,9 +231,10 @@ class RetryHelper(RetryBase):
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                self._log_retry(e, retry_count + 1, delay)
+                self._log_retry(e, retry_count + 1, delay, req_id)
                 time.sleep(delay)
                 retry_count += 1
+                self._log_retry_send(retry_count, model, req_id)
                 _fire_request(self._lg, callbacks, request, retry_count)
             except Exception as e:
                 _fire_error(self._lg, callbacks, request, e)
@@ -264,6 +284,8 @@ class RetryHelper(RetryBase):
         """Execute with retry loop, firing callbacks (async)."""
         backoff = self.create_backoff(retry)
         start_time = time.monotonic()
+        req_id = request.id if request else None
+        model = request.model if request else None
         while True:
             try:
                 result = await fn()
@@ -277,9 +299,10 @@ class RetryHelper(RetryBase):
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                self._log_retry(e, retry_count + 1, delay)
+                self._log_retry(e, retry_count + 1, delay, req_id)
                 await asyncio.sleep(delay)
                 retry_count += 1
+                self._log_retry_send(retry_count, model, req_id)
                 _fire_request(self._lg, callbacks, request, retry_count)
             except Exception as e:
                 _fire_error(self._lg, callbacks, request, e)
