@@ -191,3 +191,33 @@ class TestModelDiscovery:
         assert backend1._list_models_called
         assert backend2._list_models_called
         assert models == {"model-1": "backend1", "model-2": "backend2"}
+
+    def test_loads_default_model_from_config(self, mock_lg: Logger) -> None:
+        """Test that default model field is registered for routing."""
+        backend = MockBackend(mock_lg)
+
+        discovery = ModelDiscovery(
+            mock_lg,
+            backends={"gemini": backend},
+            configs={"gemini": {"model": "gemini-2.5-flash"}},
+        )
+
+        # Default model should be routable without explicit models list
+        assert discovery.get_backend_for_model("gemini-2.5-flash") == "gemini"
+
+    def test_models_list_takes_precedence_over_default(self, mock_lg: Logger) -> None:
+        """Test that models list registration happens before default model."""
+        backend1 = MockBackend(mock_lg, name="backend1")
+        backend2 = MockBackend(mock_lg, name="backend2")
+
+        discovery = ModelDiscovery(
+            mock_lg,
+            backends={"backend1": backend1, "backend2": backend2},
+            configs={
+                "backend1": {"models": ["shared-model"]},
+                "backend2": {"model": "shared-model"},
+            },
+        )
+
+        # models list should win - backend2's default model is skipped
+        assert discovery.get_backend_for_model("shared-model") == "backend1"
