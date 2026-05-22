@@ -67,12 +67,13 @@ class ModelDiscovery:
         self._load_from_config()
 
     def _load_from_config(self) -> None:
-        """Load model mappings from config-specified models lists.
+        """Load model mappings from config-specified models lists and default models.
 
         Raises:
             ModelConflictError: If the same model appears in multiple backend configs.
         """
         for name, config in self._configs.items():
+            # Register explicit models list
             config_models: list[str] = config.get("models", [])
             if config_models:
                 self._backend_models[name] = list(config_models)
@@ -82,6 +83,11 @@ class ModelDiscovery:
                     existing = self._model_to_backend[model]
                     raise ModelConflictError(model, existing, name)
                 self._model_to_backend[model] = name
+
+            # Also register the default model if not already mapped
+            default_model = config.get("model")
+            if default_model and default_model not in self._model_to_backend:
+                self._model_to_backend[default_model] = name
 
     @property
     def models(self) -> dict[str, str]:

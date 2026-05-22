@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Router discovery from default model**: `ModelDiscovery` now registers the `model` field from
+  backend configs for routing, not just the `models` list.
 - **Gemini structured output truncation**: Gemini 2.5 models have thinking enabled by default, which
   consumed `max_output_tokens` budget and caused JSON truncation. `GeminiBackend` now sets
   `reasoning_effort: "none"` by default, giving full token budget to output.
