@@ -11,6 +11,7 @@ Multi-backend LLM client with sync/async support, routing strategies, and model 
 | `base.py` | `ChatClient` | Abstract base class for all chat clients |
 | `client.py` | `LLMClient` | Single-backend client with rate limiting and backoff |
 | `router.py` | `LLMRouter` | Multi-backend router with strategy-based routing |
+| `fallback.py` | `FallbackClient` | Cross-provider model fallback on transient errors |
 | `factory.py` | `Factory` | Creates clients/routers from config |
 
 ### Embedding
@@ -25,18 +26,20 @@ Multi-backend LLM client with sync/async support, routing strategies, and model 
 
 | Module | Purpose |
 |--------|---------|
-| `strategy.py` | `RoutingStrategy` protocol and core types (`RoutingContext`, `RoutingDecision`, `RoutingResult`) |
-| `strategies.py` | Built-in strategies: `DefaultStrategy`, `FallbackStrategy` |
-| `resolver.py` | `ModelResolver` — model-to-backend resolution, lazy discovery, "auto"/"default" handling |
+| `strategy.py` | `RoutingStrategy` protocol and core types (`RoutingContext`, `RoutingDecision`, `RoutingResult`, `DecisionType`) |
+| `strategies.py` | Built-in strategy: `DefaultStrategy` (round-robin over enabled backends) |
+| `discovery.py` | `ModelDiscovery` — lazy model probing and model-to-backend resolution |
 | `router_helper.py` | Internal helpers for routing loop (setup, success/error handling) |
 
 ## Other Modules
 
 | Module | Purpose |
 |--------|---------|
-| `types.py` | `ChatRequest`, `ChatResponse`, `AdapterInfo` |
+| `types.py` | `ChatRequest`, `ChatResponse`, `ChatStream`/`ChatStreamSync`, `AdapterInfo` |
 | `errors.py` | `BackendError`, `BackendRequestError`, `BackendTimeoutError`, `BackendUnavailableError` |
-| `discovery.py` | `ModelDiscovery` — lazy model probing across backends |
+| `retry.py` | `RetryBase`, `RetryHelper` — exponential backoff for transient errors |
+| `bound.py` | `BoundChatClient` — wraps a `ChatClient` to inject context (used by `with_callbacks()`) |
+| `embedding.py` | `EmbeddingClient` (see [Embeddings](#embeddings)) |
 | `backends/` | Chat backends (OpenAI, Anthropic, Gemini) and embedding backends (OpenAI, Google) |
 | `saia.py` | SAIA adapter integration (optional) |
 
@@ -130,27 +133,46 @@ async with factory.from_config(config) as router:
 
 ### With Strategy
 
-Configure routing strategies in the config:
+`LLMRouter` resolves each request to a backend via a `RoutingStrategy`. The only
+built-in strategy is `default` (round-robin over enabled backends matching the
+requested model). Custom strategies live in external packages.
 
 ```yaml
-# Built-in fallback strategy
+# Built-in default strategy (round-robin) — also the implicit default
 strategy:
-  type: fallback
-  order: [primary, fallback]
+  type: default
 
-# Custom strategy from external package (expects module.Factory class)
+# Custom strategy from external package (module must export a Factory class)
 strategy:
   factory: myapp.routing
   priority_order: [fast, reliable]
 ```
 
-```python
-# Strategy is loaded automatically from config
-router = factory.from_config(config)
+For cross-provider model fallback on transient errors (5xx, timeout,
+unavailable), wrap the router with [`FallbackClient`](#cross-provider-fallback)
+instead of writing a custom strategy.
 
-# Fallback strategy will retry on transient errors (429, 5xx, timeout)
-response = router.chat(messages)
+### Cross-Provider Fallback
+
+`FallbackClient` wraps an `LLMRouter` and retries with an equivalent model on
+transient errors. Fallback pairs chain implicitly:
+
+```python
+from llm_infer.client import Factory, FallbackClient
+
+router = Factory(lg).from_config(config)
+fallbacks = {
+    "gpt-4o": "claude-sonnet-4-20250514",
+    "claude-sonnet-4-20250514": "gemini-2.0-pro",   # chains: gpt-4o -> claude -> gemini
+}
+client = FallbackClient(lg, router, fallbacks)
+
+response = client.chat(messages, model="gpt-4o")
 ```
+
+Rate-limit errors (429) are *not* retried via fallback — they bubble up so
+callers can apply their own backoff. Cycles (A->B->A) are detected and retried
+round-robin until one succeeds.
 
 ## Embeddings
 
@@ -209,10 +231,17 @@ from llm_infer.client import EmbeddingClient
 from llm_infer.client.backends import RetryConfig, embedding
 
 backend = embedding.OpenAIBackend(...)
-client = EmbeddingClient(lg, backend, retry=RetryConfig(timeout=120.0))
+client = EmbeddingClient(
+    lg,
+    backend,
+    retry=RetryConfig(timeout=120.0),
+    model="text-embedding-3-small",  # client-level default
+    dimensions=384,                   # client-level default (per-call overrides win)
+)
 
 with client:
-    result = client.embed("Hello world")  # Retries on 429, 5xx, timeout
+    result = client.embed("Hello world")              # uses defaults
+    result = client.embed("Hello world", dimensions=1536)  # per-call override
 ```
 
 ### Token Counting
@@ -244,3 +273,20 @@ async with backend:
     results = await backend.embed_batch_async(["One", "Two"])
     tokens = await backend.count_tokens_async("Hello world")
 ```
+
+## Observability
+
+Each `ChatRequest` carries an 8-hex-char `id` for log correlation. `LLMClient`
+logs request/response (model, backend, timing, tokens) and `RetryHelper` logs
+retry attempts at DEBUG level — set your logger accordingly to trace a request
+through retries and fallbacks:
+
+```python
+import logging
+logging.getLogger("my-app").setLevel(logging.DEBUG)
+```
+
+For structured observability hooks (cost tracking, tracing), use
+`LLMClient.with_callbacks()` or pass `callbacks=` to any `Factory` method.
+Callbacks fire on request (with retry count), response, and error; pass a
+`context` dict (e.g., `{"op": "planning"}`) to thread user data through them.
