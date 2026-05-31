@@ -484,7 +484,7 @@ class _StreamState:
     thinking: list[str] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     _tool_call_buffer: dict[int, dict[str, Any]] = field(default_factory=dict)
-    finish_reason: FinishReason | None = None
+    finish_reason: FinishReason | str | None = None
     usage: ChatCompletionUsage | None = None
     adapter: AdapterInfo | None = None
     raw: dict[str, Any] | None = None
@@ -590,14 +590,14 @@ class _StreamState:
         ]
 
 
-def _parse_finish_reason(value: str | None) -> FinishReason | None:
-    """Parse finish reason string to enum."""
+def _parse_finish_reason(value: str | None) -> FinishReason | str | None:
+    """Parse finish reason; unknown values pass through as raw str."""
     if value is None:
         return None
     try:
         return FinishReason(value)
     except ValueError:
-        return None
+        return value
 
 
 def _parse_usage(data: dict[str, Any] | None) -> ChatCompletionUsage | None:

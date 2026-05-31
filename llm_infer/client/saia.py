@@ -277,7 +277,7 @@ class SAIAAdapter(Backend):
             input_tokens = response.usage.prompt_tokens
             output_tokens = response.usage.completion_tokens
 
-        finish_reason = response.finish_reason.value if response.finish_reason else None
+        finish_reason = str(response.finish_reason) if response.finish_reason else None
 
         return SAIAChatResponse(
             content=response.content or "",

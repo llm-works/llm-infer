@@ -64,7 +64,11 @@ class TestParseFinishReason:
         assert _parse_finish_reason("stop") == FinishReason.STOP
 
     def test_unknown_value(self) -> None:
-        assert _parse_finish_reason("invalid") is None
+        assert _parse_finish_reason("invalid") == "invalid"
+
+    def test_gemini_function_call_filter(self) -> None:
+        value = "function_call_filter: MALFORMED_FUNCTION_CALL"
+        assert _parse_finish_reason(value) == value
 
 
 class TestParseUsage:
