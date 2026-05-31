@@ -227,8 +227,17 @@ class TestParseHelpers:
         assert _parse_finish_reason(None) is None
 
     def test_parse_finish_reason_unknown(self) -> None:
-        """Test parsing unknown finish reason returns None."""
-        assert _parse_finish_reason("unknown_reason") is None
+        """Unmapped values pass through verbatim, not collapsed to None."""
+        assert _parse_finish_reason("unknown_reason") == "unknown_reason"
+
+    def test_parse_finish_reason_gemini_function_call_filter(self) -> None:
+        """Gemini's compound rejection reason passes through verbatim."""
+        value = "function_call_filter: MALFORMED_FUNCTION_CALL"
+        assert _parse_finish_reason(value) == value
+
+    def test_parse_finish_reason_gemini_safety(self) -> None:
+        """Gemini SAFETY rejection passes through as a raw string."""
+        assert _parse_finish_reason("SAFETY") == "SAFETY"
 
     def test_parse_usage(self) -> None:
         """Test parsing usage dict."""
@@ -324,6 +333,39 @@ class TestOpenAICompatibleBackendChat:
         assert response.tool_calls[0].id == "call_123"
         assert response.tool_calls[0].function.name == "get_weather"
         assert response.finish_reason == FinishReason.TOOL_CALLS
+        backend.close()
+
+    def test_chat_gemini_function_call_filter_finish_reason(
+        self, mock_lg: Logger
+    ) -> None:
+        """Gemini's compound finish_reason reaches ChatResponse verbatim."""
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "model": "gemini-2.5-flash",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant"},
+                    "finish_reason": "function_call_filter: MALFORMED_FUNCTION_CALL",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 18234,
+                "completion_tokens": 0,
+                "total_tokens": 18234,
+            },
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+        with patch.object(backend._client, "post", return_value=mock_response):
+            response = backend.chat(request)
+
+        assert response.content == ""
+        assert response.tool_calls is None
+        assert response.finish_reason == "function_call_filter: MALFORMED_FUNCTION_CALL"
         backend.close()
 
     def test_chat_connect_error_raises_unavailable(self, mock_lg: Logger) -> None:

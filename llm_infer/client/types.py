@@ -152,7 +152,9 @@ class ChatResponse:
         content: The generated text content. May be empty if only tool_calls
             are present.
         usage: Token usage statistics (prompt, completion, total).
-        finish_reason: Why generation stopped (stop, length, tool_calls, etc).
+        finish_reason: Why generation stopped. ``FinishReason`` for known
+            values, raw ``str`` for unmapped provider values (e.g. Gemini's
+            ``"function_call_filter: ..."``), ``None`` when absent.
         model: The model that generated the response.
         provider: Backend/provider that generated the response (see Provider enum).
         raw: Raw response from the provider API. Contains provider-specific
@@ -169,7 +171,7 @@ class ChatResponse:
 
     content: str
     usage: ChatCompletionUsage | None = None
-    finish_reason: FinishReason | None = None
+    finish_reason: FinishReason | str | None = None
     model: str | None = None
     provider: str | None = None
     raw: dict[str, Any] | None = None
