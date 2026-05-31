@@ -715,8 +715,8 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             if hasattr(final_message, "model_dump"):
                 state.raw = final_message.model_dump()
 
-    def _map_stop_reason(self, stop_reason: str | None) -> FinishReason | None:
-        """Map Anthropic stop_reason to FinishReason."""
+    def _map_stop_reason(self, stop_reason: str | None) -> FinishReason | str | None:
+        """Map Anthropic stop_reason to FinishReason; unknown values pass through."""
         if stop_reason is None:
             return None
         mapping = {
@@ -725,7 +725,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             "max_tokens": FinishReason.LENGTH,
             "tool_use": FinishReason.TOOL_CALLS,
         }
-        return mapping.get(stop_reason)
+        return mapping.get(stop_reason, stop_reason)
 
 
 class _StreamState:
@@ -736,7 +736,7 @@ class _StreamState:
         self.thinking_parts: list[str] = []
         self.tool_calls: list[ToolCall] = []
         self.usage: ChatCompletionUsage | None = None
-        self.finish_reason: FinishReason | None = None
+        self.finish_reason: FinishReason | str | None = None
         self.structured_output_tool = structured_output_tool
         self.raw: dict[str, Any] | None = None
 

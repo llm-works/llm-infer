@@ -53,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`ChatResponse.finish_reason` widened to `FinishReason | str | None`**: unmapped provider
-  values (e.g. Gemini's `"function_call_filter: ..."`) now pass through as `str` instead of
-  collapsing to `None`. Exhaustive `match` over the enum needs a default arm.
+  values now pass through as `str` instead of collapsing to `None`. Applies to all backends
+  (OpenAI-compatible, Anthropic). Exhaustive `match` over the enum needs a default arm.
 - **Streaming usage reporting**: OpenAI-compatible backends now include `stream_options` with
   `include_usage: true` when streaming, so `response.usage` is populated. Previously, streaming
   requests returned `usage=None`, causing silent billing failures in downstream cost tracking.

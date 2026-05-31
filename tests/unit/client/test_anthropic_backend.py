@@ -296,7 +296,7 @@ class TestAnthropicBackendMocked:
             assert backend._map_stop_reason("max_tokens") == FinishReason.LENGTH
             assert backend._map_stop_reason("tool_use") == FinishReason.TOOL_CALLS
             assert backend._map_stop_reason(None) is None
-            assert backend._map_stop_reason("unknown") is None
+            assert backend._map_stop_reason("unknown") == "unknown"
 
 
 class TestAnthropicStructuredOutput:
