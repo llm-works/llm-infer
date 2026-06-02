@@ -32,6 +32,7 @@ from appinfra.log import Logger
 from .base import ChatClient
 from .errors import BackendError
 from .fallback_helper import detect_cycles
+from .log_utils import fmt_error
 from .router import LLMRouter
 from .strategy import DefaultTransientDetector, TransientAction, TransientDetector
 from .types import (
@@ -129,7 +130,7 @@ class FallbackClient(ChatClient):
                 "fallback_model": fallback,
                 "error_type": type(error).__name__,
                 "status_code": status_code,
-                "error": str(error)[:200],
+                "error": fmt_error(error),
                 "attempt": attempt,
             },
         )
@@ -140,7 +141,7 @@ class FallbackClient(ChatClient):
             "all fallback models failed",
             extra={
                 "original_model": model,
-                "final_error": str(error)[:200],
+                "final_error": fmt_error(error),
             },
         )
 

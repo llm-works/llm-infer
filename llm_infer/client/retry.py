@@ -12,6 +12,7 @@ from appinfra.log import Logger
 
 from .backends import BackendContext, RetryConfig
 from .errors import BackendRequestError, BackendUnavailableError
+from .log_utils import fmt_error
 from .types import ChatRequest, LLMCallbacks
 
 # Non-5xx status codes that should trigger retry (5xx are always retried)
@@ -131,9 +132,10 @@ class RetryHelper(RetryBase):
     race conditions when multiple clients share a backend.
     """
 
-    def __init__(self, lg: Logger, ctx: BackendContext) -> None:
+    def __init__(self, lg: Logger, ctx: BackendContext, provider: str) -> None:
         super().__init__(lg)
         self._ctx = ctx
+        self._provider = provider
 
     def _log_retry(
         self,
@@ -141,6 +143,7 @@ class RetryHelper(RetryBase):
         attempt: int,
         delay: float,
         req_id: str | None = None,
+        model: str | None = None,
     ) -> None:
         """Log retry attempt with context."""
         status_code = None
@@ -148,9 +151,11 @@ class RetryHelper(RetryBase):
             status_code = error.status_code
 
         extra: dict[str, Any] = {
+            "provider": self._provider,
+            "model": model,
             "error_type": type(error).__name__,
             "status_code": status_code,
-            "error": str(error)[:200],
+            "error": fmt_error(error),
             "retry_attempt": attempt,
             "delay_seconds": round(delay, 2),
         }
@@ -231,7 +236,7 @@ class RetryHelper(RetryBase):
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                self._log_retry(e, retry_count + 1, delay, req_id)
+                self._log_retry(e, retry_count + 1, delay, req_id, model)
                 time.sleep(delay)
                 retry_count += 1
                 self._log_retry_send(retry_count, model, req_id)
@@ -299,7 +304,7 @@ class RetryHelper(RetryBase):
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                self._log_retry(e, retry_count + 1, delay, req_id)
+                self._log_retry(e, retry_count + 1, delay, req_id, model)
                 await asyncio.sleep(delay)
                 retry_count += 1
                 self._log_retry_send(retry_count, model, req_id)
