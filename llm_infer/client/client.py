@@ -100,7 +100,7 @@ class LLMClient(ChatClient):
         self._lg = lg
         self._backend = backend
         self._discovery = discovery
-        self._retry = RetryHelper(lg, backend.ctx)
+        self._retry = RetryHelper(lg, backend.ctx, backend.provider)
         self._callbacks = callbacks
 
     @property

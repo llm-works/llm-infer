@@ -14,6 +14,7 @@ from appinfra.dot_dict import DotDict
 
 from .client import LLMClient
 from .errors import BackendError
+from .log_utils import fmt_error
 from .strategy import RoutingContext, RoutingDecision, RoutingResult
 from .types import ChatRequest, ChatResponse
 
@@ -193,7 +194,7 @@ def _handle_error(
                 "backend failed, retrying" if same else "backend failed, trying next",
                 extra={
                     "backend": decision.backend,
-                    "error": str(e)[:200],
+                    "error": fmt_error(e),
                     "next": next_decision.backend,
                 },
             )
