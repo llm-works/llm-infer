@@ -34,6 +34,7 @@ from typing import Any, Self
 from appinfra.log import Logger
 from appinfra.time import since, start
 
+from ..schemas.openai import ChatCompletionUsage
 from .backends import Backend
 from .base import ChatClient
 from .discovery import ModelDiscovery
@@ -48,6 +49,24 @@ from .types import (
     _ChatStream,
     _ChatStreamSync,
 )
+
+
+def _tokens_log(usage: ChatCompletionUsage | None) -> dict[str, int] | None:
+    """Build the tokens sub-dict for response logs.
+
+    Includes ``cached`` (prompt tokens served from the provider's prompt cache)
+    so cache behaviour is visible by default. Defaults to 0 when the provider
+    did not report prompt_tokens_details.
+    """
+    if usage is None:
+        return None
+    details = usage.prompt_tokens_details
+    cached = details.cached_tokens if details else 0
+    return {
+        "in": usage.prompt_tokens,
+        "out": usage.completion_tokens,
+        "cached": cached,
+    }
 
 
 class LLMClient(ChatClient):
@@ -442,9 +461,7 @@ class LLMClient(ChatClient):
                 "req": request.id,
                 "model": request.model,
                 "backend": self._backend.name,
-                "tokens": {"in": usage.prompt_tokens, "out": usage.completion_tokens}
-                if usage
-                else None,
+                "tokens": _tokens_log(usage),
             },
         )
 
@@ -472,9 +489,7 @@ class LLMClient(ChatClient):
                 "req": request.id,
                 "model": request.model,
                 "backend": self._backend.name,
-                "tokens": {"in": usage.prompt_tokens, "out": usage.completion_tokens}
-                if usage
-                else None,
+                "tokens": _tokens_log(usage),
             },
         )
         return response
@@ -531,9 +546,7 @@ class LLMClient(ChatClient):
                 "req": request.id,
                 "model": request.model,
                 "backend": self._backend.name,
-                "tokens": {"in": usage.prompt_tokens, "out": usage.completion_tokens}
-                if usage
-                else None,
+                "tokens": _tokens_log(usage),
             },
         )
         return response
