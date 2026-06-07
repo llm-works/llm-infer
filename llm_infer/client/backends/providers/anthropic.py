@@ -7,7 +7,7 @@ models. It requires the anthropic package to be installed:
 
 Key differences from OpenAI-compatible backends:
 - System messages are passed as a separate parameter, not in messages
-- Thinking mode is not yet supported (extended_thinking requires different API structure)
+- Thinking mode uses extended_thinking with budget_tokens (80% of max_tokens)
 - Tool calling uses Anthropic's native format
 """
 
@@ -66,7 +66,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         - System messages should be passed via the `system` parameter,
           not in the messages list.
         - adapter is not supported (Anthropic-specific feature).
-        - think mode is currently not supported (raises NotImplementedError).
+        - think mode uses extended_thinking (budget_tokens = 80% of max_tokens).
     """
 
     def __init__(
@@ -78,6 +78,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         api_key: str | None = None,
         base_url: str | None = None,
         max_tokens: int = 4096,
+        thinking_budget: float = 0.8,
     ) -> None:
         """Initialize the backend.
 
@@ -89,7 +90,16 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             api_key: API key for authentication.
             base_url: Base URL override (for proxies).
             max_tokens: Default max tokens for responses.
+            thinking_budget: Fraction of max_tokens for thinking (0.0-1.0, default 0.8).
+
+        Raises:
+            ValueError: If thinking_budget is not in (0, 1].
         """
+        if not (0 < thinking_budget <= 1):
+            raise ValueError(
+                f"thinking_budget must be in (0, 1], got {thinking_budget}"
+            )
+        self._thinking_budget = thinking_budget
         super().__init__(lg, name, ctx, default_model)
         try:
             import anthropic as anthropic_module
@@ -296,18 +306,16 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         if request.tool_choice:
             self._apply_tool_choice(request_kwargs, request.tool_choice)
 
-        if request.think:
-            raise NotImplementedError(
-                "think mode is not yet supported for Anthropic backend; "
-                "extended_thinking requires different API structure"
-            )
-
         extra = dict(request.extra) if request.extra else {}
         self._apply_response_format(request_kwargs, extra)
 
         for key, value in extra.items():
             if value is not None and key not in ("stream",):
                 request_kwargs[key] = value
+
+        # Apply extended thinking after extra merge so max_tokens from extra is used
+        if request.think:
+            self._apply_extended_thinking(request_kwargs)
 
         return request_kwargs
 
@@ -443,6 +451,26 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                 "type": "tool",
                 "name": tool_choice["function"].get("name", ""),
             }
+
+    def _apply_extended_thinking(self, request_kwargs: dict[str, Any]) -> None:
+        """Apply extended thinking configuration.
+
+        Maps the llm-infer `think` flag to Anthropic's extended thinking API.
+        Budget tokens are thinking_budget fraction of max_tokens.
+
+        Raises:
+            ValueError: If max_tokens is too small for thinking mode.
+        """
+        max_tokens = int(request_kwargs.get("max_tokens", self._max_tokens))
+        if max_tokens <= 1:
+            raise ValueError(f"think=True requires max_tokens >= 2, got {max_tokens}")
+        budget_tokens = max(
+            1, min(int(max_tokens * self._thinking_budget), max_tokens - 1)
+        )
+        request_kwargs["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": budget_tokens,
+        }
 
     def _apply_response_format(
         self, request_kwargs: dict[str, Any], kwargs: dict[str, Any]
@@ -687,8 +715,8 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             if hasattr(final_message, "model_dump"):
                 state.raw = final_message.model_dump()
 
-    def _map_stop_reason(self, stop_reason: str | None) -> FinishReason | None:
-        """Map Anthropic stop_reason to FinishReason."""
+    def _map_stop_reason(self, stop_reason: str | None) -> FinishReason | str | None:
+        """Map Anthropic stop_reason to FinishReason; unknown values pass through."""
         if stop_reason is None:
             return None
         mapping = {
@@ -697,7 +725,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             "max_tokens": FinishReason.LENGTH,
             "tool_use": FinishReason.TOOL_CALLS,
         }
-        return mapping.get(stop_reason)
+        return mapping.get(stop_reason, stop_reason)
 
 
 class _StreamState:
@@ -708,7 +736,7 @@ class _StreamState:
         self.thinking_parts: list[str] = []
         self.tool_calls: list[ToolCall] = []
         self.usage: ChatCompletionUsage | None = None
-        self.finish_reason: FinishReason | None = None
+        self.finish_reason: FinishReason | str | None = None
         self.structured_output_tool = structured_output_tool
         self.raw: dict[str, Any] | None = None
 

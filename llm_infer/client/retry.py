@@ -12,11 +12,72 @@ from appinfra.log import Logger
 
 from .backends import BackendContext, RetryConfig
 from .errors import BackendRequestError, BackendUnavailableError
+from .log_utils import fmt_error
 from .types import ChatRequest, LLMCallbacks
 
 # Non-5xx status codes that should trigger retry (5xx are always retried)
 # 429 = rate limited, 529 = site overloaded (Cloudflare)
 TRANSIENT_4XX_CODES: frozenset[int] = frozenset({429, 529})
+
+
+class RetryBase:
+    """Base class with core retry logic (transient detection, backoff, delay).
+
+    Provides the building blocks for retry behavior without any callback or
+    request-type dependencies. Used by RetryHelper (chat clients) and
+    EmbeddingClient (embeddings).
+    """
+
+    def __init__(self, lg: Logger) -> None:
+        self._lg = lg
+
+    def is_transient(self, exc: Exception) -> bool:
+        """Check if exception is a transient error that should be retried."""
+        if isinstance(exc, BackendUnavailableError):
+            return True
+        if isinstance(exc, BackendRequestError):
+            code = exc.status_code
+            if code is None:
+                return True
+            if 500 <= code < 600:
+                return True
+            return code in TRANSIENT_4XX_CODES
+        return False
+
+    def should_retry(
+        self,
+        exc: BackendUnavailableError | BackendRequestError,
+        start_time: float,
+        timeout: float,
+    ) -> bool:
+        """Check if error should be retried (transient + within timeout)."""
+        if not self.is_transient(exc):
+            return False
+        if timeout > 0 and (time.monotonic() - start_time) >= timeout:
+            return False
+        return True
+
+    def create_backoff(self, retry: RetryConfig) -> Backoff:
+        """Create a fresh Backoff instance from RetryConfig."""
+        return Backoff(
+            self._lg,
+            base=retry.base,
+            factor=retry.factor,
+            max_delay=retry.max_delay,
+        )
+
+    def compute_delay(
+        self, backoff: Backoff, timeout: float, start_time: float
+    ) -> float | None:
+        """Compute delay for next retry, or None if timeout exceeded."""
+        delay: float = backoff.next_delay()
+        if timeout > 0:
+            remaining = timeout - (time.monotonic() - start_time)
+            if remaining <= 0:
+                return None
+            delay = min(delay, remaining)
+        return delay
+
 
 T = TypeVar("T")
 
@@ -63,51 +124,60 @@ def _fire_error(
             lg.warning("on_error callback failed", extra={"exception": e})
 
 
-class RetryHelper:
-    """Handles retry logic with exponential backoff.
+class RetryHelper(RetryBase):
+    """Handles retry logic with exponential backoff and callback support.
 
+    Extends RetryBase with callback firing for chat client observability.
     Creates a fresh Backoff instance per-request from RetryConfig to avoid
     race conditions when multiple clients share a backend.
     """
 
-    def __init__(self, lg: Logger, ctx: BackendContext) -> None:
-        self._lg = lg
+    def __init__(self, lg: Logger, ctx: BackendContext, provider: str) -> None:
+        super().__init__(lg)
         self._ctx = ctx
+        self._provider = provider
 
-    def _is_transient(self, exc: Exception) -> bool:
-        """Check if exception is a transient error that should be retried."""
-        if isinstance(exc, BackendUnavailableError):
-            return True
-        if isinstance(exc, BackendRequestError):
-            code = exc.status_code
-            if code is None:
-                return True
-            if 500 <= code < 600:
-                return True
-            return code in TRANSIENT_4XX_CODES
-        return False
-
-    def _should_retry(
+    def _log_retry(
         self,
-        e: BackendUnavailableError | BackendRequestError,
-        start_time: float,
-        timeout: float,
-    ) -> bool:
-        """Check if error should be retried."""
-        if not self._is_transient(e):
-            return False
-        if timeout > 0 and (time.monotonic() - start_time) >= timeout:
-            return False
-        return True
+        error: BackendUnavailableError | BackendRequestError,
+        attempt: int,
+        delay: float,
+        req_id: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        """Log retry attempt with context."""
+        status_code = None
+        if isinstance(error, BackendRequestError):
+            status_code = error.status_code
 
-    def _create_backoff(self, retry: RetryConfig) -> Backoff:
-        """Create a fresh Backoff instance from RetryConfig."""
-        return Backoff(
-            self._lg,
-            base=retry.base,
-            factor=retry.factor,
-            max_delay=retry.max_delay,
-        )
+        extra: dict[str, Any] = {
+            "provider": self._provider,
+            "model": model,
+            "error_type": type(error).__name__,
+            "status_code": status_code,
+            "error": fmt_error(error),
+            "retry_attempt": attempt,
+            "delay_seconds": round(delay, 2),
+        }
+        if req_id:
+            extra["req"] = req_id
+
+        self._lg.warning("transient error, retrying", extra=extra)
+
+    def _log_retry_send(
+        self,
+        attempt: int,
+        model: str | None,
+        req_id: str | None = None,
+    ) -> None:
+        """Log debug message before retry send."""
+        extra: dict[str, Any] = {"attempt": attempt}
+        if model:
+            extra["model"] = model
+        if req_id:
+            extra["req"] = req_id
+
+        self._lg.debug("retrying request...", extra=extra)
 
     def call(
         self,
@@ -149,39 +219,31 @@ class RetryHelper:
         retry_count: int,
     ) -> T:
         """Execute with retry loop, firing callbacks."""
-        backoff = self._create_backoff(retry)
+        backoff = self.create_backoff(retry)
         start_time = time.monotonic()
+        req_id = request.id if request else None
+        model = request.model if request else None
         while True:
             try:
                 result = fn()
                 _fire_response(self._lg, callbacks, request, result)
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self._should_retry(e, start_time, retry.timeout):
+                if not self.should_retry(e, start_time, retry.timeout):
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                delay = self._compute_delay(backoff, retry.timeout, start_time)
+                delay = self.compute_delay(backoff, retry.timeout, start_time)
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
+                self._log_retry(e, retry_count + 1, delay, req_id, model)
                 time.sleep(delay)
                 retry_count += 1
+                self._log_retry_send(retry_count, model, req_id)
                 _fire_request(self._lg, callbacks, request, retry_count)
             except Exception as e:
                 _fire_error(self._lg, callbacks, request, e)
                 raise
-
-    def _compute_delay(
-        self, backoff: Backoff, timeout: float, start_time: float
-    ) -> float | None:
-        """Compute delay for next retry, or None if timeout exceeded."""
-        delay: float = backoff.next_delay()
-        if timeout > 0:
-            remaining = timeout - (time.monotonic() - start_time)
-            if remaining <= 0:
-                return None
-            delay = min(delay, remaining)
-        return delay
 
     async def call_async(
         self,
@@ -225,23 +287,27 @@ class RetryHelper:
         retry_count: int,
     ) -> T:
         """Execute with retry loop, firing callbacks (async)."""
-        backoff = self._create_backoff(retry)
+        backoff = self.create_backoff(retry)
         start_time = time.monotonic()
+        req_id = request.id if request else None
+        model = request.model if request else None
         while True:
             try:
                 result = await fn()
                 _fire_response(self._lg, callbacks, request, result)
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self._should_retry(e, start_time, retry.timeout):
+                if not self.should_retry(e, start_time, retry.timeout):
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                delay = self._compute_delay(backoff, retry.timeout, start_time)
+                delay = self.compute_delay(backoff, retry.timeout, start_time)
                 if delay is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
+                self._log_retry(e, retry_count + 1, delay, req_id, model)
                 await asyncio.sleep(delay)
                 retry_count += 1
+                self._log_retry_send(retry_count, model, req_id)
                 _fire_request(self._lg, callbacks, request, retry_count)
             except Exception as e:
                 _fire_error(self._lg, callbacks, request, e)

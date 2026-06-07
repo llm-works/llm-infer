@@ -6,6 +6,7 @@ llm-infer specific extensions like thinking content and tool calls.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -75,6 +76,11 @@ class ChatStreamSync(Protocol):
         ...
 
 
+def _gen_req_id() -> str:
+    """Generate an 8-char request ID for log correlation."""
+    return uuid.uuid4().hex[:8]
+
+
 @dataclass
 class ChatRequest:
     """Request for a chat completion.
@@ -94,6 +100,7 @@ class ChatRequest:
         adapter: LoRA adapter name.
         extra: Backend-specific parameters.
         context: User-provided context passed to callbacks (cost tracking, tracing).
+        id: Framework-assigned request ID for log correlation.
     """
 
     messages: list[dict[str, Any]]
@@ -107,6 +114,8 @@ class ChatRequest:
     adapter: str | None = None
     extra: dict[str, Any] | None = None
     context: dict[str, Any] | None = None
+    # Assigned by the framework for log correlation. Do not set manually.
+    id: str = field(default_factory=_gen_req_id)
 
 
 @dataclass
@@ -143,7 +152,9 @@ class ChatResponse:
         content: The generated text content. May be empty if only tool_calls
             are present.
         usage: Token usage statistics (prompt, completion, total).
-        finish_reason: Why generation stopped (stop, length, tool_calls, etc).
+        finish_reason: Why generation stopped. ``FinishReason`` for known
+            values, raw ``str`` for unmapped provider values (e.g. Gemini's
+            ``"function_call_filter: ..."``), ``None`` when absent.
         model: The model that generated the response.
         provider: Backend/provider that generated the response (see Provider enum).
         raw: Raw response from the provider API. Contains provider-specific
@@ -160,7 +171,7 @@ class ChatResponse:
 
     content: str
     usage: ChatCompletionUsage | None = None
-    finish_reason: FinishReason | None = None
+    finish_reason: FinishReason | str | None = None
     model: str | None = None
     provider: str | None = None
     raw: dict[str, Any] | None = None

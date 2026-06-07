@@ -36,10 +36,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
+from appinfra.rate_limit import RateLimiter
 
-from .backends import Backend, BackendFactory
+from .backends import Backend, BackendContext, BackendFactory, RetryConfig
 from .client import LLMClient
 from .discovery import ModelDiscovery
+from .embedding import EmbeddingClient
 from .router import LLMRouter
 from .types import LLMCallbacks
 
@@ -332,10 +334,7 @@ class Factory:
 
         from appinfra.dot_dict import DotDict
 
-        from .strategies import (
-            DefaultStrategyFactory,
-            FallbackStrategyFactory,
-        )
+        from .strategies import DefaultStrategyFactory
 
         config = DotDict(strategy_config)
 
@@ -349,17 +348,15 @@ class Factory:
 
         # Built-in strategies
         strategy_type = config.get("type", "default")
-        factories: dict[
-            str, type[DefaultStrategyFactory] | type[FallbackStrategyFactory]
-        ] = {
+        factories: dict[str, type[DefaultStrategyFactory]] = {
             "default": DefaultStrategyFactory,
-            "fallback": FallbackStrategyFactory,
         }
 
         if strategy_type not in factories:
             raise ValueError(
                 f"Unknown strategy type '{strategy_type}'. "
-                f"Available: {list(factories.keys())}"
+                f"Available: {list(factories.keys())}. "
+                f"For fallback/resilience, use FallbackClient instead."
             )
 
         return factories[strategy_type]().create(self._lg, config)
@@ -455,3 +452,198 @@ class Factory:
         if rate_limit:
             config["rate_limit"] = rate_limit
         return self.from_backend_config(config, "anthropic", callbacks)
+
+    def embeddings(
+        self,
+        base_url: str = "http://localhost:8001/v1",
+        model: str = "default",
+        api_key: str | None = None,
+        timeout: float = 120.0,
+        retry: RetryConfig | None = None,
+        rate_limit: dict[str, Any] | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingClient:
+        """Create EmbeddingClient for OpenAI-compatible embeddings API.
+
+        Works with OpenAI, llm-infer, vLLM, and other compatible servers.
+
+        Args:
+            base_url: API base URL for embeddings endpoint.
+            model: Model name to send in requests.
+            api_key: Optional API key for Authorization header.
+            timeout: Request timeout in seconds.
+            retry: Retry configuration for transient errors. None disables retry.
+            rate_limit: Rate limit config (e.g., {"per_minute": 60}).
+            dimensions: Default output dimensions. None uses provider default.
+
+        Returns:
+            EmbeddingClient configured for the embeddings API.
+        """
+        from .backends.embedding import OpenAIBackend
+
+        rate_limiter = self._create_rate_limiter(rate_limit)
+        ctx = BackendContext(rate_limiter=rate_limiter, request_timeout=timeout)
+        backend = OpenAIBackend(
+            self._lg,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            ctx=ctx,
+        )
+        return EmbeddingClient(
+            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+        )
+
+    def embeddings_google(
+        self,
+        api_key: str,
+        model: str = "gemini-embedding-001",
+        task_type: str = "RETRIEVAL_DOCUMENT",
+        timeout: float = 120.0,
+        retry: RetryConfig | None = None,
+        rate_limit: dict[str, Any] | None = None,
+        dimensions: int | None = None,
+        count_tokens: bool = False,
+    ) -> EmbeddingClient:
+        """Create EmbeddingClient for Google Generative AI embeddings.
+
+        Args:
+            api_key: Google API key.
+            model: Model name (default: gemini-embedding-001).
+            task_type: Task type for optimized embeddings. One of:
+                RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
+                CLASSIFICATION, CLUSTERING, QUESTION_ANSWERING, FACT_VERIFICATION.
+            timeout: Request timeout in seconds.
+            retry: Retry configuration for transient errors. None disables retry.
+            rate_limit: Rate limit config (e.g., {"per_minute": 60}).
+            dimensions: Default output dimensions. None uses provider default.
+            count_tokens: If True, populate prompt_tokens via countTokens API (extra call).
+
+        Returns:
+            EmbeddingClient configured for Google embeddings.
+        """
+        from .backends.embedding import GoogleBackend
+        from .backends.providers.google import GoogleEmbeddingTaskType
+
+        rate_limiter = self._create_rate_limiter(rate_limit)
+        ctx = BackendContext(rate_limiter=rate_limiter, request_timeout=timeout)
+        backend = GoogleBackend(
+            self._lg,
+            api_key=api_key,
+            model=model,
+            task_type=GoogleEmbeddingTaskType(task_type),
+            ctx=ctx,
+            count_tokens=count_tokens,
+        )
+        return EmbeddingClient(
+            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+        )
+
+    def _create_rate_limiter(self, config: dict[str, Any] | None) -> RateLimiter | None:
+        """Create rate limiter from config.
+
+        Args:
+            config: Rate limit config with "per_minute" key. Defaults to 60 if not specified.
+        """
+        if not config:
+            return None
+        per_minute = config.get("per_minute", 60)
+        return RateLimiter(self._lg, per_minute=per_minute)
+
+    def _parse_embedding_retry(self, cfg: DotDict) -> RetryConfig | None:
+        """Parse retry config for embeddings."""
+        if "retry" not in cfg:
+            return None
+        retry_cfg = cfg.retry
+        return RetryConfig(
+            base=retry_cfg.get("base", 1.0),
+            max_delay=retry_cfg.get("max_delay", 60.0),
+            factor=retry_cfg.get("factor", 2.0),
+            timeout=retry_cfg.get("timeout", 120.0),
+        )
+
+    def _embeddings_openai_from_config(
+        self,
+        cfg: DotDict,
+        timeout: float,
+        retry: RetryConfig | None,
+        dimensions: int | None,
+    ) -> EmbeddingClient:
+        """Create OpenAI embedding client from config."""
+        if not cfg.get("base_url"):
+            raise ValueError("base_url required for openai embedding backend")
+        return self.embeddings(
+            base_url=cfg.base_url,
+            model=cfg.get("model", "default"),
+            api_key=cfg.get("api_key"),
+            timeout=timeout,
+            retry=retry,
+            rate_limit=cfg.get("rate_limit"),
+            dimensions=dimensions,
+        )
+
+    def _embeddings_google_from_config(
+        self,
+        cfg: DotDict,
+        timeout: float,
+        retry: RetryConfig | None,
+        dimensions: int | None,
+        count_tokens: bool,
+    ) -> EmbeddingClient:
+        """Create Google embedding client from config."""
+        if not cfg.get("api_key"):
+            raise ValueError("api_key required for google embedding backend")
+        return self.embeddings_google(
+            api_key=cfg.api_key,
+            model=cfg.get("model", "gemini-embedding-001"),
+            task_type=cfg.get("task_type", "RETRIEVAL_DOCUMENT"),
+            timeout=timeout,
+            retry=retry,
+            rate_limit=cfg.get("rate_limit"),
+            dimensions=dimensions,
+            count_tokens=count_tokens,
+        )
+
+    def embeddings_from_config(self, config: dict[str, Any]) -> EmbeddingClient:
+        """Create EmbeddingClient from configuration dict.
+
+        Config format:
+            type: openai              # or "google"
+            base_url: http://...      # Required for openai
+            api_key: sk-...           # Optional for openai, required for google
+            model: text-embedding-3-small
+            dimensions: 384           # Optional, reduces output from native size
+            timeout: 120.0            # Optional, default 120.0
+            task_type: RETRIEVAL_DOCUMENT  # Google only
+            count_tokens: true        # Google only, populate prompt_tokens (extra API call)
+            rate_limit:               # Optional
+              per_minute: 60
+            retry:                    # Optional
+              base: 1.0
+              max_delay: 60
+              timeout: 120
+
+        Args:
+            config: Configuration dict.
+
+        Returns:
+            Configured EmbeddingClient.
+
+        Raises:
+            ValueError: If type is unknown or required fields are missing.
+        """
+        cfg = DotDict(config)
+        backend_type = cfg.get("type", "openai")
+        timeout = cfg.get("timeout", 120.0)
+        retry = self._parse_embedding_retry(cfg)
+        dimensions = cfg.get("dimensions")
+        count_tokens = cfg.get("count_tokens", False)
+
+        if backend_type in ("openai", "openai_compatible"):
+            return self._embeddings_openai_from_config(cfg, timeout, retry, dimensions)
+        elif backend_type == "google":
+            return self._embeddings_google_from_config(
+                cfg, timeout, retry, dimensions, count_tokens
+            )
+        else:
+            raise ValueError(f"Unknown embedding backend type: {backend_type}")

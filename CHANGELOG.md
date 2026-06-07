@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-06
+
+### Added
+
+- **`EmbeddingClient`**: sync/async wrapper with retry (5xx/429/529) and client-level `model` /
+  `dimensions` defaults. Exported from `llm_infer.client` with `EmbeddingResult`.
+- **Embedding backends**: OpenAI and Google providers with per-request `dimensions` and
+  `count_tokens()` token counting.
+- **`[embedding]` extra**: optional dependency for OpenAI token counting via tiktoken. Included
+  in `[client]` extra.
+- **`FallbackClient`**: Cross-provider model resilience. Wraps `LLMRouter` and falls back to
+  equivalent models on transient errors. Fallbacks defined as pairs (A → B) that chain implicitly.
+- **`DecisionType` enum**: Explicit decision type for routing decisions (`INITIAL`, `RETRY_SAME`,
+  `FALLBACK`). Custom strategies should set this to control model resolution behavior.
+- **`GeminiBackend`**: Specialized backend for Google Gemini via OpenAI-compatible API. Normalizes
+  thinking behavior to match other providers (disabled by default, enabled via `think=True`).
+- **Anthropic extended thinking**: `think=True` now enables extended thinking for Anthropic backend.
+  Budget allocation configurable via `thinking_budget` (default 0.8 = 80% of `max_tokens`).
+- **Debug logging**: `LLMClient` logs request/response at DEBUG level. `RetryHelper` logs retry
+  attempts with provider/model; error messages collapse whitespace for log aggregator compatibility.
+- **Request ID tracking**: `ChatRequest.id` field (8 hex chars) for log correlation across retries.
+
+### Fixed
+
+- **Router discovery from default model**: `ModelDiscovery` now registers the `model` field from
+  backend configs for routing, not just the `models` list.
+- **Gemini structured-output truncation**: `GeminiBackend` defaults `reasoning_effort: "none"` so
+  thinking doesn't consume `max_output_tokens` and truncate JSON.
+- **Gemini `think` field rejection**: `GeminiBackend` now maps `think=True` to
+  `reasoning_effort: "medium"` and strips the `think` field from payloads.
+- **Streaming error handler**: OpenAI backend now reads the error body inside the stream context —
+  previously raised `ResponseNotRead`, masking the real error.
+
+### Removed
+
+- **`FallbackStrategy`**: Removed from router — fallback logic now lives in `FallbackClient`. Router
+  only handles model → backend routing.
+
+### Changed
+
+- **`ChatResponse.finish_reason` widened to `FinishReason | str | None`**: unmapped provider
+  values now pass through as `str` instead of collapsing to `None`. Applies to all backends
+  (OpenAI-compatible, Anthropic). Exhaustive `match` over the enum needs a default arm.
+- **Streaming usage reporting**: OpenAI-compatible backends now populate `response.usage` on
+  streaming responses (was `None`, causing silent billing gaps).
+- **Cross-provider fallback resolution**: router uses the target backend's `default_model` instead
+  of the source model name (previously 404'd on e.g. grok → anthropic).
+- **Chat response log includes `cached` tokens**: `LLMClient` "LLM chat response" debug log (sync,
+  async, streaming) now emits `tokens[in[N] out[N] cached[N]]` for prompt-cache visibility.
+
 ## [0.4.0] - 2026-05-10
 
 ### Added
@@ -236,7 +286,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/llm-works/llm-infer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/llm-works/llm-infer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/llm-works/llm-infer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/llm-works/llm-infer/compare/v0.1.1...v0.2.0

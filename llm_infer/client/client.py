@@ -32,7 +32,9 @@ from copy import copy
 from typing import Any, Self
 
 from appinfra.log import Logger
+from appinfra.time import since, start
 
+from ..schemas.openai import ChatCompletionUsage
 from .backends import Backend
 from .base import ChatClient
 from .discovery import ModelDiscovery
@@ -47,6 +49,24 @@ from .types import (
     _ChatStream,
     _ChatStreamSync,
 )
+
+
+def _tokens_log(usage: ChatCompletionUsage | None) -> dict[str, int] | None:
+    """Build the tokens sub-dict for response logs.
+
+    Includes ``cached`` (prompt tokens served from the provider's prompt cache)
+    so cache behaviour is visible by default. Defaults to 0 when the provider
+    did not report prompt_tokens_details.
+    """
+    if usage is None:
+        return None
+    details = usage.prompt_tokens_details
+    cached = details.cached_tokens if details else 0
+    return {
+        "in": usage.prompt_tokens,
+        "out": usage.completion_tokens,
+        "cached": cached,
+    }
 
 
 class LLMClient(ChatClient):
@@ -99,7 +119,7 @@ class LLMClient(ChatClient):
         self._lg = lg
         self._backend = backend
         self._discovery = discovery
-        self._retry = RetryHelper(lg, backend.ctx)
+        self._retry = RetryHelper(lg, backend.ctx, backend.provider)
         self._callbacks = callbacks
 
     @property
@@ -400,87 +420,164 @@ class LLMClient(ChatClient):
         )
         return self._backend.last_response
 
+    def _fire_on_request(self, request: ChatRequest) -> None:
+        """Fire on_request callback with error handling."""
+        cb = self._callbacks
+        if cb and cb.on_request:
+            try:
+                cb.on_request(request, 0)
+            except Exception as e:
+                self._lg.warning("on_request callback failed", extra={"exception": e})
+
+    def _fire_on_response(self, request: ChatRequest, response: ChatResponse) -> None:
+        """Fire on_response callback with error handling."""
+        cb = self._callbacks
+        if cb and cb.on_response:
+            try:
+                cb.on_response(request, response)
+            except Exception as e:
+                self._lg.warning("on_response callback failed", extra={"exception": e})
+
+    def _fire_on_error(self, request: ChatRequest, error: Exception) -> None:
+        """Fire on_error callback with error handling."""
+        cb = self._callbacks
+        if cb and cb.on_error:
+            try:
+                cb.on_error(request, error)
+            except Exception as cb_err:
+                self._lg.warning(
+                    "on_error callback failed", extra={"exception": cb_err}
+                )
+
+    def _log_stream_response(
+        self, request: ChatRequest, start_t: float, response: ChatResponse | None
+    ) -> None:
+        """Log streaming response with timing and token counts."""
+        usage = response.usage if response else None
+        self._lg.debug(
+            "LLM chat response (streaming)",
+            extra={
+                "after": since(start_t),
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+                "tokens": _tokens_log(usage),
+            },
+        )
+
     def _chat(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (sync) with retry."""
-        return self._retry.call(
+        self._lg.debug(
+            "LLM chat request...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        response = self._retry.call(
             lambda: self._backend.chat(request),
             request=request,
             callbacks=self._callbacks,
         )
+        usage = response.usage
+        self._lg.debug(
+            "LLM chat response",
+            extra={
+                "after": since(start_t),
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+                "tokens": _tokens_log(usage),
+            },
+        )
+        return response
 
     def _chat_stream(
         self, request: ChatRequest, holder: ResponseHolder | None = None
     ) -> Iterator[str]:
         """Internal: stream chat request (sync).
 
-        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        Note: Streaming does not support retry. on_request fires before streaming;
+        on_response and on_error fire after stream completes.
         """
-        cb = self._callbacks
-        if cb and cb.on_request:
-            try:
-                cb.on_request(request, 0)
-            except Exception as e:
-                self._lg.warning("on_request callback failed", extra={"exception": e})
+        self._lg.debug(
+            "LLM chat request (streaming)...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        self._fire_on_request(request)
         try:
             yield from self._backend.chat_stream(request, holder)
             response = self._get_stream_response(holder)
-            if cb and cb.on_response and response:
-                try:
-                    cb.on_response(request, response)
-                except Exception as e:
-                    self._lg.warning(
-                        "on_response callback failed", extra={"exception": e}
-                    )
+            self._log_stream_response(request, start_t, response)
+            if response:
+                self._fire_on_response(request, response)
         except Exception as e:
-            if cb and cb.on_error:
-                try:
-                    cb.on_error(request, e)
-                except Exception as cb_err:
-                    self._lg.warning(
-                        "on_error callback failed", extra={"exception": cb_err}
-                    )
+            self._fire_on_error(request, e)
             raise
 
     async def _chat_async(self, request: ChatRequest) -> ChatResponse:
         """Internal: send chat request (async) with retry."""
-        return await self._retry.call_async(
+        self._lg.debug(
+            "LLM chat request...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        response = await self._retry.call_async(
             lambda: self._backend.chat_async(request),
             request=request,
             callbacks=self._callbacks,
         )
+        usage = response.usage
+        self._lg.debug(
+            "LLM chat response",
+            extra={
+                "after": since(start_t),
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+                "tokens": _tokens_log(usage),
+            },
+        )
+        return response
 
     async def _chat_stream_async(
         self, request: ChatRequest, holder: ResponseHolder | None = None
     ) -> AsyncIterator[str]:
         """Internal: stream chat request (async).
 
-        Note: Streaming does not support retry. Callbacks fire after stream completes.
+        Note: Streaming does not support retry. on_request fires before streaming;
+        on_response and on_error fire after stream completes.
         """
-        cb = self._callbacks
-        if cb and cb.on_request:
-            try:
-                cb.on_request(request, 0)
-            except Exception as e:
-                self._lg.warning("on_request callback failed", extra={"exception": e})
+        self._lg.debug(
+            "LLM chat request (streaming)...",
+            extra={
+                "req": request.id,
+                "model": request.model,
+                "backend": self._backend.name,
+            },
+        )
+        start_t = start()
+        self._fire_on_request(request)
         try:
             async for token in self._backend.chat_stream_async(request, holder):
                 yield token
             response = self._get_stream_response(holder)
-            if cb and cb.on_response and response:
-                try:
-                    cb.on_response(request, response)
-                except Exception as e:
-                    self._lg.warning(
-                        "on_response callback failed", extra={"exception": e}
-                    )
+            self._log_stream_response(request, start_t, response)
+            if response:
+                self._fire_on_response(request, response)
         except Exception as e:
-            if cb and cb.on_error:
-                try:
-                    cb.on_error(request, e)
-                except Exception as cb_err:
-                    self._lg.warning(
-                        "on_error callback failed", extra={"exception": cb_err}
-                    )
+            self._fire_on_error(request, e)
             raise
 
     # =========================================================================

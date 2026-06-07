@@ -35,6 +35,17 @@ class TransientAction(Enum):
     RETRY_NEXT = "retry_next"  # Try different backend (5xx, timeout, unavailable)
 
 
+class DecisionType(Enum):
+    """Type of routing decision.
+
+    Used by router to determine model resolution behavior.
+    """
+
+    INITIAL = "initial"  # First attempt, preserve requested model
+    RETRY_SAME = "retry_same"  # Retry same backend, preserve model
+    FALLBACK = "fallback"  # Different backend, use target's default model
+
+
 # Status codes that should retry on a different backend
 RETRY_NEXT_STATUS_CODES = frozenset({500, 502, 503, 504})
 
@@ -70,11 +81,14 @@ class RoutingDecision:
         updated_request: Optional modified request. If set, overrides the
             original ChatRequest for this attempt.
         metadata: Decision metadata (reason, markers, etc.).
+        decision_type: Type of decision (initial, retry_same, fallback).
+            Determines model resolution behavior.
     """
 
     backend: str
     updated_request: ChatRequest | None = None
     metadata: DotDict = field(default_factory=DotDict)
+    decision_type: DecisionType = DecisionType.INITIAL
 
 
 @dataclass

@@ -47,6 +47,7 @@ Classes:
     - ChatClient: Abstract base class for all chat clients
     - LLMClient: Single-backend client
     - LLMRouter: Multi-backend router with backend selection
+    - FallbackClient: Automatic model fallback on transient errors
     - Factory: Creates clients and routers from config
 
 Backends:
@@ -59,11 +60,13 @@ llm-infer Extensions:
     - tools/tool_choice: Function calling support
 """
 
-from .backends import Backend, OpenAICompatibleBackend
+from .backends import Backend, OpenAICompatibleBackend, RetryConfig
+from .backends.embedding import BatchEmbeddingResult, EmbeddingResult
 from .base import ChatClient
 from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
+from .embedding import EmbeddingClient
 from .errors import (
     BackendError,
     BackendRequestError,
@@ -73,14 +76,14 @@ from .errors import (
     ModelConflictError,
 )
 from .factory import Factory
+from .fallback import FallbackClient
 from .router import LLMRouter, ResolvedTarget
 from .strategies import (
     DefaultStrategy,
     DefaultStrategyFactory,
-    FallbackStrategy,
-    FallbackStrategyFactory,
 )
 from .strategy import (
+    DecisionType,
     DefaultTransientDetector,
     RoutingContext,
     RoutingDecision,
@@ -107,7 +110,14 @@ __all__ = [
     # Client types
     "ChatClient",
     "BoundChatClient",
+    "FallbackClient",
     "LLMClient",
+    # Embeddings client
+    "EmbeddingClient",
+    "EmbeddingResult",
+    "BatchEmbeddingResult",
+    # Retry configuration
+    "RetryConfig",
     # Router (multi-backend)
     "LLMRouter",
     "ResolvedTarget",
@@ -118,14 +128,13 @@ __all__ = [
     "RoutingContext",
     "RoutingDecision",
     "RoutingResult",
+    "DecisionType",
     "StrategyFactory",
     "TransientAction",
     "TransientDetector",
     "DefaultTransientDetector",
     "DefaultStrategy",
     "DefaultStrategyFactory",
-    "FallbackStrategy",
-    "FallbackStrategyFactory",
     # Request/Response types
     "ChatRequest",
     "ChatResponse",

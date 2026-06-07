@@ -19,7 +19,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 from appinfra.log import Logger
@@ -41,6 +41,8 @@ from ...errors import (
 from ...types import AdapterInfo, ChatRequest, ChatResponse, ResponseHolder
 from ..base import Backend
 from ..context import BackendContext
+from ..embedding import Backend as EmbeddingBackend
+from ..embedding import BatchEmbeddingResult, EmbeddingResult
 from ..mixins import AsyncRequestTrackingMixin
 from ..provider import ProviderDetector
 
@@ -176,6 +178,26 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # Request execution
     # =========================================================================
 
+    def _raise_backend_error(self, e: Exception) -> NoReturn:
+        """Translate httpx/json exceptions to backend errors."""
+        if isinstance(e, httpx.ConnectError):
+            raise BackendUnavailableError(
+                f"Failed to connect to {self._base_url}"
+            ) from e
+        if isinstance(e, httpx.TimeoutException):
+            raise BackendTimeoutError(
+                f"Request timed out after {self._ctx.request_timeout}s"
+            ) from e
+        if isinstance(e, httpx.HTTPStatusError):
+            raise BackendRequestError(
+                f"Backend error: {e.response.text}", status_code=e.response.status_code
+            ) from e
+        if isinstance(e, httpx.RequestError):
+            raise BackendRequestError(f"Transport error: {e}") from e
+        if isinstance(e, json.JSONDecodeError):
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        raise e
+
     def _execute_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute sync request with error translation."""
         if self._ctx.rate_limiter is not None:
@@ -185,22 +207,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
 
     def _execute_stream_sync(
         self, url: str, payload: dict[str, Any]
@@ -212,24 +220,14 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             with self._client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
             ) as resp:
-                resp.raise_for_status()
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError:
+                    resp.read()
+                    raise
                 yield from self._parse_sse_stream_sync(resp)
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
 
     async def _execute_async(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute async request with error translation."""
@@ -242,22 +240,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
         finally:
             self._release_async_request()
 
@@ -273,25 +257,15 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             async with client.stream(
                 "POST", url, json=payload, headers=self._build_headers()
             ) as resp:
-                resp.raise_for_status()
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError:
+                    await resp.aread()
+                    raise
                 async for chunk in self._parse_sse_stream_async(resp):
                     yield chunk
-        except httpx.ConnectError as e:
-            raise BackendUnavailableError(
-                f"Failed to connect to {self._base_url}"
-            ) from e
-        except httpx.TimeoutException as e:
-            raise BackendTimeoutError(
-                f"Request timed out after {self._ctx.request_timeout}s"
-            ) from e
-        except httpx.HTTPStatusError as e:
-            raise BackendRequestError(
-                f"Backend error: {e.response.text}", status_code=e.response.status_code
-            ) from e
-        except httpx.RequestError as e:
-            raise BackendRequestError(f"Transport error: {e}") from e
-        except json.JSONDecodeError as e:
-            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+        except (httpx.HTTPError, json.JSONDecodeError) as e:
+            self._raise_backend_error(e)
         finally:
             self._release_async_request()
 
@@ -378,6 +352,10 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             "temperature": request.temperature,
             "stream": stream,
         }
+        if stream:
+            # Request usage stats in final chunk. May break non-compliant backends
+            # that reject unknown params, but required for billing/cost tracking.
+            payload["stream_options"] = {"include_usage": True}
         self._add_optional_params(payload, request)
         # Add extra params, filtering out reserved keys to prevent override
         if request.extra:
@@ -506,7 +484,7 @@ class _StreamState:
     thinking: list[str] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     _tool_call_buffer: dict[int, dict[str, Any]] = field(default_factory=dict)
-    finish_reason: FinishReason | None = None
+    finish_reason: FinishReason | str | None = None
     usage: ChatCompletionUsage | None = None
     adapter: AdapterInfo | None = None
     raw: dict[str, Any] | None = None
@@ -612,14 +590,14 @@ class _StreamState:
         ]
 
 
-def _parse_finish_reason(value: str | None) -> FinishReason | None:
-    """Parse finish reason string to enum."""
+def _parse_finish_reason(value: str | None) -> FinishReason | str | None:
+    """Parse finish reason; unknown values pass through as raw str."""
     if value is None:
         return None
     try:
         return FinishReason(value)
     except ValueError:
-        return None
+        return value
 
 
 def _parse_usage(data: dict[str, Any] | None) -> ChatCompletionUsage | None:
@@ -659,3 +637,324 @@ def _parse_adapter_info(data: dict[str, Any] | None) -> AdapterInfo | None:
         mtime=data.get("mtime"),
         md5=data.get("md5"),
     )
+
+
+# =============================================================================
+# Embedding Backend
+# =============================================================================
+
+
+class OpenAIEmbeddingBackend(EmbeddingBackend):
+    """OpenAI-compatible embedding backend.
+
+    Works with OpenAI, Azure OpenAI, and any API following the /v1/embeddings format.
+
+    Example:
+        backend = OpenAIEmbeddingBackend(
+            lg=logger,
+            base_url="https://api.openai.com/v1",
+            api_key="sk-...",
+            model="text-embedding-3-small",
+        )
+        result = backend.embed("Hello world")
+    """
+
+    def __init__(
+        self,
+        lg: Logger,
+        base_url: str,
+        model: str,
+        api_key: str | None = None,
+        ctx: BackendContext | None = None,
+    ) -> None:
+        """Initialize OpenAI-compatible embedding backend.
+
+        Args:
+            lg: Logger instance.
+            base_url: Base URL (e.g., "https://api.openai.com/v1").
+            model: Model name (e.g., "text-embedding-3-small").
+            api_key: Optional API key for Authorization header.
+            ctx: Backend context with rate limiter and timeouts.
+        """
+        super().__init__(lg, model, ctx)
+        self._base_url = base_url.rstrip("/")
+
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        self._client = httpx.Client(timeout=self._ctx.request_timeout, headers=headers)
+        self._async_client: httpx.AsyncClient | None = None
+        self._headers = headers
+
+    @property
+    def provider(self) -> str:
+        return "openai"
+
+    def _get_async_client(self) -> httpx.AsyncClient:
+        """Get or create the async HTTP client (lazy initialization)."""
+        if self._async_client is None:
+            self._async_client = httpx.AsyncClient(
+                timeout=self._ctx.request_timeout, headers=self._headers
+            )
+        return self._async_client
+
+    # =========================================================================
+    # HTTP execution
+    # =========================================================================
+
+    def _execute_sync(
+        self,
+        texts: str | list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> dict[str, Any]:
+        """Execute sync request with error translation."""
+        url = f"{self._base_url}/embeddings"
+        payload: dict[str, Any] = {"model": model or self._model, "input": texts}
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        try:
+            resp = self._client.post(url, json=payload)
+            resp.raise_for_status()
+            result: dict[str, Any] = resp.json()
+            return result
+        except httpx.ConnectError as e:
+            raise BackendUnavailableError(
+                f"Failed to connect to {self._base_url}"
+            ) from e
+        except httpx.TimeoutException as e:
+            raise BackendTimeoutError(
+                f"Request timed out after {self._ctx.request_timeout}s"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise BackendRequestError(
+                f"Backend error: {e.response.text}", status_code=e.response.status_code
+            ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+
+    async def _execute_async(
+        self,
+        texts: str | list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> dict[str, Any]:
+        """Execute async request with error translation."""
+        url = f"{self._base_url}/embeddings"
+        payload: dict[str, Any] = {"model": model or self._model, "input": texts}
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        client = self._get_async_client()
+        try:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            result: dict[str, Any] = resp.json()
+            return result
+        except httpx.ConnectError as e:
+            raise BackendUnavailableError(
+                f"Failed to connect to {self._base_url}"
+            ) from e
+        except httpx.TimeoutException as e:
+            raise BackendTimeoutError(
+                f"Request timed out after {self._ctx.request_timeout}s"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise BackendRequestError(
+                f"Backend error: {e.response.text}", status_code=e.response.status_code
+            ) from e
+        except httpx.RequestError as e:
+            raise BackendRequestError(f"Transport error: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BackendRequestError(f"Invalid JSON response: {e}") from e
+
+    # =========================================================================
+    # Response parsing
+    # =========================================================================
+
+    def _parse_single(
+        self,
+        data: dict[str, Any],
+        model: str | None = None,
+        requested_dims: int | None = None,
+    ) -> EmbeddingResult:
+        """Parse response for single embedding."""
+        try:
+            embedding = data["data"][0]["embedding"]
+            actual_dims = len(embedding)
+        except (KeyError, IndexError, TypeError) as e:
+            raise BackendRequestError(f"Malformed response: {e}") from e
+        if requested_dims is not None and actual_dims != requested_dims:
+            raise BackendRequestError(
+                f"Requested {requested_dims} dimensions but got {actual_dims}"
+            )
+        return EmbeddingResult(
+            embedding=embedding,
+            model=data.get("model", model or self._model),
+            dimensions=actual_dims,
+            prompt_tokens=data.get("usage", {}).get("prompt_tokens"),
+        )
+
+    def _extract_batch_embeddings(
+        self, items: list[dict[str, Any]], requested_dims: int | None
+    ) -> tuple[list[list[float]], int]:
+        """Extract embeddings from sorted batch items, validate dimensions."""
+        embeddings = []
+        actual_dims = 0
+        for i, item in enumerate(sorted(items, key=lambda x: x["index"])):
+            embedding = item["embedding"]
+            dims = len(embedding)
+            if requested_dims is not None and dims != requested_dims:
+                raise BackendRequestError(
+                    f"Requested {requested_dims} dimensions but got {dims}"
+                )
+            if i == 0:
+                actual_dims = dims
+            embeddings.append(embedding)
+        return embeddings, actual_dims
+
+    def _parse_batch(
+        self,
+        data: dict[str, Any],
+        num_texts: int,
+        model: str | None = None,
+        requested_dims: int | None = None,
+    ) -> BatchEmbeddingResult:
+        """Parse batch embedding response."""
+        try:
+            embeddings_data = data["data"]
+        except (KeyError, TypeError) as e:
+            raise BackendRequestError(f"Malformed response: {e}") from e
+        if len(embeddings_data) != num_texts:
+            raise BackendRequestError(
+                f"Expected {num_texts} embeddings, got {len(embeddings_data)}"
+            )
+
+        try:
+            embeddings, actual_dims = self._extract_batch_embeddings(
+                embeddings_data, requested_dims
+            )
+        except (KeyError, TypeError) as e:
+            raise BackendRequestError(f"Malformed response: {e}") from e
+
+        return BatchEmbeddingResult(
+            embeddings=embeddings,
+            model=data.get("model", model or self._model),
+            dimensions=actual_dims,
+            size=num_texts,
+            total_prompt_tokens=data.get("usage", {}).get("prompt_tokens"),
+        )
+
+    # =========================================================================
+    # Public API
+    # =========================================================================
+
+    def embed(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResult:
+        self._wait_rate_limit()
+        data = self._execute_sync(text, model, dimensions)
+        return self._parse_single(data, model, dimensions)
+
+    def embed_batch(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> BatchEmbeddingResult:
+        if not texts:
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=model or self._model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=0,
+            )
+        self._wait_rate_limit()
+        data = self._execute_sync(texts, model, dimensions)
+        return self._parse_batch(data, len(texts), model, dimensions)
+
+    async def embed_async(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResult:
+        await self._wait_rate_limit_async()
+        data = await self._execute_async(text, model, dimensions)
+        return self._parse_single(data, model, dimensions)
+
+    async def embed_batch_async(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> BatchEmbeddingResult:
+        if not texts:
+            return BatchEmbeddingResult(
+                embeddings=[],
+                model=model or self._model,
+                dimensions=0,
+                size=0,
+                total_prompt_tokens=0,
+            )
+        await self._wait_rate_limit_async()
+        data = await self._execute_async(texts, model, dimensions)
+        return self._parse_batch(data, len(texts), model, dimensions)
+
+    # =========================================================================
+    # Token counting
+    # =========================================================================
+
+    def _get_tokenizer(self) -> Any:
+        """Get tiktoken encoding for this model."""
+        try:
+            import tiktoken
+        except ImportError as e:
+            raise ImportError(
+                "tiktoken is required for token counting. "
+                "Install with: pip install tiktoken"
+            ) from e
+
+        try:
+            return tiktoken.encoding_for_model(self._model)
+        except KeyError:
+            return tiktoken.get_encoding("cl100k_base")
+
+    def count_tokens(self, text: str) -> int:
+        enc = self._get_tokenizer()
+        return len(enc.encode(text))
+
+    def count_tokens_batch(self, texts: list[str]) -> int:
+        if not texts:
+            return 0
+        enc = self._get_tokenizer()
+        return sum(len(enc.encode(text)) for text in texts)
+
+    async def count_tokens_async(self, text: str) -> int:
+        return self.count_tokens(text)
+
+    async def count_tokens_batch_async(self, texts: list[str]) -> int:
+        return self.count_tokens_batch(texts)
+
+    # =========================================================================
+    # Resource management
+    # =========================================================================
+
+    def close(self) -> None:
+        self._client.close()
+
+    async def aclose(self) -> None:
+        self._client.close()
+        if self._async_client is not None:
+            await self._async_client.aclose()
+            self._async_client = None

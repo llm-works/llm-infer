@@ -510,6 +510,29 @@ class TestLLMRouterResolve:
             router.resolve(backend="unknown")
 
 
+class TestNormalizeDecision:
+    """Test _normalize_decision model resolution."""
+
+    def test_preserves_original_model(self, mock_lg: Logger) -> None:
+        """Decisions should preserve the original model from request."""
+        from llm_infer.client.router_helper import _normalize_decision
+        from llm_infer.client.strategy import RoutingDecision
+
+        client = make_client(mock_lg, "main", default_model="default-model")
+        router = LLMRouter(mock_lg, {"main": client}, "main")
+
+        request = ChatRequest(
+            messages=[{"role": "user", "content": "hi"}],
+            model="specific-model",
+        )
+        decision = RoutingDecision(backend="main")
+
+        normalized = _normalize_decision(router, request, decision)
+
+        assert normalized.updated_request is not None
+        assert normalized.updated_request.model == "specific-model"
+
+
 class TestLLMClientDefaultModel:
     """Test LLMClient.default_model property."""
 
