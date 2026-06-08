@@ -39,6 +39,7 @@ from ...errors import (
     BackendUnavailableError,
 )
 from ...types import AdapterInfo, ChatRequest, ChatResponse, ResponseHolder
+from ..auth import AuthProvider, StaticAPIKeyAuth
 from ..base import Backend
 from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
@@ -58,6 +59,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         default_model: str | None = None,
         base_url: str = "http://localhost:8000/v1",
         api_key: str | None = None,
+        auth: AuthProvider | None = None,
     ) -> None:
         """Initialize the backend.
 
@@ -67,11 +69,16 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             ctx: Backend context with rate limiter, backoff, and timeouts.
             default_model: Default model if not specified per-request.
             base_url: Base URL for the API.
-            api_key: API key for authentication.
+            api_key: Static API key. Wrapped as ``StaticAPIKeyAuth`` if
+                ``auth`` is not provided. Ignored when ``auth`` is provided.
+            auth: Auth provider. Takes precedence over ``api_key``. Use this
+                for non-static auth schemes (e.g. ``GCPServiceAccountAuth``).
         """
         super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        if auth is None and api_key is not None:
+            auth = StaticAPIKeyAuth(api_key)
+        self._auth = auth
         self._provider = ProviderDetector.detect(base_url, api_key)
         self._last_response: ChatResponse | None = None
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
@@ -236,7 +243,8 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         self._acquire_async_request()
         try:
             client = self._get_async_client()
-            resp = await client.post(url, json=payload, headers=self._build_headers())
+            headers = await self._build_headers_async()
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
@@ -254,8 +262,9 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         self._acquire_async_request()
         try:
             client = self._get_async_client()
+            headers = await self._build_headers_async()
             async with client.stream(
-                "POST", url, json=payload, headers=self._build_headers()
+                "POST", url, json=payload, headers=headers
             ) as resp:
                 try:
                     resp.raise_for_status()
@@ -313,10 +322,17 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         return url, payload
 
     def _build_headers(self) -> dict[str, str]:
-        """Build request headers."""
+        """Build request headers (sync)."""
         headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        if self._auth is not None:
+            headers.update(self._auth.headers())
+        return headers
+
+    async def _build_headers_async(self) -> dict[str, str]:
+        """Build request headers (async, may refresh credentials off-loop)."""
+        headers = {"Content-Type": "application/json"}
+        if self._auth is not None:
+            headers.update(await self._auth.headers_async())
         return headers
 
     def _build_messages(

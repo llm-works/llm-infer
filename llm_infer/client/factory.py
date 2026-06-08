@@ -39,6 +39,7 @@ from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
 
 from .backends import Backend, BackendContext, BackendFactory, RetryConfig
+from .backends.auth import AuthProvider, auth_from_config
 from .client import LLMClient
 from .discovery import ModelDiscovery
 from .embedding import EmbeddingClient
@@ -496,7 +497,7 @@ class Factory:
 
     def embeddings_google(
         self,
-        api_key: str,
+        api_key: str | None = None,
         model: str = "gemini-embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
         timeout: float = 120.0,
@@ -504,11 +505,14 @@ class Factory:
         rate_limit: dict[str, Any] | None = None,
         dimensions: int | None = None,
         count_tokens: bool = False,
+        base_url: str | None = None,
+        auth: AuthProvider | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for Google Generative AI embeddings.
 
         Args:
-            api_key: Google API key.
+            api_key: Google API key (AI Studio). Either this or ``auth`` must
+                be provided.
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings. One of:
                 RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
@@ -518,6 +522,10 @@ class Factory:
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
             dimensions: Default output dimensions. None uses provider default.
             count_tokens: If True, populate prompt_tokens via countTokens API (extra call).
+            base_url: API base URL override. Defaults to the AI Studio endpoint;
+                set to ``https://<region>-aiplatform.googleapis.com/v1/...`` for Vertex.
+            auth: Auth provider. Takes precedence over ``api_key``. Use
+                ``GCPServiceAccountAuth`` for Vertex.
 
         Returns:
             EmbeddingClient configured for Google embeddings.
@@ -534,6 +542,8 @@ class Factory:
             task_type=GoogleEmbeddingTaskType(task_type),
             ctx=ctx,
             count_tokens=count_tokens,
+            base_url=base_url,
+            auth=auth,
         )
         return EmbeddingClient(
             self._lg, backend, retry=retry, model=model, dimensions=dimensions
@@ -591,10 +601,17 @@ class Factory:
         count_tokens: bool,
     ) -> EmbeddingClient:
         """Create Google embedding client from config."""
-        if not cfg.get("api_key"):
-            raise ValueError("api_key required for google embedding backend")
+        auth_cfg = cfg.get("auth")
+        api_key = cfg.get("api_key")
+        auth = auth_from_config(
+            self._lg,
+            dict(auth_cfg) if auth_cfg else None,
+            api_key=api_key,
+            api_key_header="x-goog-api-key",
+        )
+        if auth is None:
+            raise ValueError("api_key or auth required for google embedding backend")
         return self.embeddings_google(
-            api_key=cfg.api_key,
             model=cfg.get("model", "gemini-embedding-001"),
             task_type=cfg.get("task_type", "RETRIEVAL_DOCUMENT"),
             timeout=timeout,
@@ -602,6 +619,8 @@ class Factory:
             rate_limit=cfg.get("rate_limit"),
             dimensions=dimensions,
             count_tokens=count_tokens,
+            base_url=cfg.get("base_url"),
+            auth=auth,
         )
 
     def embeddings_from_config(self, config: dict[str, Any]) -> EmbeddingClient:

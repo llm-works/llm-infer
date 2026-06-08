@@ -35,11 +35,16 @@ saia = [
 embedding = [
     "tiktoken>=0.7.0,<1.0.0",
 ]
-# Client: all client backends (anthropic + saia + embedding)
+# GCP: service-account auth for Vertex AI (chat + embedding backends)
+gcp = [
+    "google-auth>=2.0.0,<3.0.0",
+]
+# Client: all client backends (anthropic + saia + embedding + gcp)
 client = [
     "llm-infer[anthropic]",
     "llm-infer[saia]",
     "llm-infer[embedding]",
+    "llm-infer[gcp]",
 ]
 # Runtime: CPU serving (includes FastAPI)
 runtime = [
