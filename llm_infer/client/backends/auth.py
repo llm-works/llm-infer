@@ -131,25 +131,29 @@ class GCPServiceAccountAuth:
         return creds, Request()
 
     def headers(self) -> dict[str, str]:
-        self._ensure_fresh()
-        return {"Authorization": f"Bearer {self._creds.token}"}
+        token = self._get_token()
+        return {"Authorization": f"Bearer {token}"}
 
     async def headers_async(self) -> dict[str, str]:
         return await asyncio.to_thread(self.headers)
 
-    def _ensure_fresh(self) -> None:
-        if not self._needs_refresh():
-            return
+    def _get_token(self) -> str:
+        """Return a valid token, refreshing if needed.
+
+        Reads the token under the lock to avoid racing with a concurrent
+        refresh on another thread.
+        """
         with self._lock:
-            if not self._needs_refresh():
-                return
-            try:
-                self._creds.refresh(self._request)
-            except Exception as e:
-                self._lg.warning(
-                    "GCP service account token refresh failed", extra={"exception": e}
-                )
-                raise
+            if self._needs_refresh():
+                try:
+                    self._creds.refresh(self._request)
+                except Exception as e:
+                    self._lg.warning(
+                        "GCP service account token refresh failed",
+                        extra={"exception": e},
+                    )
+                    raise
+            return self._creds.token  # type: ignore[no-any-return]
 
     def _needs_refresh(self) -> bool:
         if self._creds.token is None:
