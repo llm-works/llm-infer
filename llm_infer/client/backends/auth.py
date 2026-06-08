@@ -222,11 +222,18 @@ def auth_from_config(
         return auth_from_api_key(key, header=api_key_header)
     if mode == "gcp_sa":
         scopes = auth_cfg.get("scopes")
+        if scopes is not None:
+            if isinstance(scopes, str):
+                raise ValueError("scopes must be a list of strings, not a bare string")
+            scopes = list(scopes)
+        refresh_skew_s = auth_cfg.get("refresh_skew_s", _DEFAULT_REFRESH_SKEW_S)
+        if not isinstance(refresh_skew_s, int) or refresh_skew_s < 0:
+            raise ValueError("refresh_skew_s must be a non-negative integer")
         return GCPServiceAccountAuth(
             lg,
             credentials_path=auth_cfg.get("credentials_path"),
-            scopes=list(scopes) if scopes else None,
-            refresh_skew_s=auth_cfg.get("refresh_skew_s", _DEFAULT_REFRESH_SKEW_S),
+            scopes=scopes,
+            refresh_skew_s=refresh_skew_s,
         )
     raise ValueError(f"Unknown auth mode: {mode!r}")
 

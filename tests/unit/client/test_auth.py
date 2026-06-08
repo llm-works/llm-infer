@@ -305,3 +305,24 @@ class TestAuthFromConfig:
     def test_unknown_mode_raises(self, mock_lg: Logger) -> None:
         with pytest.raises(ValueError, match="Unknown auth mode"):
             auth_from_config(mock_lg, {"mode": "magic"})
+
+    def test_gcp_sa_rejects_bare_string_scopes(self, mock_lg: Logger) -> None:
+        with pytest.raises(ValueError, match="scopes must be a list"):
+            auth_from_config(
+                mock_lg,
+                {"mode": "gcp_sa", "scopes": "https://example.com/scope"},
+            )
+
+    def test_gcp_sa_rejects_negative_refresh_skew(self, mock_lg: Logger) -> None:
+        with pytest.raises(ValueError, match="refresh_skew_s must be"):
+            auth_from_config(
+                mock_lg,
+                {"mode": "gcp_sa", "refresh_skew_s": -1},
+            )
+
+    def test_gcp_sa_rejects_non_int_refresh_skew(self, mock_lg: Logger) -> None:
+        with pytest.raises(ValueError, match="refresh_skew_s must be"):
+            auth_from_config(
+                mock_lg,
+                {"mode": "gcp_sa", "refresh_skew_s": "300"},
+            )

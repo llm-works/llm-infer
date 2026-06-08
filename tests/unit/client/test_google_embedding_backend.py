@@ -338,12 +338,8 @@ class TestGoogleEmbeddingBackendVertex:
 
     def test_requires_api_key_or_auth(self, mock_lg: Logger) -> None:
         """Constructor rejects when neither api_key nor auth is provided."""
-        from pathlib import Path
-
         with pytest.raises(ValueError, match="api_key or auth"):
             GoogleEmbeddingBackend(mock_lg)
-        # Ensure the path doesn't matter — pure validation.
-        assert isinstance(Path, type)
 
     def test_base_url_override(self, mock_lg: Logger) -> None:
         """Custom base_url is used for request URLs."""
