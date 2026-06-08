@@ -37,7 +37,7 @@ class TestOpenAICompatibleBackendInit:
         backend = OpenAICompatibleBackend(mock_lg, "test")
         assert backend._base_url == "http://localhost:8000/v1"
         assert backend.default_model is None
-        assert backend._api_key is None
+        assert backend._auth is None
         assert backend._ctx.request_timeout == 120.0
         assert backend.last_response is None
         backend.close()
@@ -57,7 +57,7 @@ class TestOpenAICompatibleBackendInit:
         )
         assert backend._base_url == "http://custom:9000/api"
         assert backend.default_model == "gpt-4"
-        assert backend._api_key == "sk-test"
+        assert backend._build_headers()["Authorization"] == "Bearer sk-test"
         assert backend._ctx.request_timeout == 60.0
         backend.close()
 

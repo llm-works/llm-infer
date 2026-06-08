@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Vertex AI support** for chat (`GeminiBackend`) and embedding
+  (`GoogleEmbeddingBackend`) via GCP service-account auth. Selectable from
+  config alone: `auth: {mode: gcp_sa, credentials_path: ...}` (defaults to
+  `GOOGLE_APPLICATION_CREDENTIALS`). Token refresh is lazy and cached.
+- **`AuthProvider` abstraction**: `StaticAPIKeyAuth`,
+  `GoogleAPIKeyHeaderAuth`, `GCPServiceAccountAuth`. Backends accept an
+  `auth=` parameter; existing `api_key=` still works. Async refresh is
+  off-loop via `asyncio.to_thread`.
+- **`base_url` override on `GoogleEmbeddingBackend`** so the same backend
+  targets AI Studio (default) or a Vertex endpoint.
+- **`[gcp]` optional extra** (`google-auth`). Folded into `[client]`.
+
+### Fixed
+
+- **Vertex `reasoning_effort`**: `GeminiBackend` sends `"minimal"` on Vertex
+  when thinking is disabled — Vertex's OpenAI-compat surface rejects
+  `"none"`. AI Studio still gets `"none"` (fully disabled).
+- **Vertex embedding body**: `GoogleEmbeddingBackend` omits the body `model`
+  field on Vertex (the model is already in the URL path; Vertex rejects the
+  conflict).
+
 ## [0.5.0] - 2026-06-06
 
 ### Added

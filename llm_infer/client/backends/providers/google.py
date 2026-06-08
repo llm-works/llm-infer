@@ -14,6 +14,7 @@ import httpx
 from appinfra.log import Logger
 
 from ...errors import BackendRequestError, BackendTimeoutError, BackendUnavailableError
+from ..auth import AuthProvider, GoogleAPIKeyHeaderAuth
 from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
 from ..embedding import BatchEmbeddingResult, EmbeddingResult
@@ -46,37 +47,48 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         result = backend.embed("Hello world")
     """
 
-    BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     MAX_BATCH_SIZE = 100
 
     def __init__(
         self,
         lg: Logger,
-        api_key: str,
+        api_key: str | None = None,
         model: str = "gemini-embedding-001",
         task_type: GoogleEmbeddingTaskType = GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
         ctx: BackendContext | None = None,
         count_tokens: bool = False,
+        base_url: str | None = None,
+        auth: AuthProvider | None = None,
     ) -> None:
         """Initialize Google embedding backend.
 
         Args:
             lg: Logger instance.
-            api_key: Google API key.
+            api_key: Google API key (AI Studio). Wrapped as
+                ``GoogleAPIKeyHeaderAuth`` if ``auth`` is not provided. Ignored
+                when ``auth`` is provided.
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings.
             ctx: Backend context with rate limiter and timeouts.
             count_tokens: If True, populate prompt_tokens via countTokens API (extra call).
+            base_url: API base URL. Defaults to the AI Studio endpoint; set to
+                ``https://<region>-aiplatform.googleapis.com/v1/...`` for Vertex.
+            auth: Auth provider. Takes precedence over ``api_key``. Use
+                ``GCPServiceAccountAuth`` for Vertex.
         """
         super().__init__(lg, model, ctx)
-        self._api_key = api_key
+        if auth is None and api_key is not None:
+            auth = GoogleAPIKeyHeaderAuth(api_key)
+        if auth is None:
+            raise ValueError("Either api_key or auth must be provided")
+        self._auth = auth
         self._task_type = task_type
         self._count_tokens = count_tokens
+        self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
 
-        headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
-        self._client = httpx.Client(timeout=self._ctx.request_timeout, headers=headers)
+        self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
-        self._headers = headers
 
     @property
     def provider(self) -> str:
@@ -95,14 +107,33 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     def _get_async_client(self) -> httpx.AsyncClient:
         """Get or create the async HTTP client (lazy initialization)."""
         if self._async_client is None:
-            self._async_client = httpx.AsyncClient(
-                timeout=self._ctx.request_timeout, headers=self._headers
-            )
+            self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
         return self._async_client
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build request headers (sync)."""
+        headers = {"Content-Type": "application/json"}
+        headers.update(self._auth.headers())
+        return headers
+
+    async def _build_headers_async(self) -> dict[str, str]:
+        """Build request headers (async, may refresh credentials off-loop)."""
+        headers = {"Content-Type": "application/json"}
+        headers.update(await self._auth.headers_async())
+        return headers
 
     # =========================================================================
     # Request building
     # =========================================================================
+
+    def _is_vertex(self) -> bool:
+        """True when the backend is configured for Vertex AI.
+
+        Vertex encodes the model name in the URL path and rejects requests
+        that also carry a ``model`` field in the body (oneof conflict). AI
+        Studio requires the body field. Detect once from ``base_url``.
+        """
+        return "aiplatform.googleapis.com" in self._base_url
 
     def _build_single_request(
         self,
@@ -113,10 +144,13 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         """Build request payload for single embedding."""
         effective_model = model or self._model
         request: dict[str, Any] = {
-            "model": f"models/{effective_model}",
             "content": {"parts": [{"text": text}]},
             "taskType": self._task_type.value,
         }
+        # AI Studio requires `model` in the body; Vertex rejects it (the model
+        # is already in the URL path under publishers/google/models/<name>).
+        if not self._is_vertex():
+            request["model"] = f"models/{effective_model}"
         if dimensions is not None:
             request["outputDimensionality"] = dimensions
         return request
@@ -130,9 +164,10 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         """Build request payload for batch embedding."""
         effective_model = model or self._model
         base_request: dict[str, Any] = {
-            "model": f"models/{effective_model}",
             "taskType": self._task_type.value,
         }
+        if not self._is_vertex():
+            base_request["model"] = f"models/{effective_model}"
         if dimensions is not None:
             base_request["outputDimensionality"] = dimensions
 
@@ -155,7 +190,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> dict[str, Any]:
         """Execute sync request for single embedding."""
         effective_model = model or self._model
-        url = f"{self.BASE_URL}/models/{effective_model}:embedContent"
+        url = f"{self._base_url}/models/{effective_model}:embedContent"
         payload = self._build_single_request(text, model, dimensions)
         return self._do_request_sync(url, payload)
 
@@ -167,14 +202,14 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> dict[str, Any]:
         """Execute sync request for batch embedding."""
         effective_model = model or self._model
-        url = f"{self.BASE_URL}/models/{effective_model}:batchEmbedContents"
+        url = f"{self._base_url}/models/{effective_model}:batchEmbedContents"
         payload = self._build_batch_request(texts, model, dimensions)
         return self._do_request_sync(url, payload)
 
     def _do_request_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute sync HTTP request with error translation."""
         try:
-            resp = self._client.post(url, json=payload)
+            resp = self._client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
@@ -202,7 +237,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> dict[str, Any]:
         """Execute async request for single embedding."""
         effective_model = model or self._model
-        url = f"{self.BASE_URL}/models/{effective_model}:embedContent"
+        url = f"{self._base_url}/models/{effective_model}:embedContent"
         payload = self._build_single_request(text, model, dimensions)
         return await self._do_request_async(url, payload)
 
@@ -214,7 +249,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> dict[str, Any]:
         """Execute async request for batch embedding."""
         effective_model = model or self._model
-        url = f"{self.BASE_URL}/models/{effective_model}:batchEmbedContents"
+        url = f"{self._base_url}/models/{effective_model}:batchEmbedContents"
         payload = self._build_batch_request(texts, model, dimensions)
         return await self._do_request_async(url, payload)
 
@@ -224,7 +259,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         """Execute async HTTP request with error translation."""
         client = self._get_async_client()
         try:
-            resp = await client.post(url, json=payload)
+            headers = await self._build_headers_async()
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
@@ -409,7 +445,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     def _count_tokens_sync(self, texts: list[str], model: str | None = None) -> int:
         """Count tokens via API (sync)."""
         effective_model = model or self._model
-        url = f"{self.BASE_URL}/models/{effective_model}:countTokens"
+        url = f"{self._base_url}/models/{effective_model}:countTokens"
         contents = [{"parts": [{"text": text}]} for text in texts]
         payload = {"contents": contents}
         self._wait_rate_limit()
@@ -422,7 +458,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     ) -> int:
         """Count tokens via API (async)."""
         effective_model = model or self._model
-        url = f"{self.BASE_URL}/models/{effective_model}:countTokens"
+        url = f"{self._base_url}/models/{effective_model}:countTokens"
         contents = [{"parts": [{"text": text}]} for text in texts]
         payload = {"contents": contents}
         await self._wait_rate_limit_async()

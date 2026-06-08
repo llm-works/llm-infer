@@ -105,3 +105,58 @@ class TestGeminiBackendThinkingNormalization:
         assert payload["reasoning_effort"] == "none"
         assert payload["response_format"]["type"] == "json_schema"
         backend.close()
+
+
+class TestGeminiBackendVertexReasoningEffort:
+    """Vertex's OpenAI-compat surface rejects reasoning_effort='none'.
+
+    AI Studio accepts ``{high, low, medium, minimal, none}``; Vertex accepts
+    only ``{high, low, medium, minimal}``. The backend picks the right value
+    based on ``base_url``.
+    """
+
+    def test_disabled_thinking_uses_minimal_on_vertex(self, mock_lg: Logger) -> None:
+        backend = GeminiBackend(
+            mock_lg,
+            "vertex",
+            base_url=(
+                "https://us-central1-aiplatform.googleapis.com/v1/projects/"
+                "p/locations/us-central1/endpoints/openapi"
+            ),
+        )
+        messages = [{"role": "user", "content": "Hi"}]
+        request = ChatRequest(messages=messages, model="google/gemini-2.5-flash")
+        payload = backend._build_payload(request, messages, stream=False)
+
+        assert payload["reasoning_effort"] == "minimal"
+        backend.close()
+
+    def test_enabled_thinking_still_medium_on_vertex(self, mock_lg: Logger) -> None:
+        """think=True still maps to medium regardless of provider surface."""
+        backend = GeminiBackend(
+            mock_lg,
+            "vertex",
+            base_url="https://us-central1-aiplatform.googleapis.com/v1/...",
+        )
+        messages = [{"role": "user", "content": "Hi"}]
+        request = ChatRequest(
+            messages=messages, model="google/gemini-2.5-flash", think=True
+        )
+        payload = backend._build_payload(request, messages, stream=False)
+
+        assert payload["reasoning_effort"] == "medium"
+        backend.close()
+
+    def test_ai_studio_keeps_none(self, mock_lg: Logger) -> None:
+        """AI Studio base_url still produces 'none' (backwards compatible)."""
+        backend = GeminiBackend(
+            mock_lg,
+            "studio",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+        messages = [{"role": "user", "content": "Hi"}]
+        request = ChatRequest(messages=messages, model="gemini-2.5-flash")
+        payload = backend._build_payload(request, messages, stream=False)
+
+        assert payload["reasoning_effort"] == "none"
+        backend.close()

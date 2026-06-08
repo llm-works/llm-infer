@@ -43,6 +43,11 @@ class GeminiBackend(OpenAICompatibleBackend):
         explicitly requested via think=True or reasoning_effort.
 
         Also removes the `think` field since Gemini uses `reasoning_effort` instead.
+
+        AI Studio accepts ``reasoning_effort: "none"`` to fully disable thinking.
+        Vertex AI's OpenAI-compat surface only accepts ``{high, low, medium,
+        minimal}`` and rejects ``"none"`` with HTTP 400; we map to ``"minimal"``
+        there — the smallest available budget, not strictly zero.
         """
         # Remove think field - Gemini uses reasoning_effort instead
         payload.pop("think", None)
@@ -54,4 +59,10 @@ class GeminiBackend(OpenAICompatibleBackend):
         if request.think:
             payload["reasoning_effort"] = "medium"
         else:
-            payload["reasoning_effort"] = "none"
+            payload["reasoning_effort"] = self._disabled_reasoning_effort()
+
+    def _disabled_reasoning_effort(self) -> str:
+        """Value to use for ``reasoning_effort`` when thinking is disabled."""
+        if "aiplatform.googleapis.com" in self._base_url:
+            return "minimal"
+        return "none"

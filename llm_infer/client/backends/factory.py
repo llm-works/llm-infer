@@ -8,6 +8,7 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
 
+from .auth import AuthProvider, auth_from_config
 from .base import Backend
 from .context import BackendContext, RetryConfig
 from .provider import Provider, ProviderDetector
@@ -87,15 +88,16 @@ class BackendFactory:
         """
         base_url = config.get("base_url", "http://localhost:8000/v1")
         api_key = config.get("api_key")
+        auth = self._create_auth(config, api_key=api_key)
         provider = ProviderDetector.detect(base_url, api_key)
 
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "lg": self._lg,
             "name": name,
             "ctx": ctx,
             "default_model": default_model,
             "base_url": base_url,
-            "api_key": api_key,
+            "auth": auth,
         }
 
         if provider == Provider.GOOGLE:
@@ -106,6 +108,22 @@ class BackendFactory:
         from .providers.openai import OpenAICompatibleBackend
 
         return OpenAICompatibleBackend(**kwargs)
+
+    def _create_auth(
+        self,
+        config: DotDict,
+        *,
+        api_key: str | None,
+        api_key_header: str = "Authorization",
+    ) -> AuthProvider | None:
+        """Build an AuthProvider from the ``auth:`` block, or wrap ``api_key``."""
+        auth_cfg = config.get("auth")
+        return auth_from_config(
+            self._lg,
+            dict(auth_cfg) if auth_cfg else None,
+            api_key=api_key,
+            api_key_header=api_key_header,
+        )
 
     def _create_anthropic(
         self,

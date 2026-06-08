@@ -66,7 +66,7 @@ class TestGoogleEmbeddingBackendInit:
     def test_api_key_sets_header(self, mock_lg: Logger) -> None:
         """Test API key is used in x-goog-api-key header."""
         backend = GoogleEmbeddingBackend(mock_lg, api_key="my-api-key")
-        assert backend._headers["x-goog-api-key"] == "my-api-key"
+        assert backend._build_headers()["x-goog-api-key"] == "my-api-key"
         backend.close()
 
 
@@ -331,3 +331,140 @@ class TestGoogleEmbeddingBackendContextManager:
             async_client = backend._get_async_client()
         assert backend._client.is_closed
         assert async_client.is_closed
+
+
+class TestGoogleEmbeddingBackendVertex:
+    """Test Vertex AI configuration: base_url override + SA auth."""
+
+    def test_requires_api_key_or_auth(self, mock_lg: Logger) -> None:
+        """Constructor rejects when neither api_key nor auth is provided."""
+        from pathlib import Path
+
+        with pytest.raises(ValueError, match="api_key or auth"):
+            GoogleEmbeddingBackend(mock_lg)
+        # Ensure the path doesn't matter — pure validation.
+        assert isinstance(Path, type)
+
+    def test_base_url_override(self, mock_lg: Logger) -> None:
+        """Custom base_url is used for request URLs."""
+        backend = GoogleEmbeddingBackend(
+            mock_lg,
+            api_key="test-key",
+            base_url="https://aiplatform.googleapis.com/v1",
+        )
+        assert backend._base_url == "https://aiplatform.googleapis.com/v1"
+        backend.close()
+
+    def test_default_base_url_unchanged(self, mock_lg: Logger) -> None:
+        """Default base_url is AI Studio for backwards compat."""
+        backend = GoogleEmbeddingBackend(mock_lg, api_key="test-key")
+        assert backend._base_url == ("https://generativelanguage.googleapis.com/v1beta")
+        backend.close()
+
+    def test_base_url_strips_trailing_slash(self, mock_lg: Logger) -> None:
+        backend = GoogleEmbeddingBackend(
+            mock_lg, api_key="k", base_url="https://example.com/v1/"
+        )
+        assert backend._base_url == "https://example.com/v1"
+        backend.close()
+
+    def test_request_url_uses_overridden_base_url(self, mock_lg: Logger) -> None:
+        """The :embedContent path is built off the overridden base_url."""
+        backend = GoogleEmbeddingBackend(
+            mock_lg,
+            api_key="k",
+            base_url="https://aiplatform.googleapis.com/v1",
+            model="google/gemini-embedding-001",
+        )
+        captured: dict = {}
+
+        def fake_post(url: str, json: dict, headers: dict) -> object:
+            captured["url"] = url
+            captured["headers"] = headers
+            resp = MagicMock()
+            resp.json.return_value = {"embedding": {"values": [0.1, 0.2, 0.3]}}
+            resp.raise_for_status = MagicMock()
+            return resp
+
+        with patch.object(backend._client, "post", side_effect=fake_post):
+            backend.embed("hello")
+
+        assert captured["url"] == (
+            "https://aiplatform.googleapis.com/v1/models/"
+            "google/gemini-embedding-001:embedContent"
+        )
+        assert captured["headers"]["x-goog-api-key"] == "k"
+        backend.close()
+
+    def test_vertex_omits_model_from_single_body(self, mock_lg: Logger) -> None:
+        """Vertex rejects body 'model' (URL already has it); omit on Vertex."""
+        backend = GoogleEmbeddingBackend(
+            mock_lg,
+            api_key="k",
+            base_url="https://us-central1-aiplatform.googleapis.com/v1",
+            model="gemini-embedding-001",
+        )
+        payload = backend._build_single_request("hi")
+        assert "model" not in payload
+        assert payload["content"]["parts"][0]["text"] == "hi"
+        backend.close()
+
+    def test_vertex_omits_model_from_batch_body(self, mock_lg: Logger) -> None:
+        backend = GoogleEmbeddingBackend(
+            mock_lg,
+            api_key="k",
+            base_url="https://aiplatform.googleapis.com/v1",
+            model="gemini-embedding-001",
+        )
+        payload = backend._build_batch_request(["a", "b"])
+        for r in payload["requests"]:
+            assert "model" not in r
+        backend.close()
+
+    def test_ai_studio_keeps_model_in_body(self, mock_lg: Logger) -> None:
+        """Regression guard: AI Studio body still carries 'model'."""
+        backend = GoogleEmbeddingBackend(mock_lg, api_key="k")  # default URL
+        payload = backend._build_single_request("hi")
+        assert payload["model"] == "models/gemini-embedding-001"
+        backend.close()
+
+    def test_sa_auth_sends_bearer_header(self, mock_lg: Logger, tmp_path) -> None:
+        """With GCP SA auth, Authorization: Bearer is sent instead of x-goog-api-key."""
+        import json as _json
+
+        from llm_infer.client.backends.auth import GCPServiceAccountAuth
+
+        sa_file = tmp_path / "sa.json"
+        sa_file.write_text(_json.dumps({"type": "service_account"}))
+
+        mock_creds = MagicMock()
+        mock_creds.token = "vertex-token"
+        mock_creds.expiry = None
+
+        with patch(
+            "google.oauth2.service_account.Credentials.from_service_account_file",
+            return_value=mock_creds,
+        ):
+            auth = GCPServiceAccountAuth(mock_lg, credentials_path=str(sa_file))
+            backend = GoogleEmbeddingBackend(
+                mock_lg,
+                auth=auth,
+                base_url="https://aiplatform.googleapis.com/v1",
+                model="google/gemini-embedding-001",
+            )
+
+            captured: dict = {}
+
+            def fake_post(url: str, json: dict, headers: dict) -> object:
+                captured["headers"] = headers
+                resp = MagicMock()
+                resp.json.return_value = {"embedding": {"values": [0.1]}}
+                resp.raise_for_status = MagicMock()
+                return resp
+
+            with patch.object(backend._client, "post", side_effect=fake_post):
+                backend.embed("hello")
+
+            assert captured["headers"]["Authorization"] == "Bearer vertex-token"
+            assert "x-goog-api-key" not in captured["headers"]
+            backend.close()
