@@ -115,7 +115,10 @@ class FallbackClient(ChatClient):
         if not isinstance(clients, Mapping):
             return
         for name, client in clients.items():
-            if client.backend.ctx.retry is None:
+            backend = getattr(client, "backend", None)
+            ctx = getattr(backend, "ctx", None) if backend else None
+            retry = getattr(ctx, "retry", object()) if ctx else object()
+            if retry is None:
                 self._lg.warning(
                     "backend has no retry config; "
                     "fallback engages on first transient error",
