@@ -102,6 +102,8 @@ from .types import (
     LLMResponseCallback,
     Provider,
     ResponseHolder,
+    SendContext,
+    SendResult,
 )
 
 __all__ = [
@@ -145,6 +147,8 @@ __all__ = [
     "LLMRequestCallback",
     "LLMResponseCallback",
     "LLMErrorCallback",
+    "SendContext",
+    "SendResult",
     # Backend base class
     "Backend",
     "OpenAICompatibleBackend",

@@ -73,18 +73,14 @@ class TransformerConfig:
             return result
 
     @classmethod
-    def from_hf_config(  # cq: max-lines=35
-        cls, model_path: str | Path
-    ) -> TransformerConfig:
+    def from_hf_config(cls, model_path: str | Path) -> TransformerConfig:
         """Load config from HuggingFace model directory."""
         from .architecture import get_config_defaults
 
         hf = cls._load_hf_config(model_path)
-        num_heads = hf["num_attention_heads"]
-        hidden_size = hf["hidden_size"]
+        num_heads, hidden_size = hf["num_attention_heads"], hf["hidden_size"]
         model_type = hf.get("model_type")
-        defaults = get_config_defaults(model_type)
-
+        dfl = get_config_defaults(model_type)
         return cls(
             num_layers=hf["num_hidden_layers"],
             num_heads=num_heads,
@@ -96,16 +92,14 @@ class TransformerConfig:
             rope_theta=hf.get("rope_theta", 10000.0),
             rms_norm_eps=hf.get("rms_norm_eps", 1e-5),
             max_seq_len=hf.get("max_position_embeddings", 4096),
-            attention_bias=hf.get(
-                "attention_bias", defaults.get("attention_bias", False)
-            ),
+            attention_bias=hf.get("attention_bias", dfl.get("attention_bias", False)),
             tie_word_embeddings=hf.get("tie_word_embeddings", False),
             model_type=model_type,
             attention_multiplier=hf.get("attention_multiplier"),
             embedding_multiplier=hf.get("embedding_multiplier", 1.0),
             residual_multiplier=hf.get("residual_multiplier", 1.0),
             logits_scaling=hf.get("logits_scaling", 1.0),
-            qk_norm=hf.get("qk_norm", defaults.get("qk_norm", False)),
+            qk_norm=hf.get("qk_norm", dfl.get("qk_norm", False)),
             **cls._parse_quant_config(hf),
         )
 

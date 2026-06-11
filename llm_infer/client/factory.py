@@ -207,7 +207,18 @@ class Factory:
             backend.close()
             raise
 
-    def _create_multi_backend_router(  # cq: max-lines=35
+    def _validate_default_backend(
+        self, default_name: str | None, backends: dict[str, Backend]
+    ) -> str:
+        """Validate and resolve default backend name."""
+        if default_name and default_name not in backends:
+            self._close_backends_safely(backends)
+            raise ValueError(
+                f"Default backend '{default_name}' not in enabled backends"
+            )
+        return default_name or next(iter(backends.keys()))
+
+    def _create_multi_backend_router(
         self,
         backends_config: dict[str, dict[str, Any]],
         default_name: str | None,
@@ -217,23 +228,13 @@ class Factory:
         strategy: RoutingStrategy | None = None,
         callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
-        """Create router from multi-backend config.
-
-        On failure during router init, closes all backends/clients before re-raising.
-        """
+        """Create router from multi-backend config."""
         backends, configs = self._create_enabled_backends(
             backends_config, rate_limit_config, retry_config
         )
         if not backends:
             raise ValueError("No enabled backends in config")
-
-        if default_name and default_name not in backends:
-            self._close_backends_safely(backends)
-            raise ValueError(
-                f"Default backend '{default_name}' not found in enabled backends"
-            )
-        if not default_name:
-            default_name = next(iter(backends.keys()))
+        default_name = self._validate_default_backend(default_name, backends)
 
         try:
             discovery = ModelDiscovery(self._lg, backends, configs)
@@ -241,13 +242,8 @@ class Factory:
                 name: LLMClient(self._lg, backend, discovery, callbacks)
                 for name, backend in backends.items()
             }
-
             return LLMRouter(
-                self._lg,
-                clients,
-                default_name,
-                discovery=discovery,
-                strategy=strategy,
+                self._lg, clients, default_name, discovery=discovery, strategy=strategy
             )
         except Exception:
             self._close_backends_safely(backends)
@@ -306,7 +302,7 @@ class Factory:
                     "Error closing backend during cleanup", extra={"exception": e}
                 )
 
-    def _create_strategy(  # cq: max-lines=40
+    def _create_strategy(
         self, strategy_config: dict[str, Any] | None
     ) -> RoutingStrategy | None:
         """Create routing strategy from config.
@@ -355,9 +351,7 @@ class Factory:
 
         if strategy_type not in factories:
             raise ValueError(
-                f"Unknown strategy type '{strategy_type}'. "
-                f"Available: {list(factories.keys())}. "
-                f"For fallback/resilience, use FallbackClient instead."
+                f"Unknown strategy '{strategy_type}'; use FallbackClient for fallback"
             )
 
         return factories[strategy_type]().create(self._lg, config)

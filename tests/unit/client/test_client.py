@@ -267,7 +267,9 @@ class TestFactory:
                 },
             },
         }
-        with pytest.raises(ValueError, match="Default backend 'disabled' not found"):
+        with pytest.raises(
+            ValueError, match="Default backend 'disabled' not in enabled"
+        ):
             factory.from_config(config)
 
     def test_from_config_with_discover_models_false(self, mock_lg: Logger) -> None:
@@ -1436,3 +1438,184 @@ class TestLLMClientCallbacks:
         assert len(response_calls) == 1
         assert response_calls[0][1].content == "hello"
         await client.aclose()
+
+
+class TestSendCallbacks:
+    """Tests for on_before_send / on_after_send callbacks."""
+
+    def test_on_before_send_fires_before_request(self, mock_lg: Logger) -> None:
+        """on_before_send fires before HTTP request with SendContext."""
+        from llm_infer.client import SendContext
+
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        send_calls: list[SendContext] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_before_send=lambda ctx: send_calls.append(ctx))
+        )
+        client.chat([{"role": "user", "content": "Hi"}])
+
+        assert len(send_calls) == 1
+        ctx = send_calls[0]
+        assert ctx.attempt == 1
+        assert ctx.retry_reason is None
+        assert ctx.delay_seconds is None
+        assert ctx.backend == "mock"  # MockBackend.provider returns "mock"
+        assert ctx.req_id is not None
+        client.close()
+
+    def test_on_after_send_fires_after_response(self, mock_lg: Logger) -> None:
+        """on_after_send fires after HTTP response with SendResult."""
+        from llm_infer.client import SendContext, SendResult
+
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_after_send=lambda ctx, res: after_calls.append((ctx, res)))
+        )
+        client.chat([{"role": "user", "content": "Hi"}])
+
+        assert len(after_calls) == 1
+        ctx, result = after_calls[0]
+        assert ctx.attempt == 1
+        assert result.status_code == 200
+        assert result.error is None
+        assert result.elapsed_ms > 0
+        client.close()
+
+    def test_on_after_send_fires_on_error(self, mock_lg: Logger) -> None:
+        """on_after_send fires with error details when request fails."""
+        from llm_infer.client import BackendRequestError, SendContext, SendResult
+
+        class FailingBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                raise BackendRequestError("Server error", status_code=500)
+
+        backend = FailingBackend(mock_lg, "test", responses=[])
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_after_send=lambda ctx, res: after_calls.append((ctx, res)))
+        )
+
+        with pytest.raises(BackendRequestError):
+            client.chat([{"role": "user", "content": "Hi"}])
+
+        assert len(after_calls) == 1
+        ctx, result = after_calls[0]
+        assert result.status_code == 500
+        assert isinstance(result.error, BackendRequestError)
+        client.close()
+
+    def test_send_callbacks_fire_on_retry(self, mock_lg: Logger) -> None:
+        """Send callbacks fire for each attempt during retry."""
+        from llm_infer.client import BackendRequestError, SendContext, SendResult
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def __init__(self, lg: Logger) -> None:
+                super().__init__(lg, "test", responses=[])
+                self._ctx = BackendContext(
+                    retry=RetryConfig(base=0.01, factor=1, max_delay=0.1, timeout=10)
+                )
+
+            @property
+            def ctx(self) -> BackendContext:
+                return self._ctx
+
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                return ChatResponse(content="Success!")
+
+        backend = RetryBackend(mock_lg)
+        before_calls: list[SendContext] = []
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_before_send=lambda ctx: before_calls.append(ctx),
+                on_after_send=lambda ctx, res: after_calls.append((ctx, res)),
+            )
+        )
+        result = client.chat([{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success!"
+        assert len(before_calls) == 3
+        assert len(after_calls) == 3
+
+        # First attempt: no retry info
+        assert before_calls[0].attempt == 1
+        assert before_calls[0].retry_reason is None
+        assert before_calls[0].delay_seconds is None
+
+        # Second attempt: has retry info
+        assert before_calls[1].attempt == 2
+        assert before_calls[1].retry_reason == "rate_limit"
+        assert before_calls[1].delay_seconds is not None
+        assert before_calls[1].delay_seconds > 0
+
+        # Third attempt: also has retry info
+        assert before_calls[2].attempt == 3
+        assert before_calls[2].retry_reason == "rate_limit"
+
+        # Check after_send results
+        assert after_calls[0][1].status_code == 429
+        assert after_calls[1][1].status_code == 429
+        assert after_calls[2][1].status_code == 200
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_async_send_callbacks_fire(self, mock_lg: Logger) -> None:
+        """Send callbacks fire for async requests."""
+        from llm_infer.client import SendContext, SendResult
+
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        before_calls: list[SendContext] = []
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_before_send=lambda ctx: before_calls.append(ctx),
+                on_after_send=lambda ctx, res: after_calls.append((ctx, res)),
+            )
+        )
+        await client.chat_async([{"role": "user", "content": "Hi"}])
+
+        assert len(before_calls) == 1
+        assert len(after_calls) == 1
+        assert before_calls[0].attempt == 1
+        assert after_calls[0][1].status_code == 200
+        await client.aclose()
+
+    def test_stream_send_callbacks_fire(self, mock_lg: Logger) -> None:
+        """Send callbacks fire for streaming requests."""
+        from llm_infer.client import SendContext, SendResult
+
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        before_calls: list[SendContext] = []
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_before_send=lambda ctx: before_calls.append(ctx),
+                on_after_send=lambda ctx, res: after_calls.append((ctx, res)),
+            )
+        )
+        tokens = list(client.chat_stream([{"role": "user", "content": "Hi"}]))
+
+        assert tokens == ["h", "e", "l", "l", "o"]
+        assert len(before_calls) == 1
+        assert len(after_calls) == 1
+        assert before_calls[0].attempt == 1
+        assert after_calls[0][1].status_code == 200
+        client.close()
