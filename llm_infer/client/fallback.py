@@ -129,7 +129,8 @@ class FallbackClient(ChatClient):
         limit) trigger fallback. A 429 only reaches this layer after the
         inner RetryHelper has exhausted its same-model backoff budget, so
         escalating to the fallback model is the only remaining way to keep
-        the request alive.
+        the request alive. Backends without a retry config fall back on their
+        first transient error (a warning is logged at construction).
         """
         action = self._detector.classify(error)
         return action in (TransientAction.RETRY_NEXT, TransientAction.RETRY_SAME)
