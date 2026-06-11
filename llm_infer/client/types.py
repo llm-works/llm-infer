@@ -204,7 +204,7 @@ class SendContext:
     Attributes:
         attempt: Attempt number (1 = first, 2+ = retry).
         retry_reason: Why this attempt is a retry. None for first attempt.
-            Values: "rate_limit", "server_error", "timeout", "unavailable".
+            Values: "rate_limit", "overloaded", "server_error", "timeout", "unavailable".
         delay_seconds: Backoff delay before this attempt. None for first attempt.
         model: Model being requested.
         backend: Backend name handling the request.

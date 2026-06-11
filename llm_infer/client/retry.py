@@ -459,9 +459,7 @@ class RetryHelper(RetryBase):
         Returns None when the error is not transient or the retry budget is
         exhausted, in which case the caller must re-raise.
         """
-        if not self.should_retry(e, start_time, retry.timeout):
-            return None
-        return self.compute_delay(backoff, retry.timeout, start_time)
+        return self._retry_delay(e, backoff, retry, start_time)
 
     def stream(
         self,
@@ -530,12 +528,10 @@ class RetryHelper(RetryBase):
     ) -> Iterator[str]:
         """Stream with retry loop, firing send callbacks."""
         backoff, t0, retry_count = self.create_backoff(retry), time.monotonic(), 0
-        last_error: BackendUnavailableError | BackendRequestError | None = None
-        last_delay: float | None = None
+        last_err: BackendUnavailableError | BackendRequestError | None = None
+        last_dly: float | None = None
         while True:
-            ctx = self._send_context(
-                retry_count + 1, model, req_id, last_error, last_delay
-            )
+            ctx = self._send_context(retry_count + 1, model, req_id, last_err, last_dly)
             _fire_on_before_send(self._lg, callbacks, ctx)
             start = time.monotonic()
             try:
@@ -546,14 +542,16 @@ class RetryHelper(RetryBase):
                 return
             except (BackendUnavailableError, BackendRequestError) as e:
                 self._on_after_send(callbacks, ctx, start, e)
-                delay = self._stream_retry_delay(e, backoff, retry, t0)
-                if delay is None:
+                dly = self._stream_retry_delay(e, backoff, retry, t0)
+                if dly is None:
                     raise
-                retry_count += 1
-                last_error, last_delay = e, delay
-                self._prep_retry(e, delay, retry_count, req_id, model)
+                last_err, last_dly, retry_count = e, dly, retry_count + 1
+                self._prep_retry(e, dly, retry_count, req_id, model)
                 _fire_request(self._lg, callbacks, request, retry_count)
                 continue
+            except Exception as e:
+                self._on_after_send(callbacks, ctx, start, e)
+                raise
             self._on_after_send(callbacks, ctx, start)
             yield first
             yield from it
@@ -624,12 +622,10 @@ class RetryHelper(RetryBase):
     ) -> AsyncIterator[str]:
         """Async stream with retry loop, firing send callbacks."""
         backoff, t0, retry_count = self.create_backoff(retry), time.monotonic(), 0
-        last_error: BackendUnavailableError | BackendRequestError | None = None
-        last_delay: float | None = None
+        last_err: BackendUnavailableError | BackendRequestError | None = None
+        last_dly: float | None = None
         while True:
-            ctx = self._send_context(
-                retry_count + 1, model, req_id, last_error, last_delay
-            )
+            ctx = self._send_context(retry_count + 1, model, req_id, last_err, last_dly)
             _fire_on_before_send(self._lg, callbacks, ctx)
             start = time.monotonic()
             try:
@@ -640,14 +636,16 @@ class RetryHelper(RetryBase):
                 return
             except (BackendUnavailableError, BackendRequestError) as e:
                 self._on_after_send(callbacks, ctx, start, e)
-                delay = self._stream_retry_delay(e, backoff, retry, t0)
-                if delay is None:
+                dly = self._stream_retry_delay(e, backoff, retry, t0)
+                if dly is None:
                     raise
-                retry_count += 1
-                last_error, last_delay = e, delay
-                await self._prep_retry_async(e, delay, retry_count, req_id, model)
+                last_err, last_dly, retry_count = e, dly, retry_count + 1
+                await self._prep_retry_async(e, dly, retry_count, req_id, model)
                 _fire_request(self._lg, callbacks, request, retry_count)
                 continue
+            except Exception as e:
+                self._on_after_send(callbacks, ctx, start, e)
+                raise
             self._on_after_send(callbacks, ctx, start)
             yield first
             async for token in it:
