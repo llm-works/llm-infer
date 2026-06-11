@@ -342,6 +342,11 @@ class RetryHelper(RetryBase):
         unchanged: partial output cannot be replayed safely. fn is invoked
         fresh on every attempt.
 
+        Unlike call(), the caller is responsible for firing the initial
+        on_request callback (retry_count=0); this method fires on_request
+        only on retries. This avoids duplicate callbacks when the client
+        layer manages the initial event.
+
         The backoff sleep is a blocking time.sleep and cannot be interrupted;
         abort/cancellation during backoff is only supported on the async path
         (stream_async).
@@ -382,6 +387,8 @@ class RetryHelper(RetryBase):
         callbacks: LLMCallbacks | None = None,
     ) -> AsyncIterator[str]:
         """Async variant of stream(): retry until the first token is yielded.
+
+        Like stream(), the caller fires the initial on_request callback.
 
         The backoff sleep uses asyncio.sleep, so task cancellation (e.g. an
         abort signal racing the stream task) propagates promptly.
