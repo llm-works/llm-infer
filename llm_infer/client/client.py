@@ -258,8 +258,8 @@ class LLMClient(ChatClient):
     ) -> ChatStreamSync:
         """Stream chat completion tokens (sync).
 
-        Note: Streaming does not support automatic retry. For retry support,
-        use chat() instead.
+        Transient errors are retried with backoff until the first token is
+        yielded (same policy as non-streaming); after that, errors propagate.
 
         Returns a ChatStreamSync that yields tokens. After iteration, access
         stream.response for usage statistics.
@@ -366,8 +366,8 @@ class LLMClient(ChatClient):
     ) -> ChatStream:
         """Stream chat completion tokens (async).
 
-        Note: Streaming does not support automatic retry. For retry support,
-        use chat_async() instead.
+        Transient errors are retried with backoff until the first token is
+        yielded (same policy as non-streaming); after that, errors propagate.
 
         Returns a ChatStream that yields tokens. After iteration, access
         stream.response for usage statistics.
@@ -499,7 +499,9 @@ class LLMClient(ChatClient):
     ) -> Iterator[str]:
         """Internal: stream chat request (sync).
 
-        Note: Streaming does not support retry. on_request fires before streaming;
+        Transient errors are retried with backoff until the first token is
+        yielded (same policy as non-streaming); after that, errors propagate.
+        on_request fires before streaming (and again per retry attempt);
         on_response and on_error fire after stream completes.
         """
         self._lg.debug(
@@ -513,7 +515,11 @@ class LLMClient(ChatClient):
         start_t = start()
         self._fire_on_request(request)
         try:
-            yield from self._backend.chat_stream(request, holder)
+            yield from self._retry.stream(
+                lambda: self._backend.chat_stream(request, holder),
+                request=request,
+                callbacks=self._callbacks,
+            )
             response = self._get_stream_response(holder)
             self._log_stream_response(request, start_t, response)
             if response:
@@ -556,7 +562,9 @@ class LLMClient(ChatClient):
     ) -> AsyncIterator[str]:
         """Internal: stream chat request (async).
 
-        Note: Streaming does not support retry. on_request fires before streaming;
+        Transient errors are retried with backoff until the first token is
+        yielded (same policy as non-streaming); after that, errors propagate.
+        on_request fires before streaming (and again per retry attempt);
         on_response and on_error fire after stream completes.
         """
         self._lg.debug(
@@ -570,7 +578,11 @@ class LLMClient(ChatClient):
         start_t = start()
         self._fire_on_request(request)
         try:
-            async for token in self._backend.chat_stream_async(request, holder):
+            async for token in self._retry.stream_async(
+                lambda: self._backend.chat_stream_async(request, holder),
+                request=request,
+                callbacks=self._callbacks,
+            ):
                 yield token
             response = self._get_stream_response(holder)
             self._log_stream_response(request, start_t, response)

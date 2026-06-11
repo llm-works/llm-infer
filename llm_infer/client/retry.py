@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from typing import Any, TypeVar
 
 from appinfra import Backoff
@@ -312,3 +312,114 @@ class RetryHelper(RetryBase):
             except Exception as e:
                 _fire_error(self._lg, callbacks, request, e)
                 raise
+
+    def _stream_retry_delay(
+        self,
+        e: BackendUnavailableError | BackendRequestError,
+        backoff: Backoff,
+        retry: RetryConfig,
+        start_time: float,
+    ) -> float | None:
+        """Compute delay before retrying a pre-first-token stream error.
+
+        Returns None when the error is not transient or the retry budget is
+        exhausted, in which case the caller must re-raise.
+        """
+        if not self.should_retry(e, start_time, retry.timeout):
+            return None
+        return self.compute_delay(backoff, retry.timeout, start_time)
+
+    def stream(
+        self,
+        fn: Callable[[], Iterator[str]],
+        request: ChatRequest | None = None,
+        callbacks: LLMCallbacks | None = None,
+    ) -> Iterator[str]:
+        """Execute streaming fn with retry until the first token is yielded.
+
+        Retries the same transient errors as call(), but only while no token
+        has been yielded yet. Once streaming has started, errors propagate
+        unchanged: partial output cannot be replayed safely. fn is invoked
+        fresh on every attempt.
+
+        Unlike call(), the caller is responsible for firing the initial
+        on_request callback (retry_count=0); this method fires on_request
+        only on retries. This avoids duplicate callbacks when the client
+        layer manages the initial event.
+
+        The backoff sleep is a blocking time.sleep and cannot be interrupted;
+        abort/cancellation during backoff is only supported on the async path
+        (stream_async).
+        """
+        retry = self._ctx.retry
+        if retry is None:
+            yield from fn()
+            return
+        backoff = self.create_backoff(retry)
+        start_time = time.monotonic()
+        retry_count = 0
+        req_id = request.id if request else None
+        model = request.model if request else None
+        while True:
+            try:
+                it = fn()
+                first = next(it)
+            except StopIteration:
+                return
+            except (BackendUnavailableError, BackendRequestError) as e:
+                delay = self._stream_retry_delay(e, backoff, retry, start_time)
+                if delay is None:
+                    raise
+                retry_count += 1
+                self._log_retry(e, retry_count, delay, req_id, model)
+                time.sleep(delay)
+                self._log_retry_send(retry_count, model, req_id)
+                _fire_request(self._lg, callbacks, request, retry_count)
+                continue
+            yield first
+            yield from it
+            return
+
+    async def stream_async(
+        self,
+        fn: Callable[[], AsyncIterator[str]],
+        request: ChatRequest | None = None,
+        callbacks: LLMCallbacks | None = None,
+    ) -> AsyncIterator[str]:
+        """Async variant of stream(): retry until the first token is yielded.
+
+        Like stream(), the caller fires the initial on_request callback.
+
+        The backoff sleep uses asyncio.sleep, so task cancellation (e.g. an
+        abort signal racing the stream task) propagates promptly.
+        """
+        retry = self._ctx.retry
+        if retry is None:
+            async for token in fn():
+                yield token
+            return
+        backoff = self.create_backoff(retry)
+        start_time = time.monotonic()
+        retry_count = 0
+        req_id = request.id if request else None
+        model = request.model if request else None
+        while True:
+            try:
+                it = fn()
+                first = await anext(it)
+            except StopAsyncIteration:
+                return
+            except (BackendUnavailableError, BackendRequestError) as e:
+                delay = self._stream_retry_delay(e, backoff, retry, start_time)
+                if delay is None:
+                    raise
+                retry_count += 1
+                self._log_retry(e, retry_count, delay, req_id, model)
+                await asyncio.sleep(delay)
+                self._log_retry_send(retry_count, model, req_id)
+                _fire_request(self._lg, callbacks, request, retry_count)
+                continue
+            yield first
+            async for token in it:
+                yield token
+            return
