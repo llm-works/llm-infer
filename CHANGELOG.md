@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **HTTP-level send callbacks**: `on_before_send` and `on_after_send` in
+  `LLMCallbacks` fire at actual HTTP send time (after backoff), providing
+  accurate request timestamps. New `SendContext` carries attempt number,
+  retry reason, and delay; `SendResult` carries status code and elapsed time.
 - **Vertex AI support** for chat (`GeminiBackend`) and embedding
   (`GoogleEmbeddingBackend`) via GCP service-account auth. Selectable from
   config alone: `auth: {mode: gcp_sa, credentials_path: ...}` (defaults to
