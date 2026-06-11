@@ -107,8 +107,8 @@ class SAIAAdapter(Backend):
             temperature: Sampling temperature (default 1.0).
             context: User context passed to callbacks (cost tracking, tracing).
             abort_signal: Optional event that, when set, aborts the request.
-                Raises PauseRequested on abort. Uses streaming internally
-                for fast abort even during time-to-first-token.
+                Raises PauseRequested on abort. Abort mechanism depends on
+                the ``streaming`` constructor parameter.
 
         Returns:
             SAIA ChatResponse with content, tool calls, token usage, resolved
@@ -196,11 +196,13 @@ class SAIAAdapter(Backend):
         )
         await self._cancel_tasks(pending)
 
+        if chat_task in done and chat_task.exception() is None:
+            return self._convert_response(chat_task.result())
         if abort_task in done:
             raise PauseRequested()
         if chat_task.exception():
             raise chat_task.exception()  # type: ignore[misc]
-        return self._convert_response(chat_task.result())
+        raise RuntimeError("No response available after non-streaming call")
 
     @staticmethod
     async def _consume_stream(stream: Any, abort_signal: asyncio.Event) -> None:
