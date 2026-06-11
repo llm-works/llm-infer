@@ -49,10 +49,13 @@ from .types import (
 class FallbackClient(ChatClient):
     """Client that wraps LLMRouter with automatic model fallback.
 
-    When a request fails with a transient error (5xx, timeout, unavailable),
-    FallbackClient consults the fallback pairs and retries with equivalent
-    models until one succeeds or the chain is exhausted. Rate limit errors
-    (429) are NOT retried via fallback - they bubble up for caller handling.
+    When a request fails with a transient error (5xx, timeout, unavailable,
+    429 rate limit), FallbackClient consults the fallback pairs and retries
+    with equivalent models until one succeeds or the chain is exhausted.
+    For 429s the inner retry layer (RetryHelper) backs off against the same
+    model first; fallback engages only once that budget is exhausted. A
+    backend configured without retry falls back on its first transient
+    error (a warning is logged at construction).
 
     Fallbacks are defined as pairs that chain implicitly:
         {"A": "B", "B": "C"} means A -> B -> C
@@ -88,6 +91,7 @@ class FallbackClient(ChatClient):
         self._detector = detector or DefaultTransientDetector()
 
         detect_cycles(fallbacks, lg)
+        self._warn_backends_without_retry()
 
     @property
     def router(self) -> LLMRouter:
@@ -99,15 +103,40 @@ class FallbackClient(ChatClient):
         """Model fallback pairs."""
         return self._fallbacks
 
+    def _warn_backends_without_retry(self) -> None:
+        """Warn for backends without retry config.
+
+        Without an inner retry budget, the first transient error (429, 5xx,
+        timeout, unavailable) from such a backend escalates straight to the
+        fallback model — no same-model backoff. Skipped when the router does
+        not expose a clients mapping (e.g. test doubles).
+        """
+        clients = getattr(self._router, "clients", None)
+        if not isinstance(clients, Mapping):
+            return
+        for name, client in clients.items():
+            backend = getattr(client, "backend", None)
+            ctx = getattr(backend, "ctx", None) if backend else None
+            retry = getattr(ctx, "retry", object()) if ctx else object()
+            if retry is None:
+                self._lg.warning(
+                    "backend has no retry config; "
+                    "fallback engages on first transient error",
+                    extra={"backend": name},
+                )
+
     def _should_fallback(self, error: BackendError) -> bool:
         """Check if error should trigger fallback.
 
-        Only RETRY_NEXT triggers fallback (5xx, timeout, unavailable).
-        RETRY_SAME (429 rate limit) should NOT trigger fallback - let the
-        error bubble up so the caller can decide to wait or abort.
+        Both RETRY_NEXT (5xx, timeout, unavailable) and RETRY_SAME (429 rate
+        limit) trigger fallback. A 429 only reaches this layer after the
+        inner RetryHelper has exhausted its same-model backoff budget, so
+        escalating to the fallback model is the only remaining way to keep
+        the request alive. Backends without a retry config fall back on their
+        first transient error (a warning is logged at construction).
         """
         action = self._detector.classify(error)
-        return action == TransientAction.RETRY_NEXT
+        return action in (TransientAction.RETRY_NEXT, TransientAction.RETRY_SAME)
 
     def _log_fallback(
         self,
