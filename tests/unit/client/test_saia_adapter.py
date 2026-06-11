@@ -1,5 +1,6 @@
 """Unit tests for SAIA adapter."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,6 +14,7 @@ from llm_saia.core import (
 from llm_saia.core import (
     ToolCall as SAIAToolCall,
 )
+from llm_saia.core.errors import PauseRequested
 
 from llm_infer.client import ChatResponse, LLMClient
 from llm_infer.client.saia import SAIAAdapter
@@ -42,6 +44,12 @@ class TestSAIAAdapterInit:
         adapter = SAIAAdapter(mock_client)
         assert adapter._client is mock_client
         assert adapter._chat_args == {}
+        assert adapter._streaming is True
+
+    def test_init_streaming_false(self, mock_client: MagicMock) -> None:
+        """Test adapter respects streaming=False."""
+        adapter = SAIAAdapter(mock_client, streaming=False)
+        assert adapter._streaming is False
 
     def test_with_chat_args_sets_args(self, mock_client: MagicMock) -> None:
         """Test with_chat_args binds kwargs."""
@@ -490,6 +498,106 @@ class TestSAIAAdapterChat:
         call_kwargs = mock_client.chat_async.call_args.kwargs
         assert call_kwargs["temperature"] == 0.9
         assert call_kwargs["max_tokens"] == 200
+
+    @pytest.mark.asyncio
+    async def test_chat_non_streaming_abort_before_call(
+        self, mock_client: MagicMock
+    ) -> None:
+        """streaming=False: abort already set raises PauseRequested without calling client."""
+        adapter = SAIAAdapter(mock_client, streaming=False)
+        signal = asyncio.Event()
+        signal.set()
+
+        with pytest.raises(PauseRequested):
+            await adapter.chat(
+                messages=[Message(role="user", content="Hi")],
+                abort_signal=signal,
+            )
+        mock_client.chat_async.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_chat_non_streaming_abort_mid_call(
+        self, mock_client: MagicMock
+    ) -> None:
+        """streaming=False: abort during call raises PauseRequested and cancels request."""
+        cancelled = asyncio.Event()
+        signal = asyncio.Event()
+
+        async def slow_chat(**_: object) -> ChatResponse:
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return ChatResponse(content="never", finish_reason=FinishReason.STOP)
+
+        mock_client.chat_async = slow_chat
+        adapter = SAIAAdapter(mock_client, streaming=False)
+
+        async def fire_abort() -> None:
+            await asyncio.sleep(0.01)
+            signal.set()
+
+        with pytest.raises(PauseRequested):
+            await asyncio.gather(
+                adapter.chat(
+                    messages=[Message(role="user", content="Hi")],
+                    abort_signal=signal,
+                ),
+                fire_abort(),
+            )
+        assert cancelled.is_set()
+
+    @pytest.mark.asyncio
+    async def test_chat_non_streaming_success_with_signal(
+        self, mock_client: MagicMock
+    ) -> None:
+        """streaming=False: response returned normally when abort never fires."""
+        mock_client.chat_async.return_value = ChatResponse(
+            content="Hello!",
+            usage=ChatCompletionUsage(
+                prompt_tokens=5, completion_tokens=2, total_tokens=7
+            ),
+            finish_reason=FinishReason.STOP,
+        )
+        adapter = SAIAAdapter(mock_client, streaming=False)
+
+        result = await adapter.chat(
+            messages=[Message(role="user", content="Hi")],
+            abort_signal=asyncio.Event(),
+        )
+
+        assert result.content == "Hello!"
+        mock_client.chat_async.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_chat_streaming_routes_to_stream_path(
+        self, mock_client: MagicMock
+    ) -> None:
+        """streaming=True (default) with abort_signal uses chat_stream_async, not chat_async."""
+
+        class _Stream:
+            def __init__(self, resp: ChatResponse) -> None:
+                self.response = resp
+
+            def __aiter__(self) -> "_Stream":
+                return self
+
+            async def __anext__(self) -> str:
+                raise StopAsyncIteration
+
+        resp = ChatResponse(content="streamed", finish_reason=FinishReason.STOP)
+        mock_client.chat_stream_async = MagicMock(return_value=_Stream(resp))
+        adapter = SAIAAdapter(mock_client, streaming=True)
+
+        result = await adapter.chat(
+            messages=[Message(role="user", content="Hi")],
+            abort_signal=asyncio.Event(),
+        )
+
+        assert result.content == "streamed"
+        mock_client.chat_async.assert_not_called()
+        mock_client.chat_stream_async.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_chat_uses_bound_args_when_not_passed(
