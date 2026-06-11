@@ -258,8 +258,8 @@ class LLMClient(ChatClient):
     ) -> ChatStreamSync:
         """Stream chat completion tokens (sync).
 
-        Note: Streaming does not support automatic retry. For retry support,
-        use chat() instead.
+        Transient errors are retried with backoff until the first token is
+        yielded (same policy as non-streaming); after that, errors propagate.
 
         Returns a ChatStreamSync that yields tokens. After iteration, access
         stream.response for usage statistics.
@@ -366,8 +366,8 @@ class LLMClient(ChatClient):
     ) -> ChatStream:
         """Stream chat completion tokens (async).
 
-        Note: Streaming does not support automatic retry. For retry support,
-        use chat_async() instead.
+        Transient errors are retried with backoff until the first token is
+        yielded (same policy as non-streaming); after that, errors propagate.
 
         Returns a ChatStream that yields tokens. After iteration, access
         stream.response for usage statistics.
