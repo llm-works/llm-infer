@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`SAIAAdapter(streaming=...)`**: opt out of streaming for `abort_signal`
+  calls. Defaults to `True` (unchanged). With `streaming=False`, the adapter
+  uses `chat_async` and aborts by cancelling the pending task — simpler path
+  for fast providers where TTFT is sub-second.
 - **HTTP-level send callbacks**: `on_before_send` and `on_after_send` in
   `LLMCallbacks` fire at actual HTTP send time (after backoff), providing
   accurate request timestamps. New `SendContext` carries attempt number,

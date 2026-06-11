@@ -52,13 +52,19 @@ class SAIAAdapter(Backend):
     - Tool call argument parsing (JSON string -> dict)
     """
 
-    def __init__(self, client: ChatClient) -> None:
+    def __init__(self, client: ChatClient, *, streaming: bool = True) -> None:
         """Initialize the adapter with a ChatClient.
 
         Args:
             client: The ChatClient to wrap (LLMClient, LLMRouter, etc.).
+            streaming: If True (default), abort_signal calls use streaming
+                so abort can interrupt during time-to-first-token. If False,
+                they use chat_async and abort by cancelling the pending task.
+                Streaming matters on slow providers; for fast providers
+                (sub-second TTFT) non-streaming is simpler.
         """
         self._client = client
+        self._streaming = streaming
         self._chat_args: dict[str, Any] = {}
 
     def with_chat_args(self, **kwargs: Any) -> Self:
@@ -101,8 +107,8 @@ class SAIAAdapter(Backend):
             temperature: Sampling temperature (default 1.0).
             context: User context passed to callbacks (cost tracking, tracing).
             abort_signal: Optional event that, when set, aborts the request.
-                Raises PauseRequested on abort. Uses streaming internally
-                for fast abort even during time-to-first-token.
+                Raises PauseRequested on abort. Abort mechanism depends on
+                the ``streaming`` constructor parameter.
 
         Returns:
             SAIA ChatResponse with content, tool calls, token usage, resolved
@@ -129,7 +135,9 @@ class SAIAAdapter(Backend):
             call_kwargs["context"] = context
 
         if abort_signal is not None:
-            return await self._chat_with_abort(call_kwargs, abort_signal)
+            if self._streaming:
+                return await self._chat_with_abort(call_kwargs, abort_signal)
+            return await self._chat_async_with_abort(call_kwargs, abort_signal)
 
         response = await self._client.chat_async(**call_kwargs)
         return self._convert_response(response)
@@ -169,6 +177,32 @@ class SAIAAdapter(Backend):
         if stream_task.exception():
             raise stream_task.exception()  # type: ignore[misc]
         raise RuntimeError("No response available after streaming")
+
+    async def _chat_async_with_abort(
+        self,
+        call_kwargs: dict[str, Any],
+        abort_signal: asyncio.Event,
+    ) -> SAIAChatResponse:
+        """Non-streaming chat with abort support via task cancellation."""
+        from llm_saia.core.errors import PauseRequested
+
+        if abort_signal.is_set():
+            raise PauseRequested()
+
+        chat_task = asyncio.create_task(self._client.chat_async(**call_kwargs))
+        abort_task = asyncio.create_task(abort_signal.wait())
+        done, pending = await asyncio.wait(
+            [chat_task, abort_task], return_when=asyncio.FIRST_COMPLETED
+        )
+        await self._cancel_tasks(pending)
+
+        if chat_task in done and chat_task.exception() is None:
+            return self._convert_response(chat_task.result())
+        if abort_task in done:
+            raise PauseRequested()
+        if chat_task.exception():
+            raise chat_task.exception()  # type: ignore[misc]
+        raise RuntimeError("No response available after non-streaming call")
 
     @staticmethod
     async def _consume_stream(stream: Any, abort_signal: asyncio.Event) -> None:
