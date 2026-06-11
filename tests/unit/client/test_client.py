@@ -797,6 +797,242 @@ class TestLLMClientRetry:
         assert call_count == 1
 
 
+class TestLLMClientStreamRetry:
+    """Test pre-first-token retry behavior for streaming calls."""
+
+    def test_stream_retries_429_before_first_token(self, mock_lg: Logger) -> None:
+        """A 429 at stream setup is retried; the retried stream succeeds."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        response = ChatResponse(content="Hello")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                yield from super().chat_stream(request, holder)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        tokens = list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert "".join(tokens) == "Hello"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_stream_async_retries_429_before_first_token(
+        self, mock_lg: Logger
+    ) -> None:
+        """A 429 at async stream setup is retried; the retried stream succeeds."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        response = ChatResponse(content="Hello")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            async def chat_stream_async(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> AsyncIterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                async for token in super().chat_stream_async(request, holder):
+                    yield token
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        tokens = []
+        async for token in client.chat_stream_async(
+            messages=[{"role": "user", "content": "Hi"}]
+        ):
+            tokens.append(token)
+
+        assert "".join(tokens) == "Hello"
+        assert call_count == 2
+
+    def test_stream_retry_timeout_exceeded(self, mock_lg: Logger) -> None:
+        """Retry stops and raises once the retry budget is exhausted."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                raise BackendRequestError("Rate limited", status_code=429)
+                yield ""  # unreachable; makes this a generator
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.02, timeout=0.05))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        with pytest.raises(BackendRequestError):
+            list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert call_count >= 2
+
+    def test_stream_no_retry_after_first_token(self, mock_lg: Logger) -> None:
+        """An error after the first token raises immediately, no retry."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        call_count = 0
+
+        class MidStreamFailBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                yield "x"
+                raise BackendRequestError("Rate limited", status_code=429)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = MidStreamFailBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        received = []
+        with pytest.raises(BackendRequestError):
+            for token in client.chat_stream(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                received.append(token)
+
+        assert received == ["x"]
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_async_no_retry_after_first_token(
+        self, mock_lg: Logger
+    ) -> None:
+        """An async error after the first token raises immediately, no retry."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        call_count = 0
+
+        class MidStreamFailBackend(MockBackend):
+            async def chat_stream_async(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> AsyncIterator[str]:
+                nonlocal call_count
+                call_count += 1
+                yield "x"
+                raise BackendRequestError("Rate limited", status_code=429)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = MidStreamFailBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        received = []
+        with pytest.raises(BackendRequestError):
+            async for token in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                received.append(token)
+
+        assert received == ["x"]
+        assert call_count == 1
+
+    def test_stream_no_retry_when_backoff_not_configured(self, mock_lg: Logger) -> None:
+        """Without retry config, a setup error raises immediately."""
+        from llm_infer.client import BackendRequestError
+
+        call_count = 0
+
+        class FailingBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                raise BackendRequestError("Rate limited", status_code=429)
+                yield ""  # unreachable; makes this a generator
+
+        backend = FailingBackend(mock_lg, "test")
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        with pytest.raises(BackendRequestError):
+            list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert call_count == 1
+
+    def test_stream_retry_fires_on_request_callback(self, mock_lg: Logger) -> None:
+        """on_request fires with the retry count on each streaming attempt."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        response = ChatResponse(content="Hi")
+        call_count = 0
+        attempts: list[int] = []
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                yield from super().chat_stream(request, holder)
+
+        callbacks = LLMCallbacks(on_request=lambda req, retry: attempts.append(retry))
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(lg=mock_lg, backend=backend, callbacks=callbacks)
+
+        list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert attempts == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_stream_async_cancel_interrupts_backoff(
+        self, mock_lg: Logger
+    ) -> None:
+        """Task cancellation interrupts a pending backoff sleep promptly."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        class RetryBackend(MockBackend):
+            async def chat_stream_async(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> AsyncIterator[str]:
+                raise BackendRequestError("Rate limited", status_code=429)
+                yield ""  # unreachable; makes this an async generator
+
+        ctx = BackendContext(retry=RetryConfig(base=30.0, max_delay=30.0))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        async def consume() -> None:
+            async for _ in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                pass
+
+        task = asyncio.create_task(consume())
+        await asyncio.sleep(0.05)  # let the stream hit the 429 and enter backoff
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+
+
 class TestFactoryRetryConfig:
     """Test Factory retry configuration."""
 

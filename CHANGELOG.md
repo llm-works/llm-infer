@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Streaming retry**: transient errors (429/5xx/529) before the first token
+  are now retried with the same backoff policy as non-streaming calls (sync
+  and async). Errors after the first token still raise immediately.
 - **Vertex `reasoning_effort`**: `GeminiBackend` sends `"minimal"` on Vertex
   when thinking is disabled — Vertex's OpenAI-compat surface rejects
   `"none"`. AI Studio still gets `"none"` (fully disabled).
