@@ -341,6 +341,10 @@ class RetryHelper(RetryBase):
         has been yielded yet. Once streaming has started, errors propagate
         unchanged: partial output cannot be replayed safely. fn is invoked
         fresh on every attempt.
+
+        The backoff sleep is a blocking time.sleep and cannot be interrupted;
+        abort/cancellation during backoff is only supported on the async path
+        (stream_async).
         """
         retry = self._ctx.retry
         if retry is None:
