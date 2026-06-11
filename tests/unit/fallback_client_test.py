@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from llm_infer.client.backends import RetryConfig
 from llm_infer.client.errors import BackendRequestError, BackendTimeoutError
 from llm_infer.client.fallback import FallbackClient
 from llm_infer.client.fallback_helper import detect_cycles
@@ -243,27 +244,41 @@ class TestFallbackClientLogging:
         mock_logger.warning.assert_not_called()
         mock_logger.error.assert_not_called()
 
-    def test_no_fallback_on_rate_limit(
+    def test_fallback_on_rate_limit(
         self, mock_router: MagicMock, mock_logger: MagicMock
     ) -> None:
-        """Should not fallback on 429 rate limit - let it bubble up."""
+        """429 triggers fallback: by this layer the inner retry is exhausted."""
         mock_client = MagicMock()
-        mock_client._chat = MagicMock(
-            side_effect=BackendRequestError("Rate limited", status_code=429)
-        )
+        call_count = 0
+
+        def mock_chat(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise BackendRequestError("Rate limited", status_code=429)
+            return ChatResponse(
+                content="success", model="claude-sonnet", provider="anthropic"
+            )
+
+        mock_client._chat = mock_chat
         mock_router.get_client = MagicMock(return_value=mock_client)
 
         fallbacks = {"gpt-4o": "claude-sonnet"}
         client = FallbackClient(mock_logger, mock_router, fallbacks)
 
-        # Act & Assert - 429 should bubble up immediately
-        with pytest.raises(BackendRequestError) as exc_info:
-            client.chat([{"role": "user", "content": "hello"}], model="gpt-4o")
+        # Act
+        response = client.chat([{"role": "user", "content": "hello"}], model="gpt-4o")
 
-        assert exc_info.value.status_code == 429
+        # Assert - served by the fallback model
+        assert response.content == "success"
+        assert call_count == 2
 
-        # Assert - no fallback logging (429 is not a fallback trigger)
-        mock_logger.warning.assert_not_called()
+        # Assert - fallback logged with the 429
+        mock_logger.warning.assert_called_once()
+        extra = mock_logger.warning.call_args[1]["extra"]
+        assert extra["failed_model"] == "gpt-4o"
+        assert extra["fallback_model"] == "claude-sonnet"
+        assert extra["status_code"] == 429
         mock_logger.error.assert_not_called()
 
     def test_cyclic_fallback_retries_until_success(
@@ -291,3 +306,180 @@ class TestFallbackClientLogging:
 
         assert response.content == "success"
         assert call_count == 4  # a fails, b fails, a fails, b succeeds
+
+
+class TestFallbackOnRateLimitAllPaths:
+    """429 → fallback across stream/async paths (sync chat covered above)."""
+
+    @pytest.fixture
+    def mock_router(self) -> MagicMock:
+        """Create a mock router with resolve and get_client methods."""
+        router = MagicMock()
+
+        def mock_resolve(model: str | None = None, backend: str | None = None):
+            return ResolvedTarget(
+                model=model or "default-model", backend="test-backend"
+            )
+
+        router.resolve = mock_resolve
+        return router
+
+    @pytest.fixture
+    def mock_logger(self) -> MagicMock:
+        """Create a mock logger."""
+        return MagicMock()
+
+    def test_stream_fallback_on_rate_limit(
+        self, mock_router: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Pre-token 429 on a sync stream is served by the fallback model."""
+        mock_client = MagicMock()
+        call_count = 0
+
+        def mock_chat_stream(request, holder):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise BackendRequestError("Rate limited", status_code=429)
+            return iter(["hello", " world"])
+
+        mock_client._chat_stream = mock_chat_stream
+        mock_router.get_client = MagicMock(return_value=mock_client)
+
+        fallbacks = {"gpt-4o": "claude-sonnet"}
+        client = FallbackClient(mock_logger, mock_router, fallbacks)
+
+        stream = client.chat_stream(
+            [{"role": "user", "content": "hello"}], model="gpt-4o"
+        )
+        tokens = list(stream)
+
+        assert tokens == ["hello", " world"]
+        assert call_count == 2
+        mock_logger.warning.assert_called_once()
+        assert mock_logger.warning.call_args[1]["extra"]["status_code"] == 429
+
+    @pytest.mark.asyncio
+    async def test_async_fallback_on_rate_limit(
+        self, mock_router: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """429 on async chat is served by the fallback model."""
+        mock_client = MagicMock()
+        call_count = 0
+
+        async def mock_chat_async(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise BackendRequestError("Rate limited", status_code=429)
+            return ChatResponse(
+                content="success", model="claude-sonnet", provider="anthropic"
+            )
+
+        mock_client._chat_async = mock_chat_async
+        mock_router.get_client = MagicMock(return_value=mock_client)
+
+        fallbacks = {"gpt-4o": "claude-sonnet"}
+        client = FallbackClient(mock_logger, mock_router, fallbacks)
+
+        response = await client.chat_async(
+            [{"role": "user", "content": "hello"}], model="gpt-4o"
+        )
+
+        assert response.content == "success"
+        assert call_count == 2
+        mock_logger.warning.assert_called_once()
+        assert mock_logger.warning.call_args[1]["extra"]["status_code"] == 429
+
+    @pytest.mark.asyncio
+    async def test_async_stream_fallback_on_rate_limit(
+        self, mock_router: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """Pre-token 429 on an async stream is served by the fallback model."""
+        mock_client = MagicMock()
+        call_count = 0
+
+        def mock_chat_stream_async(request, holder):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise BackendRequestError("Rate limited", status_code=429)
+
+            async def gen():
+                yield "hello"
+                yield " world"
+
+            return gen()
+
+        mock_client._chat_stream_async = mock_chat_stream_async
+        mock_router.get_client = MagicMock(return_value=mock_client)
+
+        fallbacks = {"gpt-4o": "claude-sonnet"}
+        client = FallbackClient(mock_logger, mock_router, fallbacks)
+
+        stream = client.chat_stream_async(
+            [{"role": "user", "content": "hello"}], model="gpt-4o"
+        )
+        tokens = [token async for token in stream]
+
+        assert tokens == ["hello", " world"]
+        assert call_count == 2
+        mock_logger.warning.assert_called_once()
+        assert mock_logger.warning.call_args[1]["extra"]["status_code"] == 429
+
+    def test_mid_stream_rate_limit_propagates(
+        self, mock_router: MagicMock, mock_logger: MagicMock
+    ) -> None:
+        """429 after the first token propagates: partial output can't be replayed."""
+
+        def mock_chat_stream(request, holder):
+            yield "partial"
+            raise BackendRequestError("Rate limited", status_code=429)
+
+        mock_client = MagicMock()
+        mock_client._chat_stream = mock_chat_stream
+        mock_router.get_client = MagicMock(return_value=mock_client)
+
+        fallbacks = {"gpt-4o": "claude-sonnet"}
+        client = FallbackClient(mock_logger, mock_router, fallbacks)
+
+        stream = client.chat_stream(
+            [{"role": "user", "content": "hello"}], model="gpt-4o"
+        )
+        tokens = []
+        with pytest.raises(BackendRequestError) as exc_info:
+            for token in stream:
+                tokens.append(token)
+
+        assert tokens == ["partial"]
+        assert exc_info.value.status_code == 429
+        mock_logger.warning.assert_not_called()
+
+
+class TestNoRetryWarning:
+    """Construction-time warning for backends without retry config."""
+
+    def _router(self, retry: RetryConfig | None) -> MagicMock:
+        """Mock router exposing a real clients mapping with the given retry."""
+        router = MagicMock()
+        client = MagicMock()
+        client.backend.ctx.retry = retry
+        router.clients = {"primary": client}
+        return router
+
+    def test_warns_when_backend_has_no_retry(self) -> None:
+        """retry: None means fallback engages on the first transient error."""
+        lg = MagicMock()
+        FallbackClient(lg, self._router(None), {"a": "b"})
+
+        lg.warning.assert_called_once()
+        msg = lg.warning.call_args[0][0]
+        assert "no retry config" in msg
+        assert lg.warning.call_args[1]["extra"]["backend"] == "primary"
+
+    def test_no_warning_when_retry_configured(self) -> None:
+        """Backends with a retry budget construct silently."""
+        lg = MagicMock()
+        FallbackClient(lg, self._router(RetryConfig()), {"a": "b"})
+
+        lg.warning.assert_not_called()

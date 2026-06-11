@@ -170,9 +170,11 @@ client = FallbackClient(lg, router, fallbacks)
 response = client.chat(messages, model="gpt-4o")
 ```
 
-Rate-limit errors (429) are *not* retried via fallback — they bubble up so
-callers can apply their own backoff. Cycles (A->B->A) are detected and retried
-round-robin until one succeeds.
+Rate-limit errors (429) are first retried with backoff against the same model
+(per the backend's `retry` config); once that budget is exhausted, fallback
+engages like any other transient error. A backend configured without `retry`
+falls back on its first transient error — a warning is logged at construction.
+Cycles (A->B->A) are detected and retried round-robin until one succeeds.
 
 ## Embeddings
 
