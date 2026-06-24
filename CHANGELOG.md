@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Vertex AI Priority service tier** on `GeminiBackend`. Set
+  `service_tier: priority` in the backend config to send the Vertex
+  Priority header and body param; observed downgrades log at WARN.
+- **`ChatResponse.headers`**: lowercased HTTP response headers, when the
+  backend captured them. Lets callers read provider signals carried out
+  of band (e.g. `x-gemini-service-tier`).
 - **`SAIAAdapter(streaming=...)`**: opt out of streaming for `abort_signal`
   calls. Defaults to `True` (unchanged). With `streaming=False`, the adapter
   uses `chat_async` and aborts by cancelling the pending task — simpler path

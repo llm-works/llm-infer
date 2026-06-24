@@ -423,6 +423,7 @@ class _FakeStreamResponse:
 
     def __init__(self, lines: list[str]) -> None:
         self._lines = lines
+        self.headers: dict[str, str] = {}
 
     def raise_for_status(self) -> None:
         pass
@@ -504,7 +505,7 @@ class TestExecuteStreamSyncErrors:
 
         backend._client.stream = MagicMock(return_value=_CM())
         with pytest.raises(BackendUnavailableError):
-            list(backend._execute_stream_sync("http://x", {}))
+            list(backend._execute_stream_sync("http://x", {}, _StreamState()))
         backend.close()
 
     def test_timeout(self, mock_lg: Logger) -> None:
@@ -519,5 +520,5 @@ class TestExecuteStreamSyncErrors:
 
         backend._client.stream = MagicMock(return_value=_CM())
         with pytest.raises(BackendTimeoutError):
-            list(backend._execute_stream_sync("http://x", {}))
+            list(backend._execute_stream_sync("http://x", {}, _StreamState()))
         backend.close()

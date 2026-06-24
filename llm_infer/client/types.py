@@ -161,6 +161,11 @@ class ChatResponse:
         provider: Backend/provider that generated the response (see Provider enum).
         raw: Raw response from the provider API. Contains provider-specific
             fields not normalized into the standard response (e.g., cost_in_usd_ticks).
+        headers: Lowercased HTTP response headers, when the backend captured
+            them. Useful for provider signals carried out of band — e.g.
+            Vertex's ``x-gemini-service-tier`` indicating which tier actually
+            served the request (may differ from the requested tier under
+            capacity pressure).
 
     llm-infer Extensions:
         thinking: Extracted thinking/reasoning content from <think> blocks.
@@ -177,6 +182,7 @@ class ChatResponse:
     model: str | None = None
     provider: str | None = None
     raw: dict[str, Any] | None = None
+    headers: dict[str, str] | None = None
     # llm-infer extensions
     thinking: str | None = None
     tool_calls: list[ToolCall] | None = field(default=None)
