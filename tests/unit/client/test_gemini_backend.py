@@ -5,10 +5,17 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.client import ChatRequest
+from llm_infer.client import ChatRequest, ChatResponse
 from llm_infer.client.backends.providers.gemini import GeminiBackend
 
 pytestmark = pytest.mark.unit
+
+_VERTEX_BASE_URL = (
+    "https://us-central1-aiplatform.googleapis.com/v1/projects/"
+    "p/locations/us-central1/endpoints/openapi"
+)
+_STUDIO_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+_VERTEX_PRIORITY_HEADER = "X-Vertex-AI-LLM-Shared-Request-Type"
 
 
 @pytest.fixture
@@ -159,4 +166,150 @@ class TestGeminiBackendVertexReasoningEffort:
         payload = backend._build_payload(request, messages, stream=False)
 
         assert payload["reasoning_effort"] == "none"
+        backend.close()
+
+
+class TestGeminiBackendServiceTier:
+    """Vertex AI Priority service tier behavior."""
+
+    def _request(self) -> tuple[ChatRequest, list[dict[str, object]]]:
+        messages: list[dict[str, object]] = [{"role": "user", "content": "Hi"}]
+        return ChatRequest(messages=messages, model="gemini-2.5-flash"), messages
+
+    def test_omitted_sends_no_header_or_body_param(self, mock_lg: Logger) -> None:
+        backend = GeminiBackend(mock_lg, "vertex", base_url=_VERTEX_BASE_URL)
+        request, messages = self._request()
+        payload = backend._build_payload(request, messages, stream=False)
+        headers = backend._build_headers()
+
+        assert "service_tier" not in payload
+        assert _VERTEX_PRIORITY_HEADER not in headers
+        backend.close()
+
+    def test_standard_sends_no_header_or_body_param(self, mock_lg: Logger) -> None:
+        backend = GeminiBackend(
+            mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="standard"
+        )
+        request, messages = self._request()
+        payload = backend._build_payload(request, messages, stream=False)
+        headers = backend._build_headers()
+
+        assert "service_tier" not in payload
+        assert _VERTEX_PRIORITY_HEADER not in headers
+        backend.close()
+
+    def test_priority_on_vertex_injects_header_and_body_param(
+        self, mock_lg: Logger
+    ) -> None:
+        backend = GeminiBackend(
+            mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="priority"
+        )
+        request, messages = self._request()
+        payload = backend._build_payload(request, messages, stream=False)
+        headers = backend._build_headers()
+
+        assert payload["service_tier"] == "priority"
+        assert headers[_VERTEX_PRIORITY_HEADER] == "priority"
+        backend.close()
+
+    def test_priority_on_studio_omits_vertex_header(self, mock_lg: Logger) -> None:
+        """Studio uses the body-param spelling; the Vertex header is Vertex-only."""
+        backend = GeminiBackend(
+            mock_lg, "studio", base_url=_STUDIO_BASE_URL, service_tier="priority"
+        )
+        request, messages = self._request()
+        payload = backend._build_payload(request, messages, stream=False)
+        headers = backend._build_headers()
+
+        assert payload["service_tier"] == "priority"
+        assert _VERTEX_PRIORITY_HEADER not in headers
+        mock_lg.warning.assert_called_once()
+        backend.close()
+
+    def test_invalid_service_tier_rejected(self, mock_lg: Logger) -> None:
+        with pytest.raises(ValueError, match="Invalid service_tier"):
+            GeminiBackend(
+                mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="express"
+            )
+
+    def test_priority_explicit_extra_overrides_body_default(
+        self, mock_lg: Logger
+    ) -> None:
+        """If a caller already specifies service_tier in extra, don't clobber."""
+        backend = GeminiBackend(
+            mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="priority"
+        )
+        messages: list[dict[str, object]] = [{"role": "user", "content": "Hi"}]
+        request = ChatRequest(
+            messages=messages,
+            model="gemini-2.5-flash",
+            extra={"service_tier": "auto"},
+        )
+        payload = backend._build_payload(request, messages, stream=False)
+
+        assert payload["service_tier"] == "auto"
+        backend.close()
+
+    @pytest.mark.asyncio
+    async def test_priority_header_on_async_path(self, mock_lg: Logger) -> None:
+        backend = GeminiBackend(
+            mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="priority"
+        )
+        headers = await backend._build_headers_async()
+        assert headers[_VERTEX_PRIORITY_HEADER] == "priority"
+        await backend.aclose()
+
+
+class TestGeminiBackendDowngradeLogging:
+    """Backend emits WARN when priority was requested but served as standard."""
+
+    def _make_response(self, served_tier: str | None) -> ChatResponse:
+        return ChatResponse(
+            content="hi",
+            model="gemini-2.5-flash",
+            headers={"x-gemini-service-tier": served_tier} if served_tier else None,
+        )
+
+    def test_no_warning_when_served_priority(self, mock_lg: Logger) -> None:
+        backend = GeminiBackend(
+            mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="priority"
+        )
+        mock_lg.warning.reset_mock()
+        request, _ = TestGeminiBackendServiceTier()._request()
+        backend._after_response(request, self._make_response("priority"))
+        mock_lg.warning.assert_not_called()
+        backend.close()
+
+    def test_warns_when_served_standard(self, mock_lg: Logger) -> None:
+        backend = GeminiBackend(
+            mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="priority"
+        )
+        mock_lg.warning.reset_mock()
+        request, _ = TestGeminiBackendServiceTier()._request()
+        backend._after_response(request, self._make_response("standard"))
+
+        mock_lg.warning.assert_called_once()
+        _, kwargs = mock_lg.warning.call_args
+        assert kwargs["extra"]["tier_requested"] == "priority"
+        assert kwargs["extra"]["tier_served"] == "standard"
+        backend.close()
+
+    def test_no_warning_when_priority_not_configured(self, mock_lg: Logger) -> None:
+        """A backend without service_tier='priority' never logs downgrades."""
+        backend = GeminiBackend(mock_lg, "vertex", base_url=_VERTEX_BASE_URL)
+        mock_lg.warning.reset_mock()
+        request, _ = TestGeminiBackendServiceTier()._request()
+        backend._after_response(request, self._make_response("standard"))
+        mock_lg.warning.assert_not_called()
+        backend.close()
+
+    def test_no_warning_when_header_absent(self, mock_lg: Logger) -> None:
+        """Server didn't echo the tier header at all - skip without warning."""
+        backend = GeminiBackend(
+            mock_lg, "vertex", base_url=_VERTEX_BASE_URL, service_tier="priority"
+        )
+        mock_lg.warning.reset_mock()
+        request, _ = TestGeminiBackendServiceTier()._request()
+        backend._after_response(request, self._make_response(None))
+        mock_lg.warning.assert_not_called()
         backend.close()

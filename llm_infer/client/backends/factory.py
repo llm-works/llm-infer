@@ -103,6 +103,9 @@ class BackendFactory:
         if provider == Provider.GOOGLE:
             from .providers.gemini import GeminiBackend
 
+            service_tier = config.get("service_tier")
+            if service_tier is not None:
+                kwargs["service_tier"] = service_tier
             return GeminiBackend(**kwargs)
 
         from .providers.openai import OpenAICompatibleBackend

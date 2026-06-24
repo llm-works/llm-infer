@@ -102,9 +102,12 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     def chat(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (sync)."""
         url, payload = self._prepare_request(request, stream=False)
-        data = self._execute_sync(url, payload)
-        response = self._parse_chat_response(data, request.model or self.default_model)
+        data, headers = self._execute_sync(url, payload)
+        response = self._parse_chat_response(
+            data, request.model or self.default_model, headers
+        )
         self._last_response = response
+        self._after_response(request, response)
         return response
 
     def chat_stream(
@@ -113,12 +116,13 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """Send a streaming chat completion request (sync)."""
         url, payload = self._prepare_request(request, stream=True)
         state = _StreamState()
-        for chunk in self._execute_stream_sync(url, payload):
+        for chunk in self._execute_stream_sync(url, payload, state):
             token = state.process_chunk(chunk)
             if token:
                 yield token
         response = state.to_response(request.model or self.default_model, self.provider)
         self._last_response = response
+        self._after_response(request, response)
         if holder is not None:
             holder.value = response
 
@@ -129,9 +133,12 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     async def chat_async(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (async)."""
         url, payload = self._prepare_request(request, stream=False)
-        data = await self._execute_async(url, payload)
-        response = self._parse_chat_response(data, request.model or self.default_model)
+        data, headers = await self._execute_async(url, payload)
+        response = self._parse_chat_response(
+            data, request.model or self.default_model, headers
+        )
         self._last_response = response
+        self._after_response(request, response)
         return response
 
     async def chat_stream_async(
@@ -140,12 +147,13 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """Send a streaming chat completion request (async)."""
         url, payload = self._prepare_request(request, stream=True)
         state = _StreamState()
-        async for chunk in self._execute_stream_async(url, payload):
+        async for chunk in self._execute_stream_async(url, payload, state):
             token = state.process_chunk(chunk)
             if token:
                 yield token
         response = state.to_response(request.model or self.default_model, self.provider)
         self._last_response = response
+        self._after_response(request, response)
         if holder is not None:
             holder.value = response
 
@@ -205,22 +213,31 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
         raise e
 
-    def _execute_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Execute sync request with error translation."""
+    def _execute_sync(
+        self, url: str, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Execute sync request with error translation.
+
+        Returns parsed JSON body and lowercased response headers.
+        """
         if self._ctx.rate_limiter is not None:
             self._ctx.rate_limiter.next()
         try:
             resp = self._client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
-            return result
+            return result, _lower_headers(resp.headers)
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             self._raise_backend_error(e)
 
     def _execute_stream_sync(
-        self, url: str, payload: dict[str, Any]
+        self, url: str, payload: dict[str, Any], state: _StreamState
     ) -> Iterator[dict[str, Any]]:
-        """Execute sync streaming request with error translation."""
+        """Execute sync streaming request with error translation.
+
+        Captures response headers into ``state.headers`` once the response
+        starts; the caller passes the same ``state`` it uses for chunks.
+        """
         if self._ctx.rate_limiter is not None:
             self._ctx.rate_limiter.next()
         try:
@@ -232,12 +249,18 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                 except httpx.HTTPStatusError:
                     resp.read()
                     raise
+                state.headers = _lower_headers(resp.headers)
                 yield from self._parse_sse_stream_sync(resp)
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             self._raise_backend_error(e)
 
-    async def _execute_async(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Execute async request with error translation."""
+    async def _execute_async(
+        self, url: str, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Execute async request with error translation.
+
+        Returns parsed JSON body and lowercased response headers.
+        """
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
         self._acquire_async_request()
@@ -247,16 +270,20 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
-            return result
+            return result, _lower_headers(resp.headers)
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             self._raise_backend_error(e)
         finally:
             self._release_async_request()
 
     async def _execute_stream_async(
-        self, url: str, payload: dict[str, Any]
+        self, url: str, payload: dict[str, Any], state: _StreamState
     ) -> AsyncIterator[dict[str, Any]]:
-        """Execute async streaming request with error translation."""
+        """Execute async streaming request with error translation.
+
+        Captures response headers into ``state.headers`` once the response
+        starts; the caller passes the same ``state`` it uses for chunks.
+        """
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
         self._acquire_async_request()
@@ -271,6 +298,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                 except httpx.HTTPStatusError:
                     await resp.aread()
                     raise
+                state.headers = _lower_headers(resp.headers)
                 async for chunk in self._parse_sse_stream_async(resp):
                     yield chunk
         except (httpx.HTTPError, json.JSONDecodeError) as e:
@@ -311,6 +339,13 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # =========================================================================
     # Request preparation
     # =========================================================================
+
+    def _after_response(self, request: ChatRequest, response: ChatResponse) -> None:
+        """Post-response hook for subclasses (e.g. tier-downgrade logging).
+
+        Fires once per request, after ``self._last_response`` is updated, for
+        both streaming and non-streaming. No-op by default.
+        """
 
     def _prepare_request(
         self, request: ChatRequest, stream: bool
@@ -408,7 +443,10 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # =========================================================================
 
     def _parse_chat_response(
-        self, data: dict[str, Any], model: str | None
+        self,
+        data: dict[str, Any],
+        model: str | None,
+        headers: dict[str, str] | None = None,
     ) -> ChatResponse:
         """Parse API response data into ChatResponse."""
         choices = data.get("choices", [])
@@ -426,6 +464,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             model=data.get("model", model),
             provider=self.provider,
             raw=data,
+            headers=headers,
             thinking=message.get("thinking"),
             tool_calls=tool_calls,
             adapter=_parse_adapter_info(data.get("adapter")),
@@ -504,6 +543,7 @@ class _StreamState:
     usage: ChatCompletionUsage | None = None
     adapter: AdapterInfo | None = None
     raw: dict[str, Any] | None = None
+    headers: dict[str, str] | None = None
 
     def process_chunk(self, chunk: dict[str, Any]) -> str | None:
         """Process a single SSE chunk, returning token content if present."""
@@ -582,6 +622,7 @@ class _StreamState:
             model=model,
             provider=provider,
             raw=self.raw,
+            headers=self.headers,
             thinking="".join(self.thinking) if self.thinking else None,
             tool_calls=tool_calls,
             adapter=self.adapter,
@@ -604,6 +645,16 @@ class _StreamState:
                 self._tool_call_buffer[i] for i in sorted(self._tool_call_buffer)
             )
         ]
+
+
+def _lower_headers(headers: Any) -> dict[str, str]:
+    """Normalize an httpx Headers (or any mapping) to a lowercased dict.
+
+    HTTP header names are case-insensitive but httpx preserves the server's
+    casing. Lowercasing here gives callers a predictable key for lookups
+    like ``headers["x-gemini-service-tier"]``.
+    """
+    return {str(k).lower(): str(v) for k, v in headers.items()}
 
 
 def _parse_finish_reason(value: str | None) -> FinishReason | str | None:

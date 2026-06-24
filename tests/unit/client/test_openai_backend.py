@@ -295,6 +295,31 @@ class TestOpenAICompatibleBackendChat:
         assert backend.last_response == response
         backend.close()
 
+    def test_chat_captures_lowercased_response_headers(self, mock_lg: Logger) -> None:
+        """Response headers are captured on ChatResponse.headers, lowercased."""
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "model": "m",
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.headers = {
+            "X-Gemini-Service-Tier": "priority",
+            "Content-Type": "application/json",
+        }
+
+        request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+        with patch.object(backend._client, "post", return_value=mock_response):
+            response = backend.chat(request)
+
+        assert response.headers == {
+            "x-gemini-service-tier": "priority",
+            "content-type": "application/json",
+        }
+        backend.close()
+
     def test_chat_with_tool_calls(self, mock_lg: Logger) -> None:
         """Test chat returns tool calls when present."""
         backend = OpenAICompatibleBackend(mock_lg, "test")

@@ -60,6 +60,26 @@ class TestBackendFactoryProviderDetection:
         assert isinstance(backend, GeminiBackend)
         backend.close()
 
+    def test_factory_passes_service_tier_to_gemini(self, mock_lg: Logger) -> None:
+        """Factory threads config.service_tier into the GeminiBackend."""
+        factory = BackendFactory(mock_lg)
+        config = DotDict(
+            {
+                "type": "openai_compatible",
+                "base_url": (
+                    "https://us-central1-aiplatform.googleapis.com/v1/projects/"
+                    "p/locations/us-central1/endpoints/openapi"
+                ),
+                "service_tier": "priority",
+            }
+        )
+
+        backend = factory.create("gemini", config)
+
+        assert isinstance(backend, GeminiBackend)
+        assert backend._service_tier == "priority"
+        backend.close()
+
     def test_creates_openai_backend_for_openai_url(self, mock_lg: Logger) -> None:
         """Test factory creates OpenAICompatibleBackend for OpenAI URLs."""
         factory = BackendFactory(mock_lg)
