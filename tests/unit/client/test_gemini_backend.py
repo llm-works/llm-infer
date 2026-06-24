@@ -313,3 +313,14 @@ class TestGeminiBackendDowngradeLogging:
         backend._after_response(request, self._make_response(None))
         mock_lg.warning.assert_not_called()
         backend.close()
+
+    def test_no_warning_on_studio_backend(self, mock_lg: Logger) -> None:
+        """Studio backend should not emit Vertex-specific downgrade warning."""
+        backend = GeminiBackend(
+            mock_lg, "studio", base_url=_STUDIO_BASE_URL, service_tier="priority"
+        )
+        mock_lg.warning.reset_mock()
+        request, _ = TestGeminiBackendServiceTier()._request()
+        backend._after_response(request, self._make_response("standard"))
+        mock_lg.warning.assert_not_called()
+        backend.close()

@@ -144,7 +144,11 @@ class GeminiBackend(OpenAICompatibleBackend):
         # As of 2026-06-24, Vertex's OpenAI-compat /chat/completions does
         # not emit `x-gemini-service-tier` for gemini-2.5-flash, so this
         # branch is currently a no-op (kept for when Google adds it).
-        if self._service_tier != "priority" or not response.headers:
+        if (
+            self._service_tier != "priority"
+            or not self._is_vertex
+            or not response.headers
+        ):
             return
         served = response.headers.get(_SERVED_TIER_HEADER)
         if served is None or served == "priority":
