@@ -481,7 +481,6 @@ class LLMClient(ChatClient):
             request=request,
             callbacks=self._callbacks,
         )
-        response.request = request
         usage = response.usage
         self._lg.debug(
             "LLM chat response",
@@ -547,7 +546,6 @@ class LLMClient(ChatClient):
             request=request,
             callbacks=self._callbacks,
         )
-        response.request = request
         usage = response.usage
         self._lg.debug(
             "LLM chat response",
