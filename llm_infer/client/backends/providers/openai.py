@@ -23,6 +23,7 @@ from typing import Any, NoReturn
 
 import httpx
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from ....schemas.openai import (
     ChatCompletionUsage,
@@ -58,7 +59,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         ctx: BackendContext | None = None,
         default_model: str | None = None,
         base_url: str = "http://localhost:8000/v1",
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         auth: AuthProvider | None = None,
     ) -> None:
         """Initialize the backend.
@@ -69,17 +70,21 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             ctx: Backend context with rate limiter, backoff, and timeouts.
             default_model: Default model if not specified per-request.
             base_url: Base URL for the API.
-            api_key: Static API key. Wrapped as ``StaticAPIKeyAuth`` if
-                ``auth`` is not provided. Ignored when ``auth`` is provided.
+            api_key: Static API key (``str`` or ``SecretStr``). Wrapped as
+                ``StaticAPIKeyAuth`` if ``auth`` is not provided. Ignored
+                when ``auth`` is provided.
             auth: Auth provider. Takes precedence over ``api_key``. Use this
                 for non-static auth schemes (e.g. ``GCPServiceAccountAuth``).
         """
         super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
-        if auth is None and api_key is not None:
-            auth = StaticAPIKeyAuth(api_key)
+        ensured_key = SecretStr.ensure(api_key)
+        if auth is None and ensured_key is not None:
+            auth = StaticAPIKeyAuth(ensured_key)
         self._auth = auth
-        self._provider = ProviderDetector.detect(base_url, api_key)
+        # Provider detection needs the raw prefix; reveal into a local only.
+        detect_key = ensured_key.reveal() if ensured_key is not None else None
+        self._provider = ProviderDetector.detect(base_url, detect_key)
         self._last_response: ChatResponse | None = None
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
@@ -731,7 +736,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         lg: Logger,
         base_url: str,
         model: str,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         ctx: BackendContext | None = None,
     ) -> None:
         """Initialize OpenAI-compatible embedding backend.
@@ -740,30 +745,41 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             lg: Logger instance.
             base_url: Base URL (e.g., "https://api.openai.com/v1").
             model: Model name (e.g., "text-embedding-3-small").
-            api_key: Optional API key for Authorization header.
+            api_key: Optional API key (``str`` or ``SecretStr``) for
+                Authorization header. Stored as ``SecretStr`` inside a
+                ``StaticAPIKeyAuth``; the plain value is only produced at
+                the moment each request's headers are built.
             ctx: Backend context with rate limiter and timeouts.
         """
         super().__init__(lg, model, ctx)
         self._base_url = base_url.rstrip("/")
-
-        headers: dict[str, str] = {}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        self._client = httpx.Client(timeout=self._ctx.request_timeout, headers=headers)
+        ensured_key = SecretStr.ensure(api_key)
+        self._auth: AuthProvider | None = (
+            StaticAPIKeyAuth(ensured_key) if ensured_key is not None else None
+        )
+        self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
-        self._headers = headers
 
     @property
     def provider(self) -> str:
         return "openai"
 
+    def _build_headers(self) -> dict[str, str]:
+        """Build request headers (sync). Reveals the api_key at call time."""
+        return self._auth.headers() if self._auth is not None else {}
+
+    async def _build_headers_async(self) -> dict[str, str]:
+        """Build request headers (async).
+
+        Reveals at call time; kept async so future non-static auth providers
+        can refresh off-loop without the caller changing shape.
+        """
+        return await self._auth.headers_async() if self._auth is not None else {}
+
     def _get_async_client(self) -> httpx.AsyncClient:
         """Get or create the async HTTP client (lazy initialization)."""
         if self._async_client is None:
-            self._async_client = httpx.AsyncClient(
-                timeout=self._ctx.request_timeout, headers=self._headers
-            )
+            self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
         return self._async_client
 
     # =========================================================================
@@ -782,7 +798,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         if dimensions is not None:
             payload["dimensions"] = dimensions
         try:
-            resp = self._client.post(url, json=payload)
+            resp = self._client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
@@ -816,7 +832,8 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             payload["dimensions"] = dimensions
         client = self._get_async_client()
         try:
-            resp = await client.post(url, json=payload)
+            headers = await self._build_headers_async()
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result

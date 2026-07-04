@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, cast
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
+from appinfra.yaml import SecretStr
 
 from .backends import Backend, BackendContext, BackendFactory, RetryConfig
 from .backends.auth import AuthProvider, auth_from_config
@@ -379,7 +380,7 @@ class Factory:
         self,
         base_url: str = "http://localhost:8000/v1",
         default_model: str | None = None,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
         callbacks: LLMCallbacks | None = None,
@@ -391,7 +392,7 @@ class Factory:
         Args:
             base_url: API base URL.
             default_model: Default model name.
-            api_key: Optional API key.
+            api_key: Optional API key (``str`` or ``SecretStr``).
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
             callbacks: Optional callbacks for request/response/error lifecycle events.
@@ -403,7 +404,7 @@ class Factory:
             "type": "openai_compatible",
             "base_url": base_url,
             "model": default_model,
-            "api_key": api_key,
+            "api_key": SecretStr.ensure(api_key),
             "timeout": timeout,
         }
         if rate_limit:
@@ -413,7 +414,7 @@ class Factory:
     def anthropic(
         self,
         default_model: str = "claude-sonnet-4-20250514",
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         max_tokens: int = 4096,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
@@ -425,7 +426,8 @@ class Factory:
 
         Args:
             default_model: Claude model name.
-            api_key: Anthropic API key (uses ANTHROPIC_API_KEY env var if not provided).
+            api_key: Anthropic API key as ``str`` or ``SecretStr``. Falls back
+                to the ``ANTHROPIC_API_KEY`` env var if not provided.
             max_tokens: Default max tokens for responses.
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
@@ -440,7 +442,7 @@ class Factory:
         config: dict[str, Any] = {
             "type": "anthropic",
             "model": default_model,
-            "api_key": api_key,
+            "api_key": SecretStr.ensure(api_key),
             "max_tokens": max_tokens,
             "timeout": timeout,
         }
@@ -452,7 +454,7 @@ class Factory:
         self,
         base_url: str = "http://localhost:8001/v1",
         model: str = "default",
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         timeout: float = 120.0,
         retry: RetryConfig | None = None,
         rate_limit: dict[str, Any] | None = None,
@@ -465,7 +467,8 @@ class Factory:
         Args:
             base_url: API base URL for embeddings endpoint.
             model: Model name to send in requests.
-            api_key: Optional API key for Authorization header.
+            api_key: Optional API key (``str`` or ``SecretStr``) for
+                Authorization header.
             timeout: Request timeout in seconds.
             retry: Retry configuration for transient errors. None disables retry.
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
@@ -482,7 +485,7 @@ class Factory:
             self._lg,
             base_url=base_url,
             model=model,
-            api_key=api_key,
+            api_key=SecretStr.ensure(api_key),
             ctx=ctx,
         )
         return EmbeddingClient(
@@ -491,7 +494,7 @@ class Factory:
 
     def embeddings_google(
         self,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         model: str = "gemini-embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
         timeout: float = 120.0,
@@ -505,8 +508,8 @@ class Factory:
         """Create EmbeddingClient for Google Generative AI embeddings.
 
         Args:
-            api_key: Google API key (AI Studio). Either this or ``auth`` must
-                be provided.
+            api_key: Google API key (AI Studio) as ``str`` or ``SecretStr``.
+                Either this or ``auth`` must be provided.
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings. One of:
                 RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
@@ -531,7 +534,7 @@ class Factory:
         ctx = BackendContext(rate_limiter=rate_limiter, request_timeout=timeout)
         backend = GoogleBackend(
             self._lg,
-            api_key=api_key,
+            api_key=SecretStr.ensure(api_key),
             model=model,
             task_type=GoogleEmbeddingTaskType(task_type),
             ctx=ctx,
@@ -579,7 +582,7 @@ class Factory:
         return self.embeddings(
             base_url=cfg.base_url,
             model=cfg.get("model", "default"),
-            api_key=cfg.get("api_key"),
+            api_key=SecretStr.ensure(cfg.get("api_key")),
             timeout=timeout,
             retry=retry,
             rate_limit=cfg.get("rate_limit"),
@@ -596,7 +599,7 @@ class Factory:
     ) -> EmbeddingClient:
         """Create Google embedding client from config."""
         auth_cfg = cfg.get("auth")
-        api_key = cfg.get("api_key")
+        api_key = SecretStr.ensure(cfg.get("api_key"))
         auth = auth_from_config(
             self._lg,
             dict(auth_cfg) if auth_cfg else None,

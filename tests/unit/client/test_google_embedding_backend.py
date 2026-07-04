@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from llm_infer.client import (
     BackendRequestError,
@@ -67,6 +68,12 @@ class TestGoogleEmbeddingBackendInit:
         """Test API key is used in x-goog-api-key header."""
         backend = GoogleEmbeddingBackend(mock_lg, api_key="my-api-key")
         assert backend._build_headers()["x-goog-api-key"] == "my-api-key"
+        backend.close()
+
+    def test_secret_api_key_sets_header(self, mock_lg: Logger) -> None:
+        """SecretStr api_key is revealed only at header construction."""
+        backend = GoogleEmbeddingBackend(mock_lg, api_key=SecretStr("AIza-secret"))
+        assert backend._build_headers()["x-goog-api-key"] == "AIza-secret"
         backend.close()
 
 

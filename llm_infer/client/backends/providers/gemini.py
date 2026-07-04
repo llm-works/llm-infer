@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from ...types import ChatRequest, ChatResponse
 from ..auth import AuthProvider
@@ -53,7 +54,7 @@ class GeminiBackend(OpenAICompatibleBackend):
         ctx: BackendContext | None = None,
         default_model: str | None = None,
         base_url: str = "http://localhost:8000/v1",
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         auth: AuthProvider | None = None,
         service_tier: str | None = None,
     ) -> None:
