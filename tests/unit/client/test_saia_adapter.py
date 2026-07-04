@@ -284,10 +284,10 @@ class TestSAIAAdapterResponseConversion:
         response.content = "mutated"
         assert result.raw.content == "mutated"
 
-    def test_convert_response_propagates_request_id(
+    def test_convert_response_propagates_llm_request_id(
         self, mock_client: MagicMock
     ) -> None:
-        """ChatRequest.id from response.request surfaces as SAIAChatResponse.request_id.
+        """ChatRequest.id from response.request surfaces as SAIAChatResponse.llm_request_id.
 
         Enables SAIA to record the same identifier on Step.llm_call that callback
         consumers observe via on_response(request, response), eliminating fuzzy
@@ -299,18 +299,18 @@ class TestSAIAAdapterResponseConversion:
 
         result = adapter._convert_response(response)
 
-        assert result.request_id == "req-abc12345"
+        assert result.llm_request_id == "req-abc12345"
 
-    def test_convert_response_request_id_none_when_request_absent(
+    def test_convert_response_llm_request_id_none_when_request_absent(
         self, mock_client: MagicMock
     ) -> None:
-        """When the backend leaves response.request unset, request_id is None."""
+        """When the backend leaves response.request unset, llm_request_id is None."""
         adapter = SAIAAdapter(mock_client)
         response = ChatResponse(content="Hello!")
 
         result = adapter._convert_response(response)
 
-        assert result.request_id is None
+        assert result.llm_request_id is None
 
 
 class TestSAIAAdapterToolArgumentParsing:

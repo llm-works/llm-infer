@@ -317,7 +317,7 @@ class SAIAAdapter(Backend):
             output_tokens=output_tokens,
             model=response.model,
             raw=response,
-            request_id=response.request.id if response.request else None,
+            llm_request_id=response.request.id if response.request else None,
         )
 
     def _parse_tool_arguments(self, args_str: str) -> dict[str, Any]:
