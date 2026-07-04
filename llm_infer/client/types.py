@@ -166,6 +166,15 @@ class ChatResponse:
             Vertex's ``x-gemini-service-tier`` indicating which tier actually
             served the request (may differ from the requested tier under
             capacity pressure).
+        request: The originating ``ChatRequest`` (backreference, mirrors
+            ``httpx.Response.request``). Populated by ``LLMClient`` before
+            the response is returned or surfaced to ``on_response``. Enables
+            callers of ``chat_async``/``chat_stream_async`` to correlate a
+            response back to its ``ChatRequest.id`` without side-channel
+            state. Backends leave it ``None``; the client fills it in.
+            Note: ``ChatRequest.messages`` may be large — callers that hold
+            responses long-term should copy out what they need if the memory
+            is a concern.
 
     llm-infer Extensions:
         thinking: Extracted thinking/reasoning content from <think> blocks.
@@ -183,6 +192,7 @@ class ChatResponse:
     provider: str | None = None
     raw: dict[str, Any] | None = None
     headers: dict[str, str] | None = None
+    request: ChatRequest | None = None
     # llm-infer extensions
     thinking: str | None = None
     tool_calls: list[ToolCall] | None = field(default=None)
@@ -255,7 +265,9 @@ class LLMCallbacks:
         on_request: Called before each request attempt. Args: (request, retry).
             retry is 0 for first attempt, 1+ for retries after transient errors.
         on_response: Called after successful response. Args: (request, response).
-            For streaming, fires after stream completes.
+            For streaming, fires after stream completes. ``response.request`` is
+            the same object as the ``request`` argument — the pair is passed
+            positionally for symmetry with ``on_request``/``on_error``.
         on_error: Called after failed request. Args: (request, exception).
 
     HTTP level (fires at actual send, after any backoff delay):

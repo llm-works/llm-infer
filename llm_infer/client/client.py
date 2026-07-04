@@ -481,6 +481,7 @@ class LLMClient(ChatClient):
             request=request,
             callbacks=self._callbacks,
         )
+        response.request = request
         usage = response.usage
         self._lg.debug(
             "LLM chat response",
@@ -521,6 +522,8 @@ class LLMClient(ChatClient):
                 callbacks=self._callbacks,
             )
             response = self._get_stream_response(holder)
+            if response:
+                response.request = request
             self._log_stream_response(request, start_t, response)
             if response:
                 self._fire_on_response(request, response)
@@ -544,6 +547,7 @@ class LLMClient(ChatClient):
             request=request,
             callbacks=self._callbacks,
         )
+        response.request = request
         usage = response.usage
         self._lg.debug(
             "LLM chat response",
@@ -585,6 +589,8 @@ class LLMClient(ChatClient):
             ):
                 yield token
             response = self._get_stream_response(holder)
+            if response:
+                response.request = request
             self._log_stream_response(request, start_t, response)
             if response:
                 self._fire_on_response(request, response)
