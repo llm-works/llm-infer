@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls. Defaults to `True` (unchanged). With `streaming=False`, the adapter
   uses `chat_async` and aborts by cancelling the pending task — simpler path
   for fast providers where TTFT is sub-second.
+- **`SAIAAdapter` propagates `llm_request_id`**: `_convert_response` copies
+  `ChatResponse.request.id` into `SAIAChatResponse.llm_request_id`, so SAIA
+  tracers can join `Step.llm_call` records with backend `on_response`
+  callback events on the same identifier instead of matching on timestamps.
 - **HTTP-level send callbacks**: `on_before_send` and `on_after_send` in
   `LLMCallbacks` fire at actual HTTP send time (after backoff), providing
   accurate request timestamps. New `SendContext` carries attempt number,
