@@ -18,6 +18,7 @@ from llm_saia.core.errors import PauseRequested
 
 from llm_infer.client import ChatResponse, LLMClient
 from llm_infer.client.saia import SAIAAdapter
+from llm_infer.client.types import ChatRequest
 from llm_infer.schemas.openai import (
     ChatCompletionUsage,
     FinishReason,
@@ -282,6 +283,34 @@ class TestSAIAAdapterResponseConversion:
         # raw is a live reference, not a copy: mutations are visible post-conversion.
         response.content = "mutated"
         assert result.raw.content == "mutated"
+
+    def test_convert_response_propagates_request_id(
+        self, mock_client: MagicMock
+    ) -> None:
+        """ChatRequest.id from response.request surfaces as SAIAChatResponse.request_id.
+
+        Enables SAIA to record the same identifier on Step.llm_call that callback
+        consumers observe via on_response(request, response), eliminating fuzzy
+        joins between tracer records and per-call telemetry.
+        """
+        adapter = SAIAAdapter(mock_client)
+        request = ChatRequest(messages=[], id="req-abc12345")
+        response = ChatResponse(content="Hello!", request=request)
+
+        result = adapter._convert_response(response)
+
+        assert result.request_id == "req-abc12345"
+
+    def test_convert_response_request_id_none_when_request_absent(
+        self, mock_client: MagicMock
+    ) -> None:
+        """When the backend leaves response.request unset, request_id is None."""
+        adapter = SAIAAdapter(mock_client)
+        response = ChatResponse(content="Hello!")
+
+        result = adapter._convert_response(response)
+
+        assert result.request_id is None
 
 
 class TestSAIAAdapterToolArgumentParsing:

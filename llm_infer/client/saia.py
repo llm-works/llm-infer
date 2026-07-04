@@ -292,18 +292,14 @@ class SAIAAdapter(Backend):
         need backend-specific fields (thinking, adapter info, detailed usage)
         can reach them without another round of adapter churn.
         """
-        tool_calls: list[SAIAToolCall] = []
-
-        if response.tool_calls:
-            for tc in response.tool_calls:
-                arguments = self._parse_tool_arguments(tc.function.arguments)
-                tool_calls.append(
-                    SAIAToolCall(
-                        id=tc.id,
-                        name=tc.function.name,
-                        arguments=arguments,
-                    )
-                )
+        tool_calls: list[SAIAToolCall] = [
+            SAIAToolCall(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=self._parse_tool_arguments(tc.function.arguments),
+            )
+            for tc in (response.tool_calls or [])
+        ]
 
         input_tokens = 0
         output_tokens = 0
@@ -321,6 +317,7 @@ class SAIAAdapter(Backend):
             output_tokens=output_tokens,
             model=response.model,
             raw=response,
+            request_id=response.request.id if response.request else None,
         )
 
     def _parse_tool_arguments(self, args_str: str) -> dict[str, Any]:
