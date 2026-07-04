@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from llm_infer.client import (
     ChatRequest,
@@ -18,6 +19,7 @@ from llm_infer.client import (
     ResponseHolder,
 )
 from llm_infer.client.backends import Backend, BackendContext, OpenAICompatibleBackend
+from llm_infer.client.backends.auth import StaticAPIKeyAuth
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
 
 pytestmark = pytest.mark.unit
@@ -143,6 +145,51 @@ class TestFactory:
         assert router.default == "default"
         assert "default" in router.clients
         router.close()
+
+    def test_from_config_accepts_secret_api_key(self, mock_lg: Logger) -> None:
+        """from_config accepts SecretStr in nested backends[].api_key.
+
+        The reveal must happen at the outbound header build, not at parse
+        time. This guards the xray → llm_infer wiring where LLMConfig
+        already stores keys as SecretStr.
+        """
+        factory = Factory(mock_lg)
+        config = {
+            "default": "openai",
+            "backends": {
+                "openai": {
+                    "type": "openai_compatible",
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key": SecretStr("sk-from-xray"),
+                },
+            },
+        }
+        router = factory.from_config(config)
+        try:
+            backend = router.clients["openai"].backend
+            assert isinstance(backend, OpenAICompatibleBackend)
+            assert isinstance(backend._auth, StaticAPIKeyAuth)
+            assert backend._build_headers()["Authorization"] == "Bearer sk-from-xray"
+        finally:
+            router.close()
+
+    def test_embeddings_from_config_accepts_secret_api_key(
+        self, mock_lg: Logger
+    ) -> None:
+        """embeddings_from_config accepts SecretStr for embedding.api_key."""
+        factory = Factory(mock_lg)
+        config = {
+            "type": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "model": "text-embedding-3-small",
+            "api_key": SecretStr("sk-embed-secret"),
+        }
+        emb_client = factory.embeddings_from_config(config)
+        try:
+            headers = emb_client.backend._build_headers()
+            assert headers["Authorization"] == "Bearer sk-embed-secret"
+        finally:
+            emb_client.close()
 
     def test_from_config_multi_backend_returns_router(self, mock_lg: Logger) -> None:
         """Test from_config with multiple backends returns router."""

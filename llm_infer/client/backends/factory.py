@@ -7,6 +7,7 @@ from typing import Any
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
+from appinfra.yaml import SecretStr
 
 from .auth import AuthProvider, auth_from_config
 from .base import Backend
@@ -87,9 +88,11 @@ class BackendFactory:
         (e.g., GeminiBackend for Google).
         """
         base_url = config.get("base_url", "http://localhost:8000/v1")
-        api_key = config.get("api_key")
+        api_key = SecretStr.ensure(config.get("api_key"))
         auth = self._create_auth(config, api_key=api_key)
-        provider = ProviderDetector.detect(base_url, api_key)
+        # Provider detection uses the raw prefix; reveal into a local only.
+        detect_key = api_key.reveal() if api_key is not None else None
+        provider = ProviderDetector.detect(base_url, detect_key)
 
         kwargs: dict[str, Any] = {
             "lg": self._lg,
@@ -116,7 +119,7 @@ class BackendFactory:
         self,
         config: DotDict,
         *,
-        api_key: str | None,
+        api_key: str | SecretStr | None,
         api_key_header: str = "Authorization",
     ) -> AuthProvider | None:
         """Build an AuthProvider from the ``auth:`` block, or wrap ``api_key``."""

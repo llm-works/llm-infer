@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from ...errors import BackendRequestError, BackendTimeoutError, BackendUnavailableError
 from ..auth import AuthProvider, GoogleAPIKeyHeaderAuth
@@ -53,7 +54,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
     def __init__(
         self,
         lg: Logger,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         model: str = "gemini-embedding-001",
         task_type: GoogleEmbeddingTaskType = GoogleEmbeddingTaskType.RETRIEVAL_DOCUMENT,
         ctx: BackendContext | None = None,
@@ -65,9 +66,9 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
 
         Args:
             lg: Logger instance.
-            api_key: Google API key (AI Studio). Wrapped as
-                ``GoogleAPIKeyHeaderAuth`` if ``auth`` is not provided. Ignored
-                when ``auth`` is provided.
+            api_key: Google API key (AI Studio) as ``str`` or ``SecretStr``.
+                Wrapped as ``GoogleAPIKeyHeaderAuth`` if ``auth`` is not
+                provided. Ignored when ``auth`` is provided.
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings.
             ctx: Backend context with rate limiter and timeouts.
@@ -78,8 +79,9 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
                 ``GCPServiceAccountAuth`` for Vertex.
         """
         super().__init__(lg, model, ctx)
-        if auth is None and api_key is not None:
-            auth = GoogleAPIKeyHeaderAuth(api_key)
+        ensured_key = SecretStr.ensure(api_key)
+        if auth is None and ensured_key is not None:
+            auth = GoogleAPIKeyHeaderAuth(ensured_key)
         if auth is None:
             raise ValueError("Either api_key or auth must be provided")
         self._auth = auth

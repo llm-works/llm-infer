@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from ....schemas.openai import (
     ChatCompletionUsage,
@@ -75,7 +76,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         name: str,
         ctx: BackendContext | None = None,
         default_model: str | None = None,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         base_url: str | None = None,
         max_tokens: int = 4096,
         thinking_budget: float = 0.8,
@@ -87,7 +88,10 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             name: Backend name (for discovery/routing).
             ctx: Backend context with rate limiter, backoff, and timeouts.
             default_model: Default model if not specified per-request.
-            api_key: API key for authentication.
+            api_key: API key (``str`` or ``SecretStr``) for authentication.
+                Stored internally as ``SecretStr`` and revealed only when
+                constructing the underlying Anthropic SDK client. ``None``
+                lets the SDK fall back to the ``ANTHROPIC_API_KEY`` env var.
             base_url: Base URL override (for proxies).
             max_tokens: Default max tokens for responses.
             thinking_budget: Fraction of max_tokens for thinking (0.0-1.0, default 0.8).
@@ -112,12 +116,12 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         self._anthropic = anthropic_module
         self._max_tokens = max_tokens
         self._last_response: ChatResponse | None = None
-        self._api_key = api_key
+        self._api_key: SecretStr | None = SecretStr.ensure(api_key)
         self._base_url = base_url
 
-        # Sync client created eagerly
+        # Sync client created eagerly. Reveal only at the SDK ctor call.
         self._client: anthropic.Anthropic = anthropic_module.Anthropic(
-            api_key=api_key,
+            api_key=self._api_key.reveal() if self._api_key is not None else None,
             base_url=base_url,
             timeout=self._ctx.request_timeout,
         )
@@ -224,8 +228,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
     def _get_async_client(self) -> anthropic.AsyncAnthropic:
         """Get or create the async client (lazy initialization)."""
         if self._async_client is None:
+            # Reveal only at the SDK ctor call.
             self._async_client = self._anthropic.AsyncAnthropic(
-                api_key=self._api_key,
+                api_key=self._api_key.reveal() if self._api_key is not None else None,
                 base_url=self._base_url,
                 timeout=self._ctx.request_timeout,
             )

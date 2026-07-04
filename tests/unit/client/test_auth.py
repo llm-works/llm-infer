@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from llm_infer.client.backends.auth import (
     AuthProvider,
@@ -52,6 +53,19 @@ class TestStaticAPIKeyAuth:
         auth = StaticAPIKeyAuth("k")
         assert isinstance(auth, AuthProvider)
 
+    def test_accepts_secret_str(self) -> None:
+        auth = StaticAPIKeyAuth(SecretStr("sk-test"))
+        assert auth.headers() == {"Authorization": "Bearer sk-test"}
+
+    def test_stores_as_secret_str(self) -> None:
+        """The stored key must be a SecretStr — this is what keeps the value
+        out of tracebacks and Logger.extra, and is the whole point of the
+        migration. If storage regresses to plain str, this fails."""
+        auth = StaticAPIKeyAuth("sk-repr-safe")
+        assert isinstance(auth._api_key, SecretStr)
+        assert "sk-repr-safe" not in repr(auth._api_key)
+        assert "sk-repr-safe" not in str(auth._api_key)
+
 
 class TestGoogleAPIKeyHeaderAuth:
     def test_headers(self) -> None:
@@ -61,6 +75,15 @@ class TestGoogleAPIKeyHeaderAuth:
     def test_headers_async(self) -> None:
         auth = GoogleAPIKeyHeaderAuth("AIza-key")
         assert asyncio.run(auth.headers_async()) == {"x-goog-api-key": "AIza-key"}
+
+    def test_accepts_secret_str(self) -> None:
+        auth = GoogleAPIKeyHeaderAuth(SecretStr("AIza-key"))
+        assert auth.headers() == {"x-goog-api-key": "AIza-key"}
+
+    def test_stores_as_secret_str(self) -> None:
+        auth = GoogleAPIKeyHeaderAuth("AIza-repr-safe")
+        assert isinstance(auth._api_key, SecretStr)
+        assert "AIza-repr-safe" not in repr(auth._api_key)
 
 
 class TestAuthFromAPIKey:
@@ -74,6 +97,16 @@ class TestAuthFromAPIKey:
 
     def test_google_header_returns_xgoog(self) -> None:
         auth = auth_from_api_key("AIza-abc", header="x-goog-api-key")
+        assert isinstance(auth, GoogleAPIKeyHeaderAuth)
+        assert auth.headers() == {"x-goog-api-key": "AIza-abc"}
+
+    def test_accepts_secret_str(self) -> None:
+        auth = auth_from_api_key(SecretStr("sk-abc"))
+        assert isinstance(auth, StaticAPIKeyAuth)
+        assert auth.headers() == {"Authorization": "Bearer sk-abc"}
+
+    def test_accepts_secret_str_with_google_header(self) -> None:
+        auth = auth_from_api_key(SecretStr("AIza-abc"), header="x-goog-api-key")
         assert isinstance(auth, GoogleAPIKeyHeaderAuth)
         assert auth.headers() == {"x-goog-api-key": "AIza-abc"}
 

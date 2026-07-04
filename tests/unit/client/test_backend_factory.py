@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from llm_infer.client.backends import BackendFactory
 from llm_infer.client.backends.auth import (
@@ -151,6 +152,37 @@ class TestBackendFactoryAuth:
         backend = factory.create("openai", config)
         assert isinstance(backend._auth, StaticAPIKeyAuth)
         assert backend._build_headers()["Authorization"] == "Bearer sk-test"
+        backend.close()
+
+    def test_top_level_secret_api_key_wraps_as_static_auth(
+        self, mock_lg: Logger
+    ) -> None:
+        """xray path: top-level api_key arrives as SecretStr; header still builds."""
+        factory = BackendFactory(mock_lg)
+        config = DotDict(
+            {
+                "type": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": SecretStr("sk-secret"),
+            }
+        )
+        backend = factory.create("openai", config)
+        assert isinstance(backend._auth, StaticAPIKeyAuth)
+        assert backend._build_headers()["Authorization"] == "Bearer sk-secret"
+        backend.close()
+
+    def test_auth_block_secret_api_key_mode(self, mock_lg: Logger) -> None:
+        """auth.mode=api_key with SecretStr inline key."""
+        factory = BackendFactory(mock_lg)
+        config = DotDict(
+            {
+                "type": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "auth": {"mode": "api_key", "api_key": SecretStr("sk-inline-secret")},
+            }
+        )
+        backend = factory.create("openai", config)
+        assert backend._build_headers()["Authorization"] == "Bearer sk-inline-secret"
         backend.close()
 
     def test_auth_block_api_key_mode(self, mock_lg: Logger) -> None:

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from llm_infer.client import (
     BackendRequestError,
@@ -70,7 +71,26 @@ class TestOpenAIEmbeddingBackendInit:
             model="model",
             api_key="sk-test123",
         )
-        assert backend._headers["Authorization"] == "Bearer sk-test123"
+        assert backend._build_headers()["Authorization"] == "Bearer sk-test123"
+        backend.close()
+
+    def test_secret_api_key_sets_auth_header(self, mock_lg: Logger) -> None:
+        """SecretStr api_key is revealed only at header construction."""
+        backend = OpenAIEmbeddingBackend(
+            mock_lg,
+            base_url="http://localhost:8001/v1",
+            model="model",
+            api_key=SecretStr("sk-secret-emb"),
+        )
+        assert backend._build_headers()["Authorization"] == "Bearer sk-secret-emb"
+        backend.close()
+
+    def test_no_api_key_yields_empty_headers(self, mock_lg: Logger) -> None:
+        """No key → no Authorization header (local server / anonymous)."""
+        backend = OpenAIEmbeddingBackend(
+            mock_lg, base_url="http://localhost:8001/v1", model="model"
+        )
+        assert backend._build_headers() == {}
         backend.close()
 
 
@@ -103,6 +123,7 @@ class TestOpenAIEmbeddingBackendEmbed:
         mock_post.assert_called_once_with(
             "http://localhost:8001/v1/embeddings",
             json={"model": "default", "input": "hello world"},
+            headers={},
         )
         backend.close()
 
@@ -138,6 +159,7 @@ class TestOpenAIEmbeddingBackendEmbedBatch:
         mock_post.assert_called_once_with(
             "http://localhost:8001/v1/embeddings",
             json={"model": "default", "input": ["a", "b", "c"]},
+            headers={},
         )
         backend.close()
 
