@@ -79,9 +79,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
                 ``GCPServiceAccountAuth`` for Vertex.
         """
         super().__init__(lg, model, ctx)
-        ensured_key = SecretStr.ensure(api_key)
-        if auth is None and ensured_key is not None:
-            auth = GoogleAPIKeyHeaderAuth(ensured_key)
+        if auth is None and api_key is not None:
+            auth = GoogleAPIKeyHeaderAuth(api_key)
         if auth is None:
             raise ValueError("Either api_key or auth must be provided")
         self._auth = auth

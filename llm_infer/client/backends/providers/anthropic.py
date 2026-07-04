@@ -121,7 +121,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
 
         # Sync client created eagerly. Reveal only at the SDK ctor call.
         self._client: anthropic.Anthropic = anthropic_module.Anthropic(
-            api_key=self._api_key.reveal() if self._api_key is not None else None,
+            api_key=self._revealed_api_key(),
             base_url=base_url,
             timeout=self._ctx.request_timeout,
         )
@@ -225,12 +225,16 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
     # Resource management
     # =========================================================================
 
+    def _revealed_api_key(self) -> str | None:
+        """Reveal the stored api_key for SDK client construction."""
+        return self._api_key.reveal() if self._api_key is not None else None
+
     def _get_async_client(self) -> anthropic.AsyncAnthropic:
         """Get or create the async client (lazy initialization)."""
         if self._async_client is None:
             # Reveal only at the SDK ctor call.
             self._async_client = self._anthropic.AsyncAnthropic(
-                api_key=self._api_key.reveal() if self._api_key is not None else None,
+                api_key=self._revealed_api_key(),
                 base_url=self._base_url,
                 timeout=self._ctx.request_timeout,
             )

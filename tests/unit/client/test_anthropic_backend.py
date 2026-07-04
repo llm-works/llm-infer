@@ -114,6 +114,24 @@ class TestAnthropicBackendMocked:
             finally:
                 backend.close()
 
+    def test_secret_str_revealed_at_async_sdk_ctor(
+        self, mock_lg: Logger, mock_anthropic: Any
+    ) -> None:
+        """SecretStr api_key is revealed inside the async anthropic SDK call."""
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
+            from llm_infer.client.backends.providers.anthropic import AnthropicBackend
+
+            backend = AnthropicBackend(
+                mock_lg, "anthropic", api_key=SecretStr("sk-ant-async-secret")
+            )
+            try:
+                backend._get_async_client()
+                assert mock_anthropic.AsyncAnthropic.call_args.kwargs["api_key"] == (
+                    "sk-ant-async-secret"
+                )
+            finally:
+                backend.close()
+
     def test_convert_messages_filters_system(self, mock_anthropic: Any) -> None:
         """Test system messages are filtered from message list."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):

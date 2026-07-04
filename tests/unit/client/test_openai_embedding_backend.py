@@ -285,6 +285,35 @@ class TestOpenAIEmbeddingBackendAsync:
     """Test async methods."""
 
     @pytest.mark.asyncio
+    async def test_embed_async_secret_str_header(self, mock_lg: Logger) -> None:
+        """SecretStr api_key is revealed in async request headers."""
+        backend = OpenAIEmbeddingBackend(
+            mock_lg,
+            base_url="http://localhost:8001/v1",
+            model="model",
+            api_key=SecretStr("sk-async-secret"),
+        )
+
+        response = make_embedding_response([[0.1, 0.2]])
+
+        async_client = backend._get_async_client()
+        with patch.object(async_client, "post") as mock_post:
+            mock_response = MagicMock()
+            mock_response.json.return_value = response
+            mock_response.raise_for_status = MagicMock()
+
+            async def async_post(*args, **kwargs):
+                return mock_response
+
+            mock_post.side_effect = async_post
+
+            await backend.embed_async("test")
+
+        call_kwargs = mock_post.call_args.kwargs
+        assert call_kwargs["headers"]["Authorization"] == "Bearer sk-async-secret"
+        await backend.aclose()
+
+    @pytest.mark.asyncio
     async def test_embed_async(self, mock_lg: Logger) -> None:
         """Test async embedding."""
         backend = OpenAIEmbeddingBackend(
