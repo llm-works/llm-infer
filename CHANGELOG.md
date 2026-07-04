@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`SecretStr` accepted for `api_key`**: `Factory` config and backend
+  constructors now accept `str | SecretStr` for `api_key`. Keys are coerced
+  to `SecretStr` at the boundary and revealed only at the SDK/HTTP call site,
+  so `str()`/`repr()`/logging never leaks the raw value.
 - **Fallback on rate limit**: `FallbackClient` now falls back to the paired
   model when a 429 persists past the backend's retry budget (previously 429
   never triggered fallback). Without `retry`, fallback engages immediately.

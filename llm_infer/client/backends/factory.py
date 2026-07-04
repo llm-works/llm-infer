@@ -146,7 +146,7 @@ class BackendFactory:
             "name": name,
             "ctx": ctx,
             "default_model": default_model,
-            "api_key": config.get("api_key"),
+            "api_key": SecretStr.ensure(config.get("api_key")),
             "base_url": config.get("base_url"),
         }
         if config.get("max_tokens") is not None:
