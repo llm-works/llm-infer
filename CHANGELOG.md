@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ChatResponse.headers`**: lowercased HTTP response headers, when the
   backend captured them. Lets callers read provider signals carried out
   of band (e.g. `x-gemini-service-tier`).
+- **`ChatResponse.request`**: backreference to the originating `ChatRequest`
+  (mirrors `httpx.Response.request`), so callers can correlate a response
+  to its `ChatRequest.id` without wiring `on_response`.
 - **`SAIAAdapter(streaming=...)`**: opt out of streaming for `abort_signal`
   calls. Defaults to `True` (unchanged). With `streaming=False`, the adapter
   uses `chat_async` and aborts by cancelling the pending task — simpler path

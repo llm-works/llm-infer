@@ -103,6 +103,8 @@ def _fire_response(
     response: Any,
 ) -> None:
     """Fire on_response callback if configured."""
+    if request and hasattr(response, "request"):
+        response.request = request
     if callbacks and callbacks.on_response and request:
         try:
             callbacks.on_response(request, response)
