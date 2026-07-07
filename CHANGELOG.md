@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`EmbeddingClient` DEBUG progress logs** around all four public methods,
+  matching the `ChatClient` request/response pattern.
 - **Vertex AI Priority service tier** on `GeminiBackend`. Set
   `service_tier: priority` in the backend config to send the Vertex
   Priority header and body param; observed downgrades log at WARN.

@@ -38,11 +38,13 @@ from collections.abc import Callable, Coroutine
 from typing import Any, Self, TypeVar
 
 from appinfra.log import Logger
+from appinfra.time import since, start
 
 from .backends import RetryConfig
 from .backends.embedding import Backend, BatchEmbeddingResult, EmbeddingResult
 from .errors import BackendRequestError, BackendUnavailableError
 from .retry import RetryBase
+from .types import _gen_req_id
 
 T = TypeVar("T")
 
@@ -158,6 +160,102 @@ class EmbeddingClient:
                 await asyncio.sleep(delay)
 
     # =========================================================================
+    # Logging helpers
+    # =========================================================================
+
+    def _log_request(
+        self, model: str | None, size: dict[str, int]
+    ) -> tuple[str, float]:
+        """Emit entry log and return (req_id, start_time) for pairing."""
+        req = _gen_req_id()
+        self._lg.debug(
+            "embedding request...",
+            extra={
+                "req": req,
+                "model": model,
+                "backend": self._backend.provider,
+                **size,
+            },
+        )
+        return req, start()
+
+    def _log_response(
+        self,
+        req: str,
+        model: str | None,
+        size: dict[str, int],
+        tokens: int | None,
+        t0: float,
+    ) -> None:
+        """Emit response log paired with the entry log by ``req``."""
+        self._lg.debug(
+            "embedding response",
+            extra={
+                "after": since(t0),
+                "req": req,
+                "model": model,
+                "backend": self._backend.provider,
+                **size,
+                "tokens": tokens,
+            },
+        )
+
+    def _log_failed(
+        self,
+        req: str,
+        model: str | None,
+        size: dict[str, int],
+        exc: BaseException,
+        t0: float,
+    ) -> None:
+        """Emit failure log so terminal errors aren't silent after entry log."""
+        self._lg.debug(
+            "embedding failed",
+            extra={
+                "after": since(t0),
+                "req": req,
+                "model": model,
+                "backend": self._backend.provider,
+                **size,
+                "exception": exc,
+            },
+        )
+
+    def _logged_call(
+        self,
+        model: str | None,
+        size: dict[str, int],
+        fn: Callable[[], T],
+        get_tokens: Callable[[T], int | None],
+    ) -> T:
+        """Run fn() with paired request/response/failed debug logging."""
+        req, t0 = self._log_request(model, size)
+        try:
+            result = fn()
+        except BaseException as e:
+            self._log_failed(req, model, size, e, t0)
+            raise
+        self._log_response(req, model, size, get_tokens(result), t0)
+        return result
+
+    async def _logged_call_async(
+        self,
+        model: str | None,
+        size: dict[str, int],
+        coro_fn: Callable[[], Coroutine[Any, Any, T]],
+        get_tokens: Callable[[T], int | None],
+    ) -> T:
+        """Run coro_fn() with paired request/response/failed debug logging."""
+        req, t0 = self._log_request(model, size)
+        try:
+            result = await coro_fn()
+        except BaseException as e:
+            self._log_failed(req, model, size, e, t0)
+            raise
+        self._log_response(req, model, size, get_tokens(result), t0)
+        return result
+
+    # =========================================================================
     # Sync API
     # =========================================================================
 
@@ -185,10 +283,15 @@ class EmbeddingClient:
         """
         effective_model = model or self._model
         effective_dims = dimensions if dimensions is not None else self._dimensions
-        return self._call_with_retry(
-            lambda: self._backend.embed(
-                text, model=effective_model, dimensions=effective_dims
-            )
+        return self._logged_call(
+            effective_model,
+            {"chars": len(text)},
+            lambda: self._call_with_retry(
+                lambda: self._backend.embed(
+                    text, model=effective_model, dimensions=effective_dims
+                )
+            ),
+            lambda r: r.prompt_tokens,
         )
 
     def embed_batch(
@@ -223,10 +326,15 @@ class EmbeddingClient:
                 size=0,
                 total_prompt_tokens=0,
             )
-        return self._call_with_retry(
-            lambda: self._backend.embed_batch(
-                texts, model=effective_model, dimensions=effective_dims
-            )
+        return self._logged_call(
+            effective_model,
+            {"count": len(texts)},
+            lambda: self._call_with_retry(
+                lambda: self._backend.embed_batch(
+                    texts, model=effective_model, dimensions=effective_dims
+                )
+            ),
+            lambda r: r.total_prompt_tokens,
         )
 
     # =========================================================================
@@ -257,10 +365,15 @@ class EmbeddingClient:
         """
         effective_model = model or self._model
         effective_dims = dimensions if dimensions is not None else self._dimensions
-        return await self._call_with_retry_async(
-            lambda: self._backend.embed_async(
-                text, model=effective_model, dimensions=effective_dims
-            )
+        return await self._logged_call_async(
+            effective_model,
+            {"chars": len(text)},
+            lambda: self._call_with_retry_async(
+                lambda: self._backend.embed_async(
+                    text, model=effective_model, dimensions=effective_dims
+                )
+            ),
+            lambda r: r.prompt_tokens,
         )
 
     async def embed_batch_async(
@@ -295,10 +408,15 @@ class EmbeddingClient:
                 size=0,
                 total_prompt_tokens=0,
             )
-        return await self._call_with_retry_async(
-            lambda: self._backend.embed_batch_async(
-                texts, model=effective_model, dimensions=effective_dims
-            )
+        return await self._logged_call_async(
+            effective_model,
+            {"count": len(texts)},
+            lambda: self._call_with_retry_async(
+                lambda: self._backend.embed_batch_async(
+                    texts, model=effective_model, dimensions=effective_dims
+                )
+            ),
+            lambda r: r.total_prompt_tokens,
         )
 
     # =========================================================================
