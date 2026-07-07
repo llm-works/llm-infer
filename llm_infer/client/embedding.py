@@ -221,6 +221,40 @@ class EmbeddingClient:
             },
         )
 
+    def _logged_call(
+        self,
+        model: str | None,
+        size: dict[str, int],
+        fn: Callable[[], T],
+        get_tokens: Callable[[T], int | None],
+    ) -> T:
+        """Run fn() with paired request/response/failed debug logging."""
+        req, t0 = self._log_request(model, size)
+        try:
+            result = fn()
+        except BaseException as e:
+            self._log_failed(req, model, size, e, t0)
+            raise
+        self._log_response(req, model, size, get_tokens(result), t0)
+        return result
+
+    async def _logged_call_async(
+        self,
+        model: str | None,
+        size: dict[str, int],
+        coro_fn: Callable[[], Coroutine[Any, Any, T]],
+        get_tokens: Callable[[T], int | None],
+    ) -> T:
+        """Run coro_fn() with paired request/response/failed debug logging."""
+        req, t0 = self._log_request(model, size)
+        try:
+            result = await coro_fn()
+        except BaseException as e:
+            self._log_failed(req, model, size, e, t0)
+            raise
+        self._log_response(req, model, size, get_tokens(result), t0)
+        return result
+
     # =========================================================================
     # Sync API
     # =========================================================================
@@ -249,19 +283,16 @@ class EmbeddingClient:
         """
         effective_model = model or self._model
         effective_dims = dimensions if dimensions is not None else self._dimensions
-        size = {"chars": len(text)}
-        req, t0 = self._log_request(effective_model, size)
-        try:
-            result = self._call_with_retry(
+        return self._logged_call(
+            effective_model,
+            {"chars": len(text)},
+            lambda: self._call_with_retry(
                 lambda: self._backend.embed(
                     text, model=effective_model, dimensions=effective_dims
                 )
-            )
-        except BaseException as e:
-            self._log_failed(req, effective_model, size, e, t0)
-            raise
-        self._log_response(req, effective_model, size, result.prompt_tokens, t0)
-        return result
+            ),
+            lambda r: r.prompt_tokens,
+        )
 
     def embed_batch(
         self,
@@ -295,19 +326,16 @@ class EmbeddingClient:
                 size=0,
                 total_prompt_tokens=0,
             )
-        size = {"count": len(texts)}
-        req, t0 = self._log_request(effective_model, size)
-        try:
-            result = self._call_with_retry(
+        return self._logged_call(
+            effective_model,
+            {"count": len(texts)},
+            lambda: self._call_with_retry(
                 lambda: self._backend.embed_batch(
                     texts, model=effective_model, dimensions=effective_dims
                 )
-            )
-        except BaseException as e:
-            self._log_failed(req, effective_model, size, e, t0)
-            raise
-        self._log_response(req, effective_model, size, result.total_prompt_tokens, t0)
-        return result
+            ),
+            lambda r: r.total_prompt_tokens,
+        )
 
     # =========================================================================
     # Async API
@@ -337,19 +365,16 @@ class EmbeddingClient:
         """
         effective_model = model or self._model
         effective_dims = dimensions if dimensions is not None else self._dimensions
-        size = {"chars": len(text)}
-        req, t0 = self._log_request(effective_model, size)
-        try:
-            result = await self._call_with_retry_async(
+        return await self._logged_call_async(
+            effective_model,
+            {"chars": len(text)},
+            lambda: self._call_with_retry_async(
                 lambda: self._backend.embed_async(
                     text, model=effective_model, dimensions=effective_dims
                 )
-            )
-        except BaseException as e:
-            self._log_failed(req, effective_model, size, e, t0)
-            raise
-        self._log_response(req, effective_model, size, result.prompt_tokens, t0)
-        return result
+            ),
+            lambda r: r.prompt_tokens,
+        )
 
     async def embed_batch_async(
         self,
@@ -383,19 +408,16 @@ class EmbeddingClient:
                 size=0,
                 total_prompt_tokens=0,
             )
-        size = {"count": len(texts)}
-        req, t0 = self._log_request(effective_model, size)
-        try:
-            result = await self._call_with_retry_async(
+        return await self._logged_call_async(
+            effective_model,
+            {"count": len(texts)},
+            lambda: self._call_with_retry_async(
                 lambda: self._backend.embed_batch_async(
                     texts, model=effective_model, dimensions=effective_dims
                 )
-            )
-        except BaseException as e:
-            self._log_failed(req, effective_model, size, e, t0)
-            raise
-        self._log_response(req, effective_model, size, result.total_prompt_tokens, t0)
-        return result
+            ),
+            lambda r: r.total_prompt_tokens,
+        )
 
     # =========================================================================
     # Resource management

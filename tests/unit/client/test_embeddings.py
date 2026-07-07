@@ -12,7 +12,11 @@ from llm_infer.client import (
     EmbeddingResult,
     RetryConfig,
 )
-from llm_infer.client.backends.embedding import Backend, OpenAIBackend
+from llm_infer.client.backends.embedding import (
+    Backend,
+    BatchEmbeddingResult,
+    OpenAIBackend,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -73,7 +77,6 @@ class TestEmbeddingClientEmbed:
         self, mock_lg: Logger, mock_backend: MagicMock
     ) -> None:
         """Test embed_batch delegates to backend."""
-        from llm_infer.client.backends.embedding import BatchEmbeddingResult
 
         expected = BatchEmbeddingResult(
             embeddings=[[0.1], [0.2]],
@@ -347,7 +350,6 @@ class TestEmbeddingClientLogging:
         self, mock_lg: MagicMock, mock_backend: MagicMock
     ) -> None:
         """embed_batch() logs use 'count' and 'total_prompt_tokens'."""
-        from llm_infer.client.backends.embedding import BatchEmbeddingResult
 
         expected = BatchEmbeddingResult(
             embeddings=[[0.1], [0.2], [0.3]],
@@ -403,6 +405,73 @@ class TestEmbeddingClientLogging:
         assert isinstance(fail_extra["exception"], BackendRequestError)
         assert fail_extra["after"] >= 0
 
+    def test_embed_batch_logs_failed_on_terminal_error(
+        self, mock_lg: MagicMock, mock_backend: MagicMock
+    ) -> None:
+        """embed_batch() emits request/failed pair when the call raises."""
+        mock_backend.embed_batch.side_effect = BackendRequestError(
+            "boom", status_code=400
+        )
+
+        client = EmbeddingClient(mock_lg, mock_backend)
+        with pytest.raises(BackendRequestError):
+            client.embed_batch(["a", "b"])
+        client.close()
+
+        calls = self._debug_calls(mock_lg)
+        assert len(calls) == 2
+        assert calls[0][0] == "embedding request..."
+        assert calls[1][0] == "embedding failed"
+        assert calls[0][1]["req"] == calls[1][1]["req"]
+        assert calls[1][1]["count"] == 2
+        assert isinstance(calls[1][1]["exception"], BackendRequestError)
+
+    @pytest.mark.asyncio
+    async def test_embed_async_logs_failed_on_terminal_error(
+        self, mock_lg: MagicMock, mock_backend: MagicMock
+    ) -> None:
+        """embed_async() emits request/failed pair when the call raises."""
+
+        async def _embed_async_fail(text, *, model=None, dimensions=None):
+            raise BackendRequestError("boom", status_code=400)
+
+        mock_backend.embed_async = _embed_async_fail
+
+        client = EmbeddingClient(mock_lg, mock_backend)
+        with pytest.raises(BackendRequestError):
+            await client.embed_async("hello")
+        await client.aclose()
+
+        calls = self._debug_calls(mock_lg)
+        assert len(calls) == 2
+        assert calls[0][0] == "embedding request..."
+        assert calls[1][0] == "embedding failed"
+        assert calls[0][1]["req"] == calls[1][1]["req"]
+        assert calls[1][1]["chars"] == 5
+
+    @pytest.mark.asyncio
+    async def test_embed_batch_async_logs_failed_on_terminal_error(
+        self, mock_lg: MagicMock, mock_backend: MagicMock
+    ) -> None:
+        """embed_batch_async() emits request/failed pair when the call raises."""
+
+        async def _embed_batch_async_fail(texts, *, model=None, dimensions=None):
+            raise BackendRequestError("boom", status_code=400)
+
+        mock_backend.embed_batch_async = _embed_batch_async_fail
+
+        client = EmbeddingClient(mock_lg, mock_backend)
+        with pytest.raises(BackendRequestError):
+            await client.embed_batch_async(["a", "b", "c"])
+        await client.aclose()
+
+        calls = self._debug_calls(mock_lg)
+        assert len(calls) == 2
+        assert calls[0][0] == "embedding request..."
+        assert calls[1][0] == "embedding failed"
+        assert calls[0][1]["req"] == calls[1][1]["req"]
+        assert calls[1][1]["count"] == 3
+
     @pytest.mark.asyncio
     async def test_embed_async_logs_request_and_response(
         self, mock_lg: MagicMock, mock_backend: MagicMock
@@ -435,7 +504,6 @@ class TestEmbeddingClientLogging:
         self, mock_lg: MagicMock, mock_backend: MagicMock
     ) -> None:
         """embed_batch_async() logs use 'count' and 'total_prompt_tokens'."""
-        from llm_infer.client.backends.embedding import BatchEmbeddingResult
 
         expected = BatchEmbeddingResult(
             embeddings=[[0.1], [0.2]],
