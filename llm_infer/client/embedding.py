@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any, Self, TypeVar
 
@@ -45,13 +44,9 @@ from .backends import RetryConfig
 from .backends.embedding import Backend, BatchEmbeddingResult, EmbeddingResult
 from .errors import BackendRequestError, BackendUnavailableError
 from .retry import RetryBase
+from .types import _gen_req_id
 
 T = TypeVar("T")
-
-
-def _gen_req_id() -> str:
-    """Generate an 8-char request ID for log correlation."""
-    return uuid.uuid4().hex[:8]
 
 
 class EmbeddingClient:
