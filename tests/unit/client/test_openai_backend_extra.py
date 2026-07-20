@@ -411,6 +411,33 @@ class TestStreamState:
         assert resp.tool_calls is not None
         assert resp.tool_calls[0].id == "tc1"
         assert resp.tool_calls[0].function.arguments == '{"x":1}'
+        assert resp.tool_calls[0].extra_content is None
+
+    def test_tool_call_buffering_extra_content(self) -> None:
+        """`extra_content` on any delta chunk lands on the finalized tool_call."""
+        extra = {"google": {"thought_signature": "stub-sig"}}
+        state = _StreamState()
+        state.process_chunk(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "tc1",
+                                    "function": {"name": "f", "arguments": "{}"},
+                                    "extra_content": extra,
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        resp = state.to_response("m")
+        assert resp.tool_calls is not None
+        assert resp.tool_calls[0].extra_content == extra
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ToolCall.extra_content`**: preserves the wire's `extra_content` on
+  tool calls (streaming and non-streaming). Required to round-trip
+  Gemini 3.x `thought_signature`, without which the follow-up tool turn
+  400s. Round-trip with `model_dump(exclude_none=True)`.
 - **`EmbeddingClient` DEBUG progress logs** around all four public methods,
   matching the `ChatClient` request/response pattern.
 - **Vertex AI Priority service tier** on `GeminiBackend`. Set

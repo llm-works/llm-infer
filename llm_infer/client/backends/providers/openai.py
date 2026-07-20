@@ -489,6 +489,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                     name=tc["function"]["name"],
                     arguments=tc["function"].get("arguments") or "",
                 ),
+                extra_content=tc.get("extra_content"),
             )
             for tc in raw_tool_calls
         ]
@@ -600,6 +601,7 @@ class _StreamState:
                 self._tool_call_buffer[idx] = {
                     "id": delta.get("id", ""),
                     "function": {"name": "", "arguments": ""},
+                    "extra_content": None,
                 }
             self._update_tool_call_buffer(self._tool_call_buffer[idx], delta)
 
@@ -614,6 +616,10 @@ class _StreamState:
             buf["function"]["name"] = func["name"]
         if func.get("arguments"):
             buf["function"]["arguments"] += func["arguments"]
+        # `extra_content` (Gemini 3.x thought_signature) is a whole object,
+        # not a token stream — last-writer-wins is correct here.
+        if "extra_content" in delta:
+            buf["extra_content"] = delta["extra_content"]
 
     def to_response(
         self, model: str | None, provider: str | None = None
@@ -645,6 +651,7 @@ class _StreamState:
                     name=buf["function"]["name"],
                     arguments=buf["function"]["arguments"],
                 ),
+                extra_content=buf.get("extra_content"),
             )
             for buf in (
                 self._tool_call_buffer[i] for i in sorted(self._tool_call_buffer)

@@ -357,7 +357,46 @@ class TestOpenAICompatibleBackendChat:
         assert len(response.tool_calls) == 1
         assert response.tool_calls[0].id == "call_123"
         assert response.tool_calls[0].function.name == "get_weather"
+        assert response.tool_calls[0].extra_content is None
         assert response.finish_reason == FinishReason.TOOL_CALLS
+        backend.close()
+
+    def test_chat_tool_call_extra_content_preserved(self, mock_lg: Logger) -> None:
+        """Gemini 3.x wire `extra_content` (thought_signature) survives parsing."""
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+        extra = {"google": {"thought_signature": "stub-sig"}}
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "model": "google/gemini-3.1-pro-preview",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_123",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"city": "Berlin"}',
+                                },
+                                "extra_content": extra,
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        request = ChatRequest(messages=[{"role": "user", "content": "Weather?"}])
+        with patch.object(backend._client, "post", return_value=mock_response):
+            response = backend.chat(request)
+
+        assert response.tool_calls is not None
+        assert response.tool_calls[0].extra_content == extra
         backend.close()
 
     def test_chat_gemini_function_call_filter_finish_reason(

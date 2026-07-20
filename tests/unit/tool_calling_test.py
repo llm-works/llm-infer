@@ -84,6 +84,28 @@ class TestToolSchemas:
         assert tc.type == "function"
         assert tc.function.name == "get_weather"
         assert tc.function.arguments == '{"location": "NYC"}'
+        assert tc.extra_content is None
+
+    def test_tool_call_extra_content_round_trip(self) -> None:
+        """`extra_content` survives model_dump for wire round-trip."""
+        payload = {"google": {"thought_signature": "stub-sig"}}
+        tc = ToolCall(
+            id="call_abc123",
+            type="function",
+            function=FunctionCall(name="f", arguments="{}"),
+            extra_content=payload,
+        )
+        dumped = tc.model_dump(exclude_none=True)
+        assert dumped["extra_content"] == payload
+
+    def test_tool_call_extra_content_excluded_when_none(self) -> None:
+        """`extra_content` is omitted from model_dump when unset."""
+        tc = ToolCall(
+            id="call_abc123",
+            type="function",
+            function=FunctionCall(name="f", arguments="{}"),
+        )
+        assert "extra_content" not in tc.model_dump(exclude_none=True)
 
     def test_tool_call_delta_streaming(self) -> None:
         """Test ToolCallDelta for streaming responses."""
