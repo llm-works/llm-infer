@@ -240,20 +240,26 @@ class SAIAAdapter(Backend):
             return {
                 "role": "assistant",
                 "content": msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ],
+                "tool_calls": [self._tool_call_to_dict(tc) for tc in msg.tool_calls],
             }
 
         return {"role": msg.role, "content": msg.content or ""}
+
+    @staticmethod
+    def _tool_call_to_dict(tc: SAIAToolCall) -> dict[str, Any]:
+        """Serialize a SAIA tool call to the OpenAI-compat wire dict.
+
+        ``extra_content`` is echoed back only when populated so non-Gemini
+        backends see byte-identical output to the pre-round-trip shape.
+        """
+        out: dict[str, Any] = {
+            "id": tc.id,
+            "type": "function",
+            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+        }
+        if tc.extra_content:
+            out["extra_content"] = tc.extra_content
+        return out
 
     def _convert_tools(self, tools: list[ToolDef]) -> list[dict[str, Any]]:
         """Convert SAIA tool definitions to llm-infer format."""
@@ -297,6 +303,7 @@ class SAIAAdapter(Backend):
                 id=tc.id,
                 name=tc.function.name,
                 arguments=self._parse_tool_arguments(tc.function.arguments),
+                extra_content=tc.extra_content,
             )
             for tc in (response.tool_calls or [])
         ]
