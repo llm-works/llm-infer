@@ -257,7 +257,7 @@ class SAIAAdapter(Backend):
             "type": "function",
             "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
         }
-        if tc.extra_content:
+        if tc.extra_content is not None:
             out["extra_content"] = tc.extra_content
         return out
 
