@@ -1399,6 +1399,187 @@ class TestLLMClientCallbacks:
         assert len(error_calls) == 0
         client.close()
 
+    def test_on_retry_fires_with_raw_exception(self, mock_lg: Logger) -> None:
+        """on_retry fires once per transient retry with the raw exception."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="Success!")
+        call_count = 0
+        transient = BackendRequestError("Rate limited", status_code=429)
+
+        class RetryBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise transient
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+        error_calls: list[tuple[ChatRequest, Exception]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                ),
+                on_error=lambda req, err: error_calls.append((req, err)),
+            )
+        )
+
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success!"
+        assert call_count == 3
+        # Two transient failures → two on_retry fires with attempts 1, 2.
+        assert len(retry_calls) == 2
+        assert retry_calls[0][1] is transient
+        assert retry_calls[0][2] == 1
+        assert retry_calls[0][3] > 0
+        assert retry_calls[1][2] == 2
+        # Successful terminal → no on_error.
+        assert error_calls == []
+        client.close()
+
+    def test_on_retry_not_fired_on_terminal_error(self, mock_lg: Logger) -> None:
+        """Non-transient failures skip on_retry and go straight to on_error."""
+        from llm_infer.client import BackendRequestError
+
+        class FailingBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                raise BackendRequestError("bad request", status_code=400)
+
+        backend = FailingBackend(mock_lg, "test")
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+        error_calls: list[tuple[ChatRequest, Exception]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                ),
+                on_error=lambda req, err: error_calls.append((req, err)),
+            )
+        )
+
+        with pytest.raises(BackendRequestError):
+            client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert retry_calls == []
+        assert len(error_calls) == 1
+        client.close()
+
+    def test_on_retry_callback_exception_swallowed(self, mock_lg: Logger) -> None:
+        """A raising on_retry does not derail the retry loop."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="ok")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+
+        def bad_on_retry(*_: object) -> None:
+            raise RuntimeError("tracker down")
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(on_retry=bad_on_retry)
+        )
+
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+        assert result.content == "ok"
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_on_retry_fires_async(self, mock_lg: Logger) -> None:
+        """on_retry fires on the async path with the raw exception."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="ok")
+        call_count = 0
+        transient = BackendRequestError("Rate limited", status_code=429)
+
+        class RetryBackend(MockBackend):
+            async def chat_async(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise transient
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                )
+            )
+        )
+
+        result = await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
+        assert result.content == "ok"
+        assert len(retry_calls) == 1
+        assert retry_calls[0][1] is transient
+        assert retry_calls[0][2] == 1
+        await client.aclose()
+
+    def test_stream_on_retry_fires_on_pre_first_token_error(
+        self, mock_lg: Logger
+    ) -> None:
+        """on_retry fires when a stream error before the first token is retried."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="Hi")
+        call_count = 0
+        transient = BackendRequestError("Rate limited", status_code=429)
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise transient
+                yield from super().chat_stream(request, holder)
+
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(
+            lg=mock_lg,
+            backend=backend,
+            callbacks=LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                )
+            ),
+        )
+
+        list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert len(retry_calls) == 1
+        assert retry_calls[0][1] is transient
+        assert retry_calls[0][2] == 1
+        client.close()
+
     def test_stream_on_request_fires_before_stream(self, mock_lg: Logger) -> None:
         """on_request callback fires before streaming starts."""
         response = ChatResponse(content="hello")

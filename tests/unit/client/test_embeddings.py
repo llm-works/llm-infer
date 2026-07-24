@@ -714,6 +714,135 @@ class TestEmbeddingClientCallbacks:
         assert len(errors) == 1
         assert isinstance(errors[0], BackendRequestError)
 
+    def test_on_retry_fires_with_raw_exception(
+        self, mock_lg: Logger, mock_backend: MagicMock
+    ) -> None:
+        """on_retry fires once per transient retry with (req, exc, attempt, delay)."""
+        retries: list[tuple[EmbeddingRequest, Exception, int, float]] = []
+
+        def on_retry(
+            req: EmbeddingRequest, err: Exception, attempt: int, delay: float
+        ) -> None:
+            retries.append((req, err, attempt, delay))
+
+        transient = BackendRequestError("boom", status_code=429)
+        call_count = 0
+
+        def side_effect(text, *, model=None, dimensions=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise transient
+            return self._ok_result()
+
+        mock_backend.embed.side_effect = side_effect
+
+        client = EmbeddingClient(
+            mock_lg,
+            mock_backend,
+            retry=RetryConfig(base=0.001, factor=1.0, timeout=10.0),
+            callbacks=EmbeddingCallbacks(on_retry=on_retry),
+        )
+        client.embed("hi")
+        client.close()
+
+        assert len(retries) == 2
+        # Raw exception object is preserved end to end.
+        assert retries[0][1] is transient
+        assert retries[0][2] == 1
+        assert retries[0][3] > 0
+        assert retries[1][2] == 2
+
+    def test_on_retry_not_fired_on_terminal_error(
+        self, mock_lg: Logger, mock_backend: MagicMock
+    ) -> None:
+        """Non-transient failures skip on_retry, still fire on_error."""
+        retries: list[tuple[EmbeddingRequest, Exception, int, float]] = []
+        errors: list[Exception] = []
+
+        mock_backend.embed.side_effect = BackendRequestError("bad", status_code=400)
+
+        client = EmbeddingClient(
+            mock_lg,
+            mock_backend,
+            retry=RetryConfig(base=0.001, factor=1.0, timeout=10.0),
+            callbacks=EmbeddingCallbacks(
+                on_retry=lambda req, err, attempt, delay: retries.append(
+                    (req, err, attempt, delay)
+                ),
+                on_error=lambda _req, err: errors.append(err),
+            ),
+        )
+        with pytest.raises(BackendRequestError):
+            client.embed("hi")
+        client.close()
+
+        assert retries == []
+        assert len(errors) == 1
+
+    def test_on_retry_callback_exception_swallowed(
+        self, mock_lg: Logger, mock_backend: MagicMock
+    ) -> None:
+        """A raising on_retry does not derail the retry loop."""
+        call_count = 0
+
+        def side_effect(text, *, model=None, dimensions=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise BackendRequestError("boom", status_code=503)
+            return self._ok_result()
+
+        mock_backend.embed.side_effect = side_effect
+
+        def bad_on_retry(*_: object) -> None:
+            raise RuntimeError("tracker down")
+
+        client = EmbeddingClient(
+            mock_lg,
+            mock_backend,
+            retry=RetryConfig(base=0.001, factor=1.0, timeout=10.0),
+            callbacks=EmbeddingCallbacks(on_retry=bad_on_retry),
+        )
+        # Must NOT raise — the callback error is swallowed.
+        client.embed("hi")
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_on_retry_fires_async(
+        self, mock_lg: Logger, mock_backend: MagicMock
+    ) -> None:
+        """on_retry fires on the async path with the raw exception."""
+        retries: list[tuple[EmbeddingRequest, Exception, int, float]] = []
+        transient = BackendUnavailableError("unavailable")
+        call_count = 0
+
+        def side_effect(text, *, model=None, dimensions=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise transient
+            return self._ok_result()
+
+        mock_backend.embed_async = AsyncMock(side_effect=side_effect)
+
+        client = EmbeddingClient(
+            mock_lg,
+            mock_backend,
+            retry=RetryConfig(base=0.001, factor=1.0, timeout=10.0),
+            callbacks=EmbeddingCallbacks(
+                on_retry=lambda req, err, attempt, delay: retries.append(
+                    (req, err, attempt, delay)
+                )
+            ),
+        )
+        await client.embed_async("hi")
+        await client.aclose()
+
+        assert len(retries) == 1
+        assert retries[0][1] is transient
+        assert retries[0][2] == 1
+
     def test_no_callbacks_preserves_original_behavior(
         self, mock_lg: Logger, mock_backend: MagicMock
     ) -> None:
