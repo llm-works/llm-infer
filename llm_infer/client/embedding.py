@@ -79,6 +79,7 @@ EmbeddingResponseCallback = Callable[
     ["EmbeddingRequest", "EmbeddingResult | BatchEmbeddingResult"], None
 ]
 EmbeddingErrorCallback = Callable[["EmbeddingRequest", Exception], None]
+EmbeddingRetryCallback = Callable[["EmbeddingRequest", Exception, int, float], None]
 
 
 # Constrained: the retry/logging helpers hand this back into on_response,
@@ -107,11 +108,19 @@ class EmbeddingCallbacks:
             ``embed``/``embed_async`` and a ``BatchEmbeddingResult`` for
             ``embed_batch``/``embed_batch_async``.
         on_error: Called after a terminal failure. Args: (request, exception).
+        on_retry: Called on a transient error that will be retried, before the
+            backoff sleep. Args: (request, exception, attempt, delay_seconds).
+            ``attempt`` is the upcoming retry index (1-based), matching the
+            ``retry`` argument the following ``on_request`` fires with.
+            ``exception`` is the raw exception object; the callback owns the
+            formatting decision (useful for capturing full 429/quota bodies).
+            Not fired on terminal errors; those still route through ``on_error``.
     """
 
     on_request: EmbeddingRequestCallback | None = None
     on_response: EmbeddingResponseCallback | None = None
     on_error: EmbeddingErrorCallback | None = None
+    on_retry: EmbeddingRetryCallback | None = None
 
 
 class EmbeddingClient:
@@ -222,6 +231,23 @@ class EmbeddingClient:
                     "on_error callback failed", extra={"exception": cb_err}
                 )
 
+    def _fire_on_retry(
+        self,
+        request: EmbeddingRequest,
+        error: Exception,
+        attempt: int,
+        delay_seconds: float,
+    ) -> None:
+        """Fire on_retry callback (before backoff sleep) with error handling."""
+        cb = self._callbacks
+        if cb and cb.on_retry:
+            try:
+                cb.on_retry(request, error, attempt, delay_seconds)
+            except Exception as cb_err:
+                self._lg.warning(
+                    "on_retry callback failed", extra={"exception": cb_err}
+                )
+
     # =========================================================================
     # Retry wrappers
     # =========================================================================
@@ -260,6 +286,7 @@ class EmbeddingClient:
                     "embedding request failed, retrying",
                     extra={"retry": retry_count, "delay": delay, "exception": e},
                 )
+                self._fire_on_retry(request, e, retry_count, delay)
                 time.sleep(delay)
                 self._fire_on_request(request, retry_count)
 
@@ -296,6 +323,7 @@ class EmbeddingClient:
                     "embedding request failed, retrying",
                     extra={"retry": retry_count, "delay": delay, "exception": e},
                 )
+                self._fire_on_retry(request, e, retry_count, delay)
                 await asyncio.sleep(delay)
                 self._fire_on_request(request, retry_count)
 

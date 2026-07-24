@@ -126,6 +126,22 @@ def _fire_error(
             lg.warning("on_error callback failed", extra={"exception": e})
 
 
+def _fire_retry(
+    lg: Logger,
+    callbacks: LLMCallbacks | None,
+    request: ChatRequest | None,
+    error: Exception,
+    attempt: int,
+    delay_seconds: float,
+) -> None:
+    """Fire on_retry callback if configured (before backoff sleep)."""
+    if callbacks and callbacks.on_retry and request:
+        try:
+            callbacks.on_retry(request, error, attempt, delay_seconds)
+        except Exception as e:
+            lg.warning("on_retry callback failed", extra={"exception": e})
+
+
 def _fire_on_before_send(
     lg: Logger,
     callbacks: LLMCallbacks | None,
@@ -274,26 +290,34 @@ class RetryHelper(RetryBase):
         e: BackendUnavailableError | BackendRequestError,
         delay: float,
         retry_count: int,
-        req_id: str | None,
-        model: str | None,
+        callbacks: LLMCallbacks | None = None,
+        request: ChatRequest | None = None,
     ) -> None:
-        """Log and sleep for retry. Call after incrementing retry_count."""
+        """Fire on_retry, log+sleep, then fire on_request for the next attempt."""
+        req_id = request.id if request else None
+        model = request.model if request else None
         self._log_retry(e, retry_count, delay, req_id, model)
+        _fire_retry(self._lg, callbacks, request, e, retry_count, delay)
         time.sleep(delay)
         self._log_retry_send(retry_count, model, req_id)
+        _fire_request(self._lg, callbacks, request, retry_count)
 
     async def _prep_retry_async(
         self,
         e: BackendUnavailableError | BackendRequestError,
         delay: float,
         retry_count: int,
-        req_id: str | None,
-        model: str | None,
+        callbacks: LLMCallbacks | None = None,
+        request: ChatRequest | None = None,
     ) -> None:
-        """Log and sleep for retry (async)."""
+        """Async variant of _prep_retry: on_retry → sleep → on_request."""
+        req_id = request.id if request else None
+        model = request.model if request else None
         self._log_retry(e, retry_count, delay, req_id, model)
+        _fire_retry(self._lg, callbacks, request, e, retry_count, delay)
         await asyncio.sleep(delay)
         self._log_retry_send(retry_count, model, req_id)
+        _fire_request(self._lg, callbacks, request, retry_count)
 
     def call(
         self,
@@ -364,8 +388,7 @@ class RetryHelper(RetryBase):
                     raise
                 retry_count += 1
                 last_err, last_dly = e, dly
-                self._prep_retry(e, dly, retry_count, req_id, model)
-                _fire_request(self._lg, callbacks, request, retry_count)
+                self._prep_retry(e, dly, retry_count, callbacks, request)
             except Exception as e:
                 self._on_after_send(callbacks, ctx, start, e)
                 _fire_error(self._lg, callbacks, request, e)
@@ -442,8 +465,7 @@ class RetryHelper(RetryBase):
                     raise
                 retry_count += 1
                 last_err, last_dly = e, dly
-                await self._prep_retry_async(e, dly, retry_count, req_id, model)
-                _fire_request(self._lg, callbacks, request, retry_count)
+                await self._prep_retry_async(e, dly, retry_count, callbacks, request)
             except Exception as e:
                 self._on_after_send(callbacks, ctx, start, e)
                 _fire_error(self._lg, callbacks, request, e)
@@ -548,8 +570,7 @@ class RetryHelper(RetryBase):
                 if dly is None:
                     raise
                 last_err, last_dly, retry_count = e, dly, retry_count + 1
-                self._prep_retry(e, dly, retry_count, req_id, model)
-                _fire_request(self._lg, callbacks, request, retry_count)
+                self._prep_retry(e, dly, retry_count, callbacks, request)
                 continue
             except Exception as e:
                 self._on_after_send(callbacks, ctx, start, e)
@@ -642,8 +663,7 @@ class RetryHelper(RetryBase):
                 if dly is None:
                     raise
                 last_err, last_dly, retry_count = e, dly, retry_count + 1
-                await self._prep_retry_async(e, dly, retry_count, req_id, model)
-                _fire_request(self._lg, callbacks, request, retry_count)
+                await self._prep_retry_async(e, dly, retry_count, callbacks, request)
                 continue
             except Exception as e:
                 self._on_after_send(callbacks, ctx, start, e)

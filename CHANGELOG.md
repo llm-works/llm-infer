@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`on_retry` callback** on `LLMCallbacks` and `EmbeddingCallbacks`. Fires
+  once per transient retry before the backoff sleep with
+  `(request, exception, attempt, delay_seconds)` — raw exception, so callers
+  can capture full 429/quota bodies past the internal warning truncation.
 - **`EmbeddingClient` callbacks and `context=`**: `EmbeddingCallbacks`
   (`on_request`/`on_response`/`on_error`), `context=` on all `embed*`
   methods, and `with_callbacks()` — mirrors `LLMClient`.

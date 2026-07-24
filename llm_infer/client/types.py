@@ -207,6 +207,7 @@ class ChatResponse:
 LLMRequestCallback = Callable[["ChatRequest", int], None]
 LLMResponseCallback = Callable[["ChatRequest", "ChatResponse"], None]
 LLMErrorCallback = Callable[["ChatRequest", Exception], None]
+LLMRetryCallback = Callable[["ChatRequest", Exception, int, float], None]
 
 
 @dataclass
@@ -268,6 +269,14 @@ class LLMCallbacks:
             For streaming, fires after stream completes. ``response.request`` is
             the same object as the ``request`` argument — the pair is passed
             positionally for symmetry with ``on_request``/``on_error``.
+        on_retry: Called on a transient error that will be retried, before the
+            backoff sleep. Args: (request, exception, attempt, delay_seconds).
+            ``attempt`` is the upcoming retry index (1-based), matching the
+            ``retry`` argument the following ``on_request`` fires with.
+            ``exception`` is the raw exception object — the callback owns the
+            formatting decision (useful for logging full 429/quota bodies past
+            the truncated internal warning). Not fired on terminal errors;
+            those still route through ``on_error``.
         on_error: Called after failed request. Args: (request, exception).
 
     HTTP level (fires at actual send, after any backoff delay):
@@ -280,6 +289,7 @@ class LLMCallbacks:
     on_request: LLMRequestCallback | None = None
     on_response: LLMResponseCallback | None = None
     on_error: LLMErrorCallback | None = None
+    on_retry: LLMRetryCallback | None = None
     on_before_send: BeforeSendCallback | None = None
     on_after_send: AfterSendCallback | None = None
 
