@@ -690,6 +690,30 @@ class TestEmbeddingClientCallbacks:
 
         assert retries == [0, 1, 2]
 
+    def test_on_error_fires_once_after_retries_exhausted(
+        self, mock_lg: Logger, mock_backend: MagicMock
+    ) -> None:
+        """on_error fires exactly once when all retry attempts fail."""
+        errors: list[Exception] = []
+
+        def on_error(_req: EmbeddingRequest, err: Exception) -> None:
+            errors.append(err)
+
+        mock_backend.embed.side_effect = BackendRequestError("boom", status_code=503)
+
+        client = EmbeddingClient(
+            mock_lg,
+            mock_backend,
+            retry=RetryConfig(base=0.001, factor=1.0, timeout=0.01),
+            callbacks=EmbeddingCallbacks(on_error=on_error),
+        )
+        with pytest.raises(BackendRequestError):
+            client.embed("hi")
+        client.close()
+
+        assert len(errors) == 1
+        assert isinstance(errors[0], BackendRequestError)
+
     def test_no_callbacks_preserves_original_behavior(
         self, mock_lg: Logger, mock_backend: MagicMock
     ) -> None:

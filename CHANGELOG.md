@@ -10,9 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`EmbeddingClient` callbacks and `context=`**: `EmbeddingCallbacks`
-  (`on_request`/`on_response`/`on_error`) and `context=` on all four
-  `embed*` methods, mirroring `LLMClient` so callers can bill embedding
-  tokens through the same channel as chat. Factory helpers accept `callbacks=`.
+  (`on_request`/`on_response`/`on_error`), `context=` on all `embed*`
+  methods, and `with_callbacks()` — mirrors `LLMClient`.
 - **`ToolCall.extra_content`**: preserves the wire's `extra_content` on
   tool calls (streaming and non-streaming). Required to round-trip
   Gemini 3.x `thought_signature`, without which the follow-up tool turn
