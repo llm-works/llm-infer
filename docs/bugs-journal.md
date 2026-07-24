@@ -126,6 +126,7 @@ def rotate_half(x):
     x2 = x[..., half:]
     return torch.cat((-x2, x1), dim=-1)
 
+
 def apply_rope(q, k, cos, sin, positions):
     # Expand cos/sin to full head_dim
     cos = torch.cat([cos, cos], dim=-1)
@@ -215,6 +216,7 @@ class ModelConfig:
             tie_word_embeddings=hf_config.get("tie_word_embeddings", False),
         )
 
+
 # transformer.py - Tie weights after loading
 def _load_weights(self, weights_path):
     # ... load weights from safetensors ...
@@ -276,7 +278,7 @@ for layer_idx in range(num_layers):
     our_hidden = run_our_layer(...)
     hf_hidden = hf_hidden_states[layer_idx + 1]
     max_diff = abs(our_hidden - hf_hidden).max()
-    print(f'Layer {layer_idx}: max_diff={max_diff:.4f}')
+    print(f"Layer {layer_idx}: max_diff={max_diff:.4f}")
 ```
 
 This quickly revealed where divergence started (layer 0's attention output).
@@ -287,17 +289,17 @@ This quickly revealed where divergence started (layer 0's attention output).
 Verify weights are loaded correctly:
 
 ```python
-our_q = our_model.layers[0]['q_proj'].weight
+our_q = our_model.layers[0]["q_proj"].weight
 hf_q = hf_model.model.layers[0].self_attn.q_proj.weight
-print(f'Match: {torch.allclose(our_q, hf_q, atol=1e-3)}')
+print(f"Match: {torch.allclose(our_q, hf_q, atol=1e-3)}")
 ```
 
 
 ### Check Bias Presence
 
 ```python
-print(f'Our q_proj has bias: {layer.q_proj.bias is not None}')
-print(f'HF q_proj has bias: {hf_layer.self_attn.q_proj.bias is not None}')
+print(f"Our q_proj has bias: {layer.q_proj.bias is not None}")
+print(f"HF q_proj has bias: {hf_layer.self_attn.q_proj.bias is not None}")
 ```
 
 
@@ -813,6 +815,7 @@ def run_prefill(request, model, block_pool, device, guards=()):
         token_ids = torch.tensor([request.prompt_tokens], device=device)
         ...
 
+
 # After (fixed)
 def run_prefill(request, model, block_pool, device, guards=()):
     with torch.inference_mode():
@@ -972,9 +975,13 @@ if req.stream and not self.batch_streaming:
 if self._response_q is not None:
     for req_id, running in self.running.items():
         if running.request.stream:
-            new_tokens = running.engine_request.output_tokens[running.last_streamed_idx:]
+            new_tokens = running.engine_request.output_tokens[
+                running.last_streamed_idx :
+            ]
             for token_id in new_tokens:
-                token_text = self.engine.tokenizer.decode([token_id], skip_special_tokens=True)
+                token_text = self.engine.tokenizer.decode(
+                    [token_id], skip_special_tokens=True
+                )
                 chunk = StreamChunk(id=req_id, token=token_text)
                 self._response_q.put(chunk)
             running.last_streamed_idx = len(running.engine_request.output_tokens)
@@ -1150,7 +1157,15 @@ def _is_fp8_tensor(self, key: str) -> bool:
     if self.config.quant_method != "fp8":
         return False
     # Only projection weights and their scales are FP8
-    fp8_projs = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    fp8_projs = [
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+    ]
     for proj in fp8_projs:
         if key.endswith(f".{proj}.weight") or key.endswith(f".{proj}.weight_scale_inv"):
             return True
@@ -1217,9 +1232,9 @@ yield the delta:
 
 ```python
 for i in range(len(token_ids)):
-    current_text = self._tokenizer.decode(token_ids[:i+1], skip_special_tokens=True)
+    current_text = self._tokenizer.decode(token_ids[: i + 1], skip_special_tokens=True)
     if len(current_text) > len(prev_text):
-        result._tokens.append(current_text[len(prev_text):])
+        result._tokens.append(current_text[len(prev_text) :])
     prev_text = current_text
 ```
 
@@ -1294,6 +1309,7 @@ def _add_lora_startup(self, builder: Any) -> Any:
             self._create_adapter_startup_callback(lora_cfg.base_path)
         )
     return builder
+
 
 # Used with subprocess IPC:
 builder.subprocess.with_ipc(self._request_q, self._response_q)

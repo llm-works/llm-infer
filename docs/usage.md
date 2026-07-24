@@ -370,13 +370,11 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="not-needed"  # No auth required
+    api_key="not-needed",  # No auth required
 )
 
 response = client.chat.completions.create(
-    model="default",
-    messages=[{"role": "user", "content": "Hello!"}],
-    max_tokens=100
+    model="default", messages=[{"role": "user", "content": "Hello!"}], max_tokens=100
 )
 
 print(response.choices[0].message.content)
@@ -388,7 +386,7 @@ Streaming:
 stream = client.chat.completions.create(
     model="default",
     messages=[{"role": "user", "content": "Tell me a story"}],
-    stream=True
+    stream=True,
 )
 
 for chunk in stream:
