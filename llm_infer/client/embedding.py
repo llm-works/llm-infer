@@ -314,7 +314,8 @@ class EmbeddingClient:
                 **size,
             },
         )
-        return start()
+        t0: float = start()
+        return t0
 
     def _log_response(
         self,
