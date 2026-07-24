@@ -43,7 +43,7 @@ from .backends import Backend, BackendContext, BackendFactory, RetryConfig
 from .backends.auth import AuthProvider, auth_from_config
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .embedding import EmbeddingClient
+from .embedding import EmbeddingCallbacks, EmbeddingClient
 from .router import LLMRouter
 from .types import LLMCallbacks
 
@@ -459,6 +459,7 @@ class Factory:
         retry: RetryConfig | None = None,
         rate_limit: dict[str, Any] | None = None,
         dimensions: int | None = None,
+        callbacks: EmbeddingCallbacks | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for OpenAI-compatible embeddings API.
 
@@ -473,6 +474,8 @@ class Factory:
             retry: Retry configuration for transient errors. None disables retry.
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
             dimensions: Default output dimensions. None uses provider default.
+            callbacks: Optional embedding lifecycle callbacks (cost tracking,
+                tracing). See ``EmbeddingCallbacks``.
 
         Returns:
             EmbeddingClient configured for the embeddings API.
@@ -489,7 +492,12 @@ class Factory:
             ctx=ctx,
         )
         return EmbeddingClient(
-            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+            self._lg,
+            backend,
+            retry=retry,
+            model=model,
+            dimensions=dimensions,
+            callbacks=callbacks,
         )
 
     def embeddings_google(
@@ -504,6 +512,7 @@ class Factory:
         count_tokens: bool = False,
         base_url: str | None = None,
         auth: AuthProvider | None = None,
+        callbacks: EmbeddingCallbacks | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for Google Generative AI embeddings.
 
@@ -523,6 +532,8 @@ class Factory:
                 set to ``https://<region>-aiplatform.googleapis.com/v1/...`` for Vertex.
             auth: Auth provider. Takes precedence over ``api_key``. Use
                 ``GCPServiceAccountAuth`` for Vertex.
+            callbacks: Optional embedding lifecycle callbacks (cost tracking,
+                tracing). See ``EmbeddingCallbacks``.
 
         Returns:
             EmbeddingClient configured for Google embeddings.
@@ -543,7 +554,12 @@ class Factory:
             auth=auth,
         )
         return EmbeddingClient(
-            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+            self._lg,
+            backend,
+            retry=retry,
+            model=model,
+            dimensions=dimensions,
+            callbacks=callbacks,
         )
 
     def _create_rate_limiter(self, config: dict[str, Any] | None) -> RateLimiter | None:
@@ -575,6 +591,7 @@ class Factory:
         timeout: float,
         retry: RetryConfig | None,
         dimensions: int | None,
+        callbacks: EmbeddingCallbacks | None,
     ) -> EmbeddingClient:
         """Create OpenAI embedding client from config."""
         if not cfg.get("base_url"):
@@ -587,6 +604,7 @@ class Factory:
             retry=retry,
             rate_limit=cfg.get("rate_limit"),
             dimensions=dimensions,
+            callbacks=callbacks,
         )
 
     def _embeddings_google_from_config(
@@ -596,6 +614,7 @@ class Factory:
         retry: RetryConfig | None,
         dimensions: int | None,
         count_tokens: bool,
+        callbacks: EmbeddingCallbacks | None,
     ) -> EmbeddingClient:
         """Create Google embedding client from config."""
         auth_cfg = cfg.get("auth")
@@ -618,9 +637,14 @@ class Factory:
             count_tokens=count_tokens,
             base_url=cfg.get("base_url"),
             auth=auth,
+            callbacks=callbacks,
         )
 
-    def embeddings_from_config(self, config: dict[str, Any]) -> EmbeddingClient:
+    def embeddings_from_config(
+        self,
+        config: dict[str, Any],
+        callbacks: EmbeddingCallbacks | None = None,
+    ) -> EmbeddingClient:
         """Create EmbeddingClient from configuration dict.
 
         Config format:
@@ -641,6 +665,8 @@ class Factory:
 
         Args:
             config: Configuration dict.
+            callbacks: Optional embedding lifecycle callbacks (cost tracking,
+                tracing). See ``EmbeddingCallbacks``.
 
         Returns:
             Configured EmbeddingClient.
@@ -656,10 +682,12 @@ class Factory:
         count_tokens = cfg.get("count_tokens", False)
 
         if backend_type in ("openai", "openai_compatible"):
-            return self._embeddings_openai_from_config(cfg, timeout, retry, dimensions)
+            return self._embeddings_openai_from_config(
+                cfg, timeout, retry, dimensions, callbacks
+            )
         elif backend_type == "google":
             return self._embeddings_google_from_config(
-                cfg, timeout, retry, dimensions, count_tokens
+                cfg, timeout, retry, dimensions, count_tokens, callbacks
             )
         else:
             raise ValueError(f"Unknown embedding backend type: {backend_type}")

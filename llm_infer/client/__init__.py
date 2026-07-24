@@ -66,7 +66,14 @@ from .base import ChatClient
 from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .embedding import EmbeddingClient
+from .embedding import (
+    EmbeddingCallbacks,
+    EmbeddingClient,
+    EmbeddingErrorCallback,
+    EmbeddingRequest,
+    EmbeddingRequestCallback,
+    EmbeddingResponseCallback,
+)
 from .errors import (
     BackendError,
     BackendRequestError,
@@ -116,8 +123,13 @@ __all__ = [
     "LLMClient",
     # Embeddings client
     "EmbeddingClient",
+    "EmbeddingRequest",
     "EmbeddingResult",
     "BatchEmbeddingResult",
+    "EmbeddingCallbacks",
+    "EmbeddingRequestCallback",
+    "EmbeddingResponseCallback",
+    "EmbeddingErrorCallback",
     # Retry configuration
     "RetryConfig",
     # Router (multi-backend)
