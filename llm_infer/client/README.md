@@ -119,7 +119,7 @@ with factory.openai(base_url="https://api.openai.com/v1") as client:
 with factory.from_config(config) as router:
     response = router.chat(messages)
     response = router.chat(messages, backend="fallback")  # Explicit backend
-    response = router.chat(messages, model="gpt-4")       # Route by model
+    response = router.chat(messages, model="gpt-4")  # Route by model
 ```
 
 ### Async
@@ -163,7 +163,7 @@ from llm_infer.client import Factory, FallbackClient
 router = Factory(lg).from_config(config)
 fallbacks = {
     "gpt-4o": "claude-sonnet-4-20250514",
-    "claude-sonnet-4-20250514": "gemini-2.0-pro",   # chains: gpt-4o -> claude -> gemini
+    "claude-sonnet-4-20250514": "gemini-2.0-pro",  # chains: gpt-4o -> claude -> gemini
 }
 client = FallbackClient(lg, router, fallbacks)
 
@@ -199,7 +199,7 @@ backend = embedding.OpenAIBackend(
 with backend:
     result = backend.embed("Hello world")
     print(f"Dimensions: {len(result.embedding)}")  # 1536
-    print(f"Tokens: {result.prompt_tokens}")       # from API response
+    print(f"Tokens: {result.prompt_tokens}")  # from API response
 
     # Batch embedding
     results = backend.embed_batch(["Text one", "Text two", "Text three"])
@@ -221,7 +221,7 @@ backend = embedding.GoogleBackend(
 with backend:
     result = backend.embed("Hello world")
     print(f"Dimensions: {len(result.embedding)}")  # 3072
-    print(f"Tokens: {result.prompt_tokens}")       # None (use count_tokens)
+    print(f"Tokens: {result.prompt_tokens}")  # None (use count_tokens)
 ```
 
 ### With Retry
@@ -238,11 +238,11 @@ client = EmbeddingClient(
     backend,
     retry=RetryConfig(timeout=120.0),
     model="text-embedding-3-small",  # client-level default
-    dimensions=384,                   # client-level default (per-call overrides win)
+    dimensions=384,  # client-level default (per-call overrides win)
 )
 
 with client:
-    result = client.embed("Hello world")              # uses defaults
+    result = client.embed("Hello world")  # uses defaults
     result = client.embed("Hello world", dimensions=1536)  # per-call override
 ```
 
@@ -285,6 +285,7 @@ through retries and fallbacks:
 
 ```python
 import logging
+
 logging.getLogger("my-app").setLevel(logging.DEBUG)
 ```
 
