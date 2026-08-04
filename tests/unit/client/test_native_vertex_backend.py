@@ -20,6 +20,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from appinfra.dot_dict import DotDict
 
 from llm_infer.client.backends.context import BackendContext, RetryConfig
 from llm_infer.client.backends.vertex_native import (
@@ -415,15 +416,17 @@ class TestNativeVertexFactory:
     """
 
     def test_builds_context_and_auth_from_backend_block(self) -> None:
-        cfg = {
-            "type": "openai",
-            "base_url": "https://us-central1-aiplatform.googleapis.com/v1beta/...",
-            "auth": {"mode": "api_key", "api_key": "test-key-not-a-secret"},
-            "rate_limit": {"per_minute": 120},
-            "retry": {"timeout": 60, "base": 2.0, "factor": 2.0, "max_delay": 10.0},
-            "timeout": 45.0,
-            "service_tier": "priority",
-        }
+        cfg = DotDict(
+            {
+                "type": "openai",
+                "base_url": "https://us-central1-aiplatform.googleapis.com/v1beta/...",
+                "auth": {"mode": "api_key", "api_key": "test-key-not-a-secret"},
+                "rate_limit": {"per_minute": 120},
+                "retry": {"timeout": 60, "base": 2.0, "factor": 2.0, "max_delay": 10.0},
+                "timeout": 45.0,
+                "service_tier": "priority",
+            }
+        )
         backend = NativeVertexFactory(Mock()).create(
             cfg, project="p", region="us-central1"
         )
@@ -438,7 +441,7 @@ class TestNativeVertexFactory:
     def test_raises_when_auth_missing(self) -> None:
         with pytest.raises(ValueError, match="auth"):
             NativeVertexFactory(Mock()).create(
-                {"type": "openai", "base_url": "https://foo"},
+                DotDict({"type": "openai", "base_url": "https://foo"}),
                 project="p",
                 region="us-central1",
             )

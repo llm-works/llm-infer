@@ -101,7 +101,7 @@ lifecycle explicitly.
 from llm_infer.client.backends import NativeVertexFactory
 
 backend = NativeVertexFactory(lg).create(
-    backend_cfg,  # same yaml block shape as the Vertex OpenAI-compat backend
+    config,  # DotDict — same yaml block shape as the Vertex OpenAI-compat backend
     project="my-gcp-project",
     region="us-central1",
 )

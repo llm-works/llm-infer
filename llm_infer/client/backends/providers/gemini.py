@@ -21,12 +21,13 @@ from ...types import ChatRequest, ChatResponse
 from ..auth import AuthProvider
 from ..context import BackendContext
 from ..provider import Provider
+from ..vertex_common import (
+    SERVED_TIER_HEADER,
+    VERTEX_HOST,
+    VERTEX_PRIORITY_HEADER,
+    validate_service_tier,
+)
 from .openai import OpenAICompatibleBackend
-
-_VALID_SERVICE_TIERS = frozenset({"standard", "priority"})
-_VERTEX_HOST = "aiplatform.googleapis.com"
-_VERTEX_PRIORITY_HEADER = "X-Vertex-AI-LLM-Shared-Request-Type"
-_SERVED_TIER_HEADER = "x-gemini-service-tier"
 
 
 class GeminiBackend(OpenAICompatibleBackend):
@@ -63,8 +64,8 @@ class GeminiBackend(OpenAICompatibleBackend):
         super().__init__(
             lg, name, ctx, default_model, base_url, api_key, auth, provider=provider
         )
-        self._service_tier = self._validate_service_tier(service_tier)
-        self._is_vertex = _VERTEX_HOST in self._base_url
+        self._service_tier = validate_service_tier(service_tier)
+        self._is_vertex = VERTEX_HOST in self._base_url
         if self._service_tier == "priority" and not self._is_vertex:
             self._lg.warning(
                 "service_tier='priority' configured against non-Vertex "
@@ -72,27 +73,16 @@ class GeminiBackend(OpenAICompatibleBackend):
                 extra={"backend": name, "base_url": base_url},
             )
 
-    @staticmethod
-    def _validate_service_tier(value: str | None) -> str | None:
-        if value is None:
-            return None
-        if value not in _VALID_SERVICE_TIERS:
-            raise ValueError(
-                f"Invalid service_tier {value!r}; "
-                f"expected one of {sorted(_VALID_SERVICE_TIERS)} or omitted"
-            )
-        return value
-
     def _build_headers(self) -> dict[str, str]:
         headers = super()._build_headers()
         if self._service_tier == "priority" and self._is_vertex:
-            headers[_VERTEX_PRIORITY_HEADER] = "priority"
+            headers[VERTEX_PRIORITY_HEADER] = "priority"
         return headers
 
     async def _build_headers_async(self) -> dict[str, str]:
         headers = await super()._build_headers_async()
         if self._service_tier == "priority" and self._is_vertex:
-            headers[_VERTEX_PRIORITY_HEADER] = "priority"
+            headers[VERTEX_PRIORITY_HEADER] = "priority"
         return headers
 
     def _build_payload(
@@ -155,7 +145,7 @@ class GeminiBackend(OpenAICompatibleBackend):
             or not response.headers
         ):
             return
-        served = response.headers.get(_SERVED_TIER_HEADER)
+        served = response.headers.get(SERVED_TIER_HEADER)
         if served is None or served == "priority":
             return
         self._lg.warning(

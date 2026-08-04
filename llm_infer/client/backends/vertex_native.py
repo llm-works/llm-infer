@@ -40,19 +40,21 @@ import uuid
 from typing import Any
 
 import httpx
+from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from appinfra.rate_limit import RateLimiter
 
 from ..errors import BackendRequestError, BackendUnavailableError
 from ..retry import RetryHelper
 from ..types import ChatRequest, LLMCallbacks
 from .auth import AuthProvider, auth_from_config
-from .context import BackendContext, RetryConfig
+from .context import BackendContext, context_from_config
+from .vertex_common import (
+    SERVED_TIER_HEADER,
+    VERTEX_PRIORITY_HEADER,
+    validate_service_tier,
+)
 
 _PROVIDER = "vertex_native"
-_VERTEX_PRIORITY_HEADER = "X-Vertex-AI-LLM-Shared-Request-Type"
-_SERVED_TIER_HEADER = "x-gemini-service-tier"
-_VALID_SERVICE_TIERS = frozenset({"standard", "priority"})
 
 
 def _make_retry_request(model: str | None) -> ChatRequest:
@@ -95,7 +97,7 @@ class NativeVertexBackend:
         self._auth = auth
         self._project = project
         self._region = region
-        self._service_tier = _validate_service_tier(service_tier)
+        self._service_tier = validate_service_tier(service_tier)
         # Tests inject ``httpx.MockTransport`` via ``transport=`` to intercept
         # without hitting the network. Persistent client amortizes TCP+TLS.
         self._client = httpx.AsyncClient(
@@ -265,7 +267,7 @@ class NativeVertexBackend:
         constant but rides along for uniformity."""
         headers = await self._auth.headers_async()
         if self._service_tier == "priority":
-            headers[_VERTEX_PRIORITY_HEADER] = "priority"
+            headers[VERTEX_PRIORITY_HEADER] = "priority"
         return headers
 
     def _detect_downgrade(self, url: str, resp: httpx.Response) -> None:
@@ -275,7 +277,7 @@ class NativeVertexBackend:
         the OpenAI-compat GeminiBackend."""
         if self._service_tier != "priority":
             return
-        served = resp.headers.get(_SERVED_TIER_HEADER)
+        served = resp.headers.get(SERVED_TIER_HEADER)
         if served is None or served == "priority":
             return
         self._lg.warning(
@@ -307,7 +309,7 @@ class NativeVertexFactory:
 
     def create(
         self,
-        backend_cfg: dict[str, Any],
+        config: DotDict,
         *,
         project: str,
         region: str,
@@ -315,8 +317,8 @@ class NativeVertexFactory:
     ) -> NativeVertexBackend:
         """Build a backend from the yaml block. Raises ``ValueError`` when
         no ``auth`` block is present (native Vertex needs SA credentials)."""
-        ctx = self._create_context(backend_cfg)
-        auth = auth_from_config(self._lg, backend_cfg.get("auth"))
+        ctx = self._create_context(config)
+        auth = auth_from_config(self._lg, config.get("auth"))
         if auth is None:
             raise ValueError(
                 "NativeVertexBackend requires an auth block; got none in backend yaml"
@@ -327,42 +329,12 @@ class NativeVertexFactory:
             auth,
             project=project,
             region=region,
-            service_tier=backend_cfg.get("service_tier"),
+            service_tier=config.get("service_tier"),
             callbacks=callbacks,
         )
 
-    def _create_context(self, backend_cfg: dict[str, Any]) -> BackendContext:
-        return BackendContext(
-            rate_limiter=self._create_rate_limiter(backend_cfg.get("rate_limit")),
-            retry=self._create_retry(backend_cfg.get("retry")),
-            request_timeout=float(backend_cfg.get("timeout", 120.0)),
-        )
-
-    def _create_rate_limiter(self, cfg: dict[str, Any] | None) -> RateLimiter | None:
-        if not cfg:
-            return None
-        return RateLimiter(self._lg, per_minute=cfg.get("per_minute", 60))
-
-    def _create_retry(self, cfg: dict[str, Any] | None) -> RetryConfig | None:
-        if not cfg:
-            return None
-        return RetryConfig(
-            base=cfg.get("base", 1.0),
-            factor=cfg.get("factor", 2.0),
-            max_delay=cfg.get("max_delay", 60.0),
-            timeout=cfg.get("timeout", 0),
-        )
-
-
-def _validate_service_tier(value: str | None) -> str | None:
-    if value is None:
-        return None
-    if value not in _VALID_SERVICE_TIERS:
-        raise ValueError(
-            f"Invalid service_tier {value!r}; "
-            f"expected one of {sorted(_VALID_SERVICE_TIERS)} or omitted"
-        )
-    return value
+    def _create_context(self, config: DotDict) -> BackendContext:
+        return context_from_config(self._lg, config)
 
 
 def _decode_json(
