@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`NativeVertexBackend`** + **`NativeVertexFactory`**: Vertex REST client
+  for `cachedContents` + `generateContent` (sibling to `Backend`, not a
+  subclass). Exposes `cache_create` / `generate_content` / `cache_delete`.
+  `NativeVertexFactory(lg).create(cfg, project=..., region=...)` consumes
+  the same yaml block shape as the OpenAI-compat Vertex path.
 - **Explicit `provider:` in backend config**: yaml backend blocks can
   now set `provider: <name>` to override URL-based auto-detection
   (still the default when absent). Invalid names raise; explicit-vs-
