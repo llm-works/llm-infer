@@ -105,24 +105,26 @@ backend = NativeVertexFactory(lg).create(
     project="my-gcp-project",
     region="us-central1",
 )
-
-name, usage = await backend.cache_create(
-    model="gemini-2.5-flash-lite",
-    system="you are careful",
-    user_text="<large shared prefix>",
-    ttl_seconds=600,
-)
 try:
-    for slice_text in slices:
-        payload = await backend.generate_content(
-            model="gemini-2.5-flash-lite",
-            cache_name=name,
-            user_text=slice_text,
-            generation_config={"temperature": 0.2, "maxOutputTokens": 8192},
-        )
-        ...
+    name, usage = await backend.cache_create(
+        model="gemini-2.5-flash-lite",
+        system="you are careful",
+        user_text="<large shared prefix>",
+        ttl_seconds=600,
+    )
+    try:
+        for slice_text in slices:
+            payload = await backend.generate_content(
+                model="gemini-2.5-flash-lite",
+                cache_name=name,
+                user_text=slice_text,
+                generation_config={"temperature": 0.2, "maxOutputTokens": 8192},
+            )
+            ...
+    finally:
+        await backend.cache_delete(name)
 finally:
-    await backend.cache_delete(name)
+    await backend.aclose()
 ```
 
 Reuses the shared substrate: `RetryHelper` (429/5xx/timeouts), `RateLimiter`,

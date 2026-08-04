@@ -123,7 +123,14 @@ class NativeVertexBackend:
         """Allocate a ``cachedContents`` handle. Returns
         ``(resource_name, usageMetadata)`` — usageMetadata carries
         ``totalTokenCount`` (all tokens written to cache, billed at input
-        rate on Vertex). Empty dict when the field is absent."""
+        rate on Vertex). Empty dict when the field is absent.
+
+        Note: this operation retries on transient errors (429/5xx/timeout).
+        If the server succeeds but the client times out before receiving the
+        response, a retry will create a duplicate cache. The TTL ensures
+        orphaned caches expire; callers needing stricter idempotency should
+        add a ``displayName`` and reconcile before retry.
+        """
         body = {
             "model": self._model_ref(model),
             "systemInstruction": {"parts": [{"text": system}]},
