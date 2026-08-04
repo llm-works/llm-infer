@@ -12,6 +12,7 @@ backends/
 ├── factory.py       # BackendFactory (creates backends from config)
 ├── mixins.py        # AsyncRequestTrackingMixin
 ├── provider.py      # Provider enum, ProviderDetector
+├── vertex_native.py # NativeVertexBackend (sibling — cache lifecycle, not chat())
 └── providers/       # Concrete provider implementations
 ```
 
@@ -82,4 +83,54 @@ tokens = result.prompt_tokens or backend.count_tokens(text)
 - `embedding.OpenAIBackend` - OpenAI /v1/embeddings
 - `embedding.GoogleBackend` - Google Generative AI embedContent
 
+**Native (non-chat lifecycle):**
+- `NativeVertexBackend` - Vertex REST for `cachedContents` + `generateContent`
+
 See `providers/README.md` for provider-specific details.
+
+## NativeVertexBackend
+
+Sibling to `Backend` — does NOT inherit from it and is not routable through
+`BackendFactory`. The Vertex OpenAI-compat surface silently ignores the
+`cachedContent` request field, so explicit context caching requires speaking
+Vertex's native REST directly. Chat-shaped abstract methods don't fit a cache
+lifecycle (allocate → reference N times → delete), and the caller owns that
+lifecycle explicitly.
+
+```python
+from llm_infer.client.backends import NativeVertexFactory
+
+backend = NativeVertexFactory(lg).create(
+    config,  # DotDict — same yaml block shape as the Vertex OpenAI-compat backend
+    project="my-gcp-project",
+    region="us-central1",
+)
+try:
+    name, usage = await backend.cache_create(
+        model="gemini-2.5-flash-lite",
+        system="you are careful",
+        user_text="<large shared prefix>",
+        ttl_seconds=600,
+    )
+    try:
+        for slice_text in slices:
+            payload = await backend.generate_content(
+                model="gemini-2.5-flash-lite",
+                cache_name=name,
+                user_text=slice_text,
+                generation_config={"temperature": 0.2, "maxOutputTokens": 8192},
+            )
+            ...
+    finally:
+        await backend.cache_delete(name)
+finally:
+    await backend.aclose()
+```
+
+Reuses the shared substrate: `RetryHelper` (429/5xx/timeouts), `RateLimiter`,
+`AuthProvider`, and `BackendContext.request_timeout`. Errors surface as
+`BackendRequestError` / `BackendUnavailableError`. `project` and `region` are
+explicit kwargs so a single Vertex backend yaml block can be reused across
+the chat path (`GeminiBackend`) and the native-cache path without duplication.
+Configure `service_tier: priority` in yaml to send the Vertex Priority header;
+observed downgrades log at WARN.

@@ -11,6 +11,7 @@ from .factory import BackendFactory
 from .mixins import AsyncRequestTrackingMixin
 from .provider import Provider, ProviderDetector
 from .providers import AnthropicBackend, GeminiBackend, OpenAICompatibleBackend
+from .vertex_native import NativeVertexBackend, NativeVertexFactory
 
 __all__ = [
     "AnthropicBackend",
@@ -19,6 +20,8 @@ __all__ = [
     "BackendContext",
     "BackendFactory",
     "GeminiBackend",
+    "NativeVertexBackend",
+    "NativeVertexFactory",
     "OpenAICompatibleBackend",
     "Provider",
     "ProviderDetector",

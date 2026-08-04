@@ -6,12 +6,11 @@ from typing import Any
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from appinfra.rate_limit import RateLimiter
 from appinfra.yaml import SecretStr
 
 from .auth import AuthProvider, auth_from_config
 from .base import Backend
-from .context import BackendContext, RetryConfig
+from .context import BackendContext, context_from_config
 from .provider import Provider, ProviderDetector
 
 
@@ -47,33 +46,7 @@ class BackendFactory:
 
     def _create_context(self, config: DotDict) -> BackendContext:
         """Create BackendContext from config."""
-        return BackendContext(
-            rate_limiter=self._create_rate_limiter(config),
-            retry=self._create_retry_config(config),
-            request_timeout=config.get("timeout", 120.0),
-        )
-
-    def _create_rate_limiter(self, config: DotDict) -> RateLimiter | None:
-        """Create RateLimiter from config."""
-        rate_cfg = config.get("rate_limit")
-        if not rate_cfg:
-            return None
-        return RateLimiter(
-            self._lg,
-            per_minute=rate_cfg.get("per_minute", 60),
-        )
-
-    def _create_retry_config(self, config: DotDict) -> RetryConfig | None:
-        """Create RetryConfig from config."""
-        retry_cfg = config.get("retry")
-        if not retry_cfg:
-            return None
-        return RetryConfig(
-            base=retry_cfg.get("base", 1.0),
-            factor=retry_cfg.get("factor", 2.0),
-            max_delay=retry_cfg.get("max_delay", 60.0),
-            timeout=retry_cfg.get("timeout", 0),
-        )
+        return context_from_config(self._lg, config)
 
     def _resolve_provider(
         self,
