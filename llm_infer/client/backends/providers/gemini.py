@@ -20,6 +20,7 @@ from appinfra.yaml import SecretStr
 from ...types import ChatRequest, ChatResponse
 from ..auth import AuthProvider
 from ..context import BackendContext
+from ..provider import Provider
 from .openai import OpenAICompatibleBackend
 
 _VALID_SERVICE_TIERS = frozenset({"standard", "priority"})
@@ -57,8 +58,11 @@ class GeminiBackend(OpenAICompatibleBackend):
         api_key: str | SecretStr | None = None,
         auth: AuthProvider | None = None,
         service_tier: str | None = None,
+        provider: Provider | None = None,
     ) -> None:
-        super().__init__(lg, name, ctx, default_model, base_url, api_key, auth)
+        super().__init__(
+            lg, name, ctx, default_model, base_url, api_key, auth, provider=provider
+        )
         self._service_tier = self._validate_service_tier(service_tier)
         self._is_vertex = _VERTEX_HOST in self._base_url
         if self._service_tier == "priority" and not self._is_vertex:

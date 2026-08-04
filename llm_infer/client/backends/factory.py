@@ -142,6 +142,7 @@ class BackendFactory:
             "default_model": default_model,
             "base_url": base_url,
             "auth": auth,
+            "provider": provider,
         }
 
         if provider == Provider.GOOGLE:

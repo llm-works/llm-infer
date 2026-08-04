@@ -132,7 +132,7 @@ class TestBackendFactoryProviderDetection:
     def test_explicit_provider_google_overrides_url(self, mock_lg: Logger) -> None:
         """Explicit provider=google routes to GeminiBackend even on a URL
         that would auto-detect differently. Mismatch is warned; explicit
-        wins."""
+        wins — and the backend.provider property returns the explicit value."""
         factory = BackendFactory(mock_lg)
         config = DotDict(
             {
@@ -145,6 +145,8 @@ class TestBackendFactoryProviderDetection:
         backend = factory.create("proxied", config)
 
         assert isinstance(backend, GeminiBackend)
+        # Explicit provider must be propagated to the backend instance
+        assert backend.provider == "google"
         mock_lg.warning.assert_called_once()
         _, kwargs = mock_lg.warning.call_args
         assert kwargs["extra"]["backend"] == "proxied"
@@ -177,8 +179,8 @@ class TestBackendFactoryProviderDetection:
         backend.close()
 
     def test_explicit_provider_on_unknown_url_no_warning(self, mock_lg: Logger) -> None:
-        """Explicit provider used on an unrecognized URL — the classifier
-        returns UNKNOWN, which isn't a real disagreement, so no warning."""
+        """Explicit provider on an unrecognized URL — no warning (UNKNOWN isn't
+        a real disagreement), and the backend.provider returns the explicit value."""
         factory = BackendFactory(mock_lg)
         config = DotDict(
             {
@@ -192,6 +194,8 @@ class TestBackendFactoryProviderDetection:
 
         assert isinstance(backend, OpenAICompatibleBackend)
         assert not isinstance(backend, GeminiBackend)
+        # Explicit provider must be propagated — would be "unknown" if auto-detected
+        assert backend.provider == "openai"
         mock_lg.warning.assert_not_called()
         backend.close()
 
