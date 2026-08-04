@@ -41,13 +41,6 @@ class TestProviderDetector:
             == Provider.GOOGLE
         )
 
-    def test_detect_azure_from_url(self) -> None:
-        """Test Azure detection from URL."""
-        assert (
-            ProviderDetector.detect("https://myresource.openai.azure.com/v1")
-            == Provider.AZURE
-        )
-
     def test_detect_local_from_url(self) -> None:
         """Test local detection from URL."""
         assert ProviderDetector.detect("http://localhost:8000/v1") == Provider.LOCAL
@@ -87,7 +80,6 @@ class TestProviderEnum:
         assert Provider.OPENAI.value == "openai"
         assert Provider.XAI.value == "xai"
         assert Provider.GOOGLE.value == "google"
-        assert Provider.AZURE.value == "azure"
         assert Provider.LOCAL.value == "local"
         assert Provider.UNKNOWN.value == "unknown"
 

@@ -726,7 +726,7 @@ def _parse_adapter_info(data: dict[str, Any] | None) -> AdapterInfo | None:
 class OpenAIEmbeddingBackend(EmbeddingBackend):
     """OpenAI-compatible embedding backend.
 
-    Works with OpenAI, Azure OpenAI, and any API following the /v1/embeddings format.
+    Works with OpenAI and any API following the /v1/embeddings format.
 
     Example:
         backend = OpenAIEmbeddingBackend(

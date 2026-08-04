@@ -129,6 +129,86 @@ class TestBackendFactoryProviderDetection:
         assert not isinstance(backend, GeminiBackend)
         backend.close()
 
+    def test_explicit_provider_google_overrides_url(self, mock_lg: Logger) -> None:
+        """Explicit provider=google routes to GeminiBackend even on a URL
+        that would auto-detect differently. Mismatch is warned; explicit
+        wins."""
+        factory = BackendFactory(mock_lg)
+        config = DotDict(
+            {
+                "type": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "provider": "google",
+            }
+        )
+
+        backend = factory.create("proxied", config)
+
+        assert isinstance(backend, GeminiBackend)
+        mock_lg.warning.assert_called_once()
+        _, kwargs = mock_lg.warning.call_args
+        assert kwargs["extra"]["backend"] == "proxied"
+        assert kwargs["extra"]["provider"] == {
+            "explicit": "google",
+            "detected": "openai",
+        }
+        # base_url must not leak into the log — see factory._resolve_provider
+        assert "base_url" not in kwargs["extra"]
+        backend.close()
+
+    def test_explicit_provider_matches_detected_no_warning(
+        self, mock_lg: Logger
+    ) -> None:
+        """Explicit provider matching auto-detect stays silent."""
+        factory = BackendFactory(mock_lg)
+        config = DotDict(
+            {
+                "type": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "provider": "openai",
+            }
+        )
+
+        backend = factory.create("openai", config)
+
+        assert isinstance(backend, OpenAICompatibleBackend)
+        assert not isinstance(backend, GeminiBackend)
+        mock_lg.warning.assert_not_called()
+        backend.close()
+
+    def test_explicit_provider_on_unknown_url_no_warning(self, mock_lg: Logger) -> None:
+        """Explicit provider used on an unrecognized URL — the classifier
+        returns UNKNOWN, which isn't a real disagreement, so no warning."""
+        factory = BackendFactory(mock_lg)
+        config = DotDict(
+            {
+                "type": "openai_compatible",
+                "base_url": "https://some-custom-provider.example.com/v1",
+                "provider": "openai",
+            }
+        )
+
+        backend = factory.create("custom", config)
+
+        assert isinstance(backend, OpenAICompatibleBackend)
+        assert not isinstance(backend, GeminiBackend)
+        mock_lg.warning.assert_not_called()
+        backend.close()
+
+    def test_explicit_provider_invalid_raises(self, mock_lg: Logger) -> None:
+        """Invalid provider name raises ValueError listing valid options."""
+        factory = BackendFactory(mock_lg)
+        config = DotDict(
+            {
+                "type": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "provider": "nonexistent",
+            }
+        )
+
+        with pytest.raises(ValueError, match="invalid provider 'nonexistent'"):
+            factory.create("bad", config)
+
 
 class TestBackendFactoryAuth:
     """Test BackendFactory's auth: config block parsing."""
