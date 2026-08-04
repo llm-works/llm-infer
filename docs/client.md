@@ -301,6 +301,9 @@ backends:
     base_url: http://localhost:8000/v1
     model: qwen2.5-72b
     timeout: 120.0
+    # provider: <name>  # optional; overrides URL-based auto-detection.
+                        # Valid: anthropic, openai, xai, google, local, unknown.
+                        # Mismatch with URL-detected value logs a WARN.
     # Per-backend overrides (optional)
     rate_limit:
       per_minute: 120

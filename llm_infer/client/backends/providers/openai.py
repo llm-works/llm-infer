@@ -46,7 +46,7 @@ from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
 from ..embedding import BatchEmbeddingResult, EmbeddingResult
 from ..mixins import AsyncRequestTrackingMixin
-from ..provider import ProviderDetector
+from ..provider import Provider, ProviderDetector
 
 
 class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
@@ -61,6 +61,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         base_url: str = "http://localhost:8000/v1",
         api_key: str | SecretStr | None = None,
         auth: AuthProvider | None = None,
+        provider: Provider | None = None,
     ) -> None:
         """Initialize the backend.
 
@@ -75,6 +76,9 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                 when ``auth`` is provided.
             auth: Auth provider. Takes precedence over ``api_key``. Use this
                 for non-static auth schemes (e.g. ``GCPServiceAccountAuth``).
+            provider: Explicit provider override. When set, skips URL/key-based
+                auto-detection. Used by :class:`BackendFactory` to honor the
+                ``provider:`` config field.
         """
         super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
@@ -82,9 +86,11 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         if auth is None and ensured_key is not None:
             auth = StaticAPIKeyAuth(ensured_key)
         self._auth = auth
-        # Provider detection needs the raw prefix; reveal into a local only.
-        detect_key = ensured_key.reveal() if ensured_key is not None else None
-        self._provider = ProviderDetector.detect(base_url, detect_key)
+        if provider is not None:
+            self._provider = provider
+        else:
+            detect_key = ensured_key.reveal() if ensured_key is not None else None
+            self._provider = ProviderDetector.detect(base_url, detect_key)
         self._last_response: ChatResponse | None = None
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
@@ -726,7 +732,7 @@ def _parse_adapter_info(data: dict[str, Any] | None) -> AdapterInfo | None:
 class OpenAIEmbeddingBackend(EmbeddingBackend):
     """OpenAI-compatible embedding backend.
 
-    Works with OpenAI, Azure OpenAI, and any API following the /v1/embeddings format.
+    Works with OpenAI and any API following the /v1/embeddings format.
 
     Example:
         backend = OpenAIEmbeddingBackend(

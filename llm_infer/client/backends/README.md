@@ -74,7 +74,7 @@ tokens = result.prompt_tokens or backend.count_tokens(text)
 ## Available Backends
 
 **Chat:**
-- `OpenAICompatibleBackend` - OpenAI, Azure, vLLM, any /v1/chat/completions
+- `OpenAICompatibleBackend` - OpenAI, vLLM, any /v1/chat/completions
 - `AnthropicBackend` - Native Claude API
 - `GeminiBackend` - Google Gemini (OpenAI-compatible wrapper)
 

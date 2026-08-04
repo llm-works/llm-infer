@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Explicit `provider:` in backend config**: yaml backend blocks can
+  now set `provider: <name>` to override URL-based auto-detection
+  (still the default when absent). Invalid names raise; explicit-vs-
+  detected mismatch logs a WARN and honors the explicit value.
 - **`on_retry` callback** on `LLMCallbacks` and `EmbeddingCallbacks`. Fires
   once per transient retry before the backoff sleep with
   `(request, exception, attempt, delay_seconds)` — raw exception, so callers
@@ -64,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fallback on rate limit**: `FallbackClient` now falls back to the paired
   model when a 429 persists past the backend's retry budget (previously 429
   never triggered fallback). Without `retry`, fallback engages immediately.
+
+### Removed
+
+- **`Provider.AZURE`**: unused enum entry — no code branched on it and
+  no Azure-specific dispatch existed. URL pattern for `openai.azure.com`
+  removed alongside. Azure OpenAI endpoints still work via
+  `OpenAICompatibleBackend` (they always did — the enum entry was
+  passive metadata).
 
 ### Fixed
 

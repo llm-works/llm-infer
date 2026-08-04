@@ -21,7 +21,6 @@ class Provider(StrEnum):
     OPENAI = "openai"
     XAI = "xai"
     GOOGLE = "google"
-    AZURE = "azure"
     LOCAL = "local"
     UNKNOWN = "unknown"
 
@@ -41,7 +40,6 @@ class ProviderDetector:
         ("api.x.ai", Provider.XAI),
         ("generativelanguage.googleapis.com", Provider.GOOGLE),
         ("aiplatform.googleapis.com", Provider.GOOGLE),
-        ("openai.azure.com", Provider.AZURE),
         ("localhost", Provider.LOCAL),
         ("127.0.0.1", Provider.LOCAL),
         ("0.0.0.0", Provider.LOCAL),

@@ -75,6 +75,46 @@ class BackendFactory:
             timeout=retry_cfg.get("timeout", 0),
         )
 
+    def _resolve_provider(
+        self,
+        name: str,
+        config: DotDict,
+        base_url: str,
+        api_key: str | None,
+    ) -> Provider:
+        """Return the provider for this backend.
+
+        Precedence: explicit ``config.provider`` wins; otherwise fall back
+        to URL/key auto-detection via :class:`ProviderDetector`. When both
+        yield a known value and disagree, WARN and honor the explicit
+        setting — the user's config is authoritative, but the mismatch is
+        surfaced for debugging (typical cause: wrong ``base_url``).
+        """
+        detected = ProviderDetector.detect(base_url, api_key)
+        explicit_raw = config.get("provider")
+        if explicit_raw is None:
+            return detected
+        try:
+            explicit = Provider(explicit_raw)
+        except ValueError as e:
+            valid = sorted(p.value for p in Provider)
+            raise ValueError(
+                f"Backend {name!r}: invalid provider {explicit_raw!r}; "
+                f"expected one of {valid}"
+            ) from e
+        if detected is not Provider.UNKNOWN and explicit is not detected:
+            self._lg.warning(
+                "backend provider explicit vs auto-detect mismatch; using explicit",
+                extra={
+                    "backend": name,
+                    "provider": {
+                        "explicit": explicit.value,
+                        "detected": detected.value,
+                    },
+                },
+            )
+        return explicit
+
     def _create_openai(
         self,
         name: str,
@@ -84,15 +124,16 @@ class BackendFactory:
     ) -> Backend:
         """Create OpenAI-compatible backend.
 
-        Detects provider from URL/key and returns specialized backend if available
-        (e.g., GeminiBackend for Google).
+        Resolves the provider (explicit ``config.provider`` if set, else
+        URL/key auto-detection) and returns a specialized backend when the
+        provider has one (e.g. GeminiBackend for Google).
         """
         base_url = config.get("base_url", "http://localhost:8000/v1")
         api_key = SecretStr.ensure(config.get("api_key"))
         auth = self._create_auth(config, api_key=api_key)
         # Provider detection uses the raw prefix; reveal into a local only.
         detect_key = api_key.reveal() if api_key is not None else None
-        provider = ProviderDetector.detect(base_url, detect_key)
+        provider = self._resolve_provider(name, config, base_url, detect_key)
 
         kwargs: dict[str, Any] = {
             "lg": self._lg,
@@ -101,6 +142,7 @@ class BackendFactory:
             "default_model": default_model,
             "base_url": base_url,
             "auth": auth,
+            "provider": provider,
         }
 
         if provider == Provider.GOOGLE:
