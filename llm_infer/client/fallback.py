@@ -104,7 +104,9 @@ class FallbackClient(ChatClient):
                 served by more than one backend. Use ``model@backend`` to
                 disambiguate.
             ConfigError: If a ``model@backend`` reference names an unknown
-                backend, or if a ref is malformed (empty side of ``@``).
+                backend.
+            ValueError: If a ref is malformed (empty model or backend in
+                ``model@backend`` syntax).
         """
         self._lg = lg
         self._router = router
