@@ -176,6 +176,28 @@ engages like any other transient error. A backend configured without `retry`
 falls back on its first transient error — a warning is logged at construction.
 Cycles (A->B->A) are detected and retried round-robin until one succeeds.
 
+#### Pinning a fallback to a backend (`model@backend`)
+
+Keys and values may take the form `model@backend` to pin a fallback step to a
+specific backend. `@` is used rather than `/` to avoid clashing with
+OpenRouter's `provider/model` names. When the same model is served by more
+than one backend, `FallbackClient` raises `FallbackAmbiguityError` at
+construction and requires the caller to disambiguate:
+
+```python
+# gpt-4o is served by two backends: qualify to pick one
+fallbacks = {
+    "gpt-4o@openai_primary": "gpt-4o@openai_backup",
+    "gpt-4o@openai_backup": "claude-sonnet-4-20250514",
+}
+```
+
+Lookup is qualified-first: at each step `FallbackClient` first tries
+`f"{model}@{resolved_backend}"` before falling back to the bare key, so bare
+and qualified entries mix cleanly within a single map. Ambiguity is checked
+eagerly at `__init__` (backend catalogs are probed once and cached), which
+surfaces misconfiguration at wire-up instead of at 3 AM.
+
 ## Embeddings
 
 Generate vector embeddings with OpenAI or Google backends.
