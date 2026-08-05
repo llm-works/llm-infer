@@ -53,7 +53,7 @@ class BackendFactory:
         elif backend_type in NON_CHAT_BACKEND_TYPES:
             raise ValueError(
                 f"Backend {name!r} has non-chat type {backend_type!r}; "
-                f"use BackendFactory.create_{backend_type}() instead"
+                f"use Factory.vertex_natives_from_config() to build these entries"
             )
         else:
             raise ValueError(f"Unknown backend type: {backend_type}")

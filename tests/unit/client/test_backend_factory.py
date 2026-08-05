@@ -398,5 +398,5 @@ class TestBackendFactoryVertexNative:
                 "auth": {"mode": "api_key", "api_key": "k"},
             }
         )
-        with pytest.raises(ValueError, match="create_vertex_native"):
+        with pytest.raises(ValueError, match="vertex_natives_from_config"):
             factory.create("vertex_direct", cfg)

@@ -245,16 +245,63 @@ class Factory:
         retry_config = config.get("retry")
 
         result: dict[str, NativeVertexBackend] = {}
-        for name, cfg in backends_config.items():
-            if not cfg.get("enabled", True):
-                continue
-            if cfg.get("type") != "vertex_native":
-                continue
-            merged = self._merge_backend_config(cfg, rate_limit_config, retry_config)
-            result[name] = self._backend_factory.create_vertex_native(
-                name, DotDict(merged), callbacks=callbacks
-            )
+        try:
+            for name, cfg in backends_config.items():
+                if not cfg.get("enabled", True):
+                    continue
+                if cfg.get("type") != "vertex_native":
+                    continue
+                merged = self._merge_backend_config(
+                    cfg, rate_limit_config, retry_config
+                )
+                result[name] = self._backend_factory.create_vertex_native(
+                    name, DotDict(merged), callbacks=callbacks
+                )
+        except Exception:
+            for backend in result.values():
+                try:
+                    backend.close()
+                except Exception as e:
+                    self._lg.warning(
+                        "Error closing backend during cleanup", extra={"exception": e}
+                    )
+            raise
         return result
+
+    def vertex_native_from_backend_config(
+        self,
+        config: dict[str, Any],
+        name: str = "default",
+        callbacks: LLMCallbacks | None = None,
+    ) -> NativeVertexBackend:
+        """Create a single :class:`NativeVertexBackend` from a backend config.
+
+        Symmetric with :meth:`from_backend_config` for chat backends. Use when
+        constructing a single vertex_native backend directly rather than
+        extracting from :meth:`vertex_natives_from_config`.
+
+        Args:
+            config: Backend config dict. Must contain ``type: vertex_native``,
+                ``project``, ``region``, and ``auth`` sub-block.
+            name: Backend name — used in error messages and log ``extra``.
+            callbacks: Optional lifecycle callbacks (retry / error).
+
+        Returns:
+            Configured :class:`NativeVertexBackend` instance.
+
+        Raises:
+            ValueError: If ``project`` / ``region`` / ``auth`` is missing, or
+                if ``type`` is not ``vertex_native``.
+        """
+        backend_type = config.get("type")
+        if backend_type != "vertex_native":
+            raise ValueError(
+                f"vertex_native_from_backend_config requires type: vertex_native, "
+                f"got {backend_type!r}"
+            )
+        return self._backend_factory.create_vertex_native(
+            name, DotDict(config), callbacks=callbacks
+        )
 
     def _create_single_backend_router(
         self,
