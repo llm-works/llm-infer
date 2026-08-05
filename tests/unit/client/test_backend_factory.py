@@ -9,7 +9,7 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.yaml import SecretStr
 
-from llm_infer.client.backends import BackendFactory
+from llm_infer.client.backends import BackendFactory, NativeVertexBackend
 from llm_infer.client.backends.auth import (
     GCPServiceAccountAuth,
     StaticAPIKeyAuth,
@@ -320,3 +320,83 @@ class TestBackendFactoryAuth:
         assert backend._auth is None
         assert "Authorization" not in backend._build_headers()
         backend.close()
+
+
+class TestBackendFactoryVertexNative:
+    """``create_vertex_native`` reads ``project`` / ``region`` from yaml
+    and delegates to ``NativeVertexFactory`` — sibling surface to the chat
+    ``create()`` dispatch. ``create()`` itself rejects a ``type:
+    vertex_native`` block pointing callers at the right accessor."""
+
+    def test_reads_project_and_region_from_yaml(self, mock_lg: Logger) -> None:
+        factory = BackendFactory(mock_lg)
+        cfg = DotDict(
+            {
+                "type": "vertex_native",
+                "project": "my-proj",
+                "region": "us-central1",
+                "auth": {"mode": "api_key", "api_key": "k"},
+                "timeout": 45.0,
+                "rate_limit": {"per_minute": 120},
+                "service_tier": "priority",
+            }
+        )
+        backend = factory.create_vertex_native("vertex_direct", cfg)
+        assert isinstance(backend, NativeVertexBackend)
+        assert backend._project == "my-proj"
+        assert backend._region == "us-central1"
+        assert backend._ctx.request_timeout == 45.0
+        assert backend._service_tier == "priority"
+
+    def test_missing_project_raises(self, mock_lg: Logger) -> None:
+        factory = BackendFactory(mock_lg)
+        cfg = DotDict(
+            {
+                "type": "vertex_native",
+                "region": "us-central1",
+                "auth": {"mode": "api_key", "api_key": "k"},
+            }
+        )
+        with pytest.raises(ValueError, match="project.*region.*are required"):
+            factory.create_vertex_native("vertex_direct", cfg)
+
+    def test_missing_region_raises(self, mock_lg: Logger) -> None:
+        factory = BackendFactory(mock_lg)
+        cfg = DotDict(
+            {
+                "type": "vertex_native",
+                "project": "my-proj",
+                "auth": {"mode": "api_key", "api_key": "k"},
+            }
+        )
+        with pytest.raises(ValueError, match="project.*region.*are required"):
+            factory.create_vertex_native("vertex_direct", cfg)
+
+    def test_missing_auth_raises(self, mock_lg: Logger) -> None:
+        # NativeVertexFactory itself enforces this; verify create_vertex_native
+        # propagates the failure at wire-up rather than swallowing it.
+        factory = BackendFactory(mock_lg)
+        cfg = DotDict(
+            {
+                "type": "vertex_native",
+                "project": "my-proj",
+                "region": "us-central1",
+            }
+        )
+        with pytest.raises(ValueError, match="auth"):
+            factory.create_vertex_native("vertex_direct", cfg)
+
+    def test_create_rejects_vertex_native_type(self, mock_lg: Logger) -> None:
+        # A yaml misfiring on the chat dispatch should point at the right
+        # accessor rather than silently creating a broken chat backend.
+        factory = BackendFactory(mock_lg)
+        cfg = DotDict(
+            {
+                "type": "vertex_native",
+                "project": "my-proj",
+                "region": "us-central1",
+                "auth": {"mode": "api_key", "api_key": "k"},
+            }
+        )
+        with pytest.raises(ValueError, match="create_vertex_native"):
+            factory.create("vertex_direct", cfg)

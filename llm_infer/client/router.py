@@ -225,7 +225,10 @@ class LLMRouter(ChatClient):
             if backend not in self._clients:
                 available = list(self._clients.keys())
                 raise ValueError(
-                    f"Backend '{backend}' not found. Available: {available}"
+                    f"Chat backend '{backend}' not found. "
+                    f"Available chat backends: {available}. "
+                    f"Non-chat backends (e.g. type: vertex_native) live in "
+                    f"their own Factory accessor, not the router."
                 )
             return backend
 

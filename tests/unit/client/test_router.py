@@ -173,7 +173,7 @@ class TestLLMRouterRouting:
         client_a = make_client(mock_lg, "a", [ChatResponse(content="A")])
         router = LLMRouter(mock_lg, {"a": client_a}, "a")
 
-        with pytest.raises(ValueError, match="Backend 'unknown' not found"):
+        with pytest.raises(ValueError, match="Chat backend 'unknown' not found"):
             router.chat([{"role": "user", "content": "Hi"}], backend="unknown")
 
     def test_chat_stream_routes_correctly(self, mock_lg: Logger) -> None:
@@ -409,7 +409,7 @@ class TestLLMRouterCanCall:
         client = LLMClient(lg=mock_lg, backend=backend)
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
-        with pytest.raises(ValueError, match="Backend 'unknown' not found"):
+        with pytest.raises(ValueError, match="Chat backend 'unknown' not found"):
             router.can_call(backend="unknown")
 
 
@@ -506,7 +506,7 @@ class TestLLMRouterResolve:
         client = make_client(mock_lg, "main")
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
-        with pytest.raises(ValueError, match="Backend 'unknown' not found"):
+        with pytest.raises(ValueError, match="Chat backend 'unknown' not found"):
             router.resolve(backend="unknown")
 
 

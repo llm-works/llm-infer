@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`type: vertex_native` in the shared `backends:` yaml**: native Vertex
+  entries live alongside chat backends, with `project` / `region` as yaml
+  fields. Build via `Factory.vertex_natives_from_config(cfg)`; `from_config`
+  skips these entries when constructing the router.
 - **`model@backend` syntax in `FallbackClient` maps**: pin a fallback step
   to a specific backend when a model is served by more than one. Ambiguity
   in bare refs raises `FallbackAmbiguityError` at construction, listing the
