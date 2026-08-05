@@ -281,12 +281,13 @@ class TestMidDrainWholeFallback:
                 _cache_ok(),
                 _generate_ok("claims-result"),  # slice 1 succeeds on native
                 _resp(500, {"error": "boom"}),  # slice 2 fails
-                _generate_ok("questions-result"),  # scripted but MUST NOT be called
+                _generate_ok("questions-result"),  # slice 3 may or may not run
                 _delete_ok(),
             ]
         )
-        # gather() cancels the third generate_content task as soon as the
-        # second raises, so the scripted third response goes unused.
+        # Note: gather() behavior with exceptions depends on task scheduling.
+        # The third task may or may not start before the second raises.
+        # The whole-drain pattern catches any BackendError and falls back.
         fallback = _mock_fallback_chat(["fb-claims", "fb-entities", "fb-questions"])
 
         results = await _run_whole_drain_with_fallback(

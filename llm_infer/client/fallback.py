@@ -46,7 +46,7 @@ from .client import LLMClient
 from .errors import BackendError, ConfigError, FallbackAmbiguityError
 from .fallback_helper import detect_cycles, parse_fallback_key
 from .log_utils import fmt_error
-from .router import LLMRouter
+from .router import LLMRouter, ResolvedTarget
 from .strategy import DefaultTransientDetector, TransientAction, TransientDetector
 from .types import (
     ChatRequest,
@@ -134,11 +134,12 @@ class FallbackClient(ChatClient):
         that no ref is malformed. Skipped when the router does not expose the
         ``discovery`` and ``clients`` surfaces (e.g., test doubles).
 
-        Probes each referenced backend's model catalog once via
-        ``ModelDiscovery.get_models_for_backend`` — cached, so subsequent
-        routing lookups benefit. Probe failures are treated as empty catalogs
-        (a backend that can't be reached at wire-up will surface a real error
-        at first use, not here).
+        When the map contains bare refs, probes every configured backend's
+        model catalog once via ``ModelDiscovery.get_models_for_backend`` —
+        all backends are checked because any of them may serve a bare model.
+        Results are cached, so subsequent routing lookups benefit. Probe
+        failures are treated as empty catalogs (a backend that can't be
+        reached at wire-up will surface a real error at first use, not here).
         """
         discovery = getattr(self._router, "discovery", None)
         clients = getattr(self._router, "clients", None)
@@ -214,18 +215,30 @@ class FallbackClient(ChatClient):
 
     def _resolve_target(
         self, current_key: str | None
-    ) -> tuple[LLMClient, str | None, str]:
-        """Split ``current_key`` and resolve to (client, resolved_model, backend).
+    ) -> tuple[LLMClient, ResolvedTarget, str]:
+        """Split ``current_key`` and resolve to (client, resolved, effective_key).
 
         When ``current_key`` contains ``@``, the backend part is passed as an
         explicit override to the router (highest routing priority).
+
+        When ``current_key`` is None (caller omitted model), returns the
+        router-resolved model as ``effective_key`` so fallback lookup uses
+        the actual model, not the string ``"None"``.
         """
         model, backend_hint = (
             parse_fallback_key(current_key) if current_key is not None else (None, None)
         )
         resolved = self._router.resolve(model=model, backend=backend_hint)
         client = self._router.get_client(backend=resolved.backend)
-        return client, resolved.model, resolved.backend
+        if current_key is not None:
+            effective_key = current_key
+        elif resolved.model is not None:
+            effective_key = resolved.model
+        else:
+            # No model specified and router has no default — fallback can't engage.
+            # Use empty string; lookup will find nothing and chain exhausts.
+            effective_key = ""
+        return client, resolved, effective_key
 
     def _warn_backends_without_retry(self) -> None:
         """Warn for backends without retry config.
@@ -348,23 +361,25 @@ class FallbackClient(ChatClient):
 
     def _chat_with_fallback(self, request: ChatRequest) -> ChatResponse:
         """Execute chat with fallback, following pairs until success or no fallback."""
-        current_key = request.model
-        original_key = current_key
+        current_key: str | None = request.model
+        original_key: str | None = None
         attempt = 0
 
         while True:
             attempt += 1
-            client, resolved_model, resolved_backend = self._resolve_target(current_key)
-            req = dataclasses.replace(request, model=resolved_model)
+            client, resolved, effective_key = self._resolve_target(current_key)
+            if original_key is None:
+                original_key = effective_key
+            req = dataclasses.replace(request, model=resolved.model)
             try:
                 return client._chat(req)
             except BackendError as e:
                 if not self._should_fallback(e):
                     raise
                 next_key = self._next_or_exhaust(
-                    str(current_key), resolved_backend, original_key, e
+                    effective_key, resolved.backend, original_key, e
                 )
-                self._log_fallback(str(current_key), next_key, e, attempt)
+                self._log_fallback(effective_key, next_key, e, attempt)
                 current_key = next_key
 
     def chat_stream(
@@ -402,15 +417,17 @@ class FallbackClient(ChatClient):
         self, request: ChatRequest, holder: ResponseHolder
     ) -> Iterator[str]:
         """Execute streaming chat with fallback, following pairs."""
-        current_key = request.model
-        original_key = current_key
+        current_key: str | None = request.model
+        original_key: str | None = None
         attempt = 0
 
         while True:
             attempt += 1
             streamed = False
-            client, resolved_model, resolved_backend = self._resolve_target(current_key)
-            req = dataclasses.replace(request, model=resolved_model)
+            client, resolved, effective_key = self._resolve_target(current_key)
+            if original_key is None:
+                original_key = effective_key
+            req = dataclasses.replace(request, model=resolved.model)
             try:
                 for token in client._chat_stream(req, holder):
                     streamed = True
@@ -420,9 +437,9 @@ class FallbackClient(ChatClient):
                 if streamed or not self._should_fallback(e):
                     raise
                 next_key = self._next_or_exhaust(
-                    str(current_key), resolved_backend, original_key, e
+                    effective_key, resolved.backend, original_key, e
                 )
-                self._log_fallback(str(current_key), next_key, e, attempt)
+                self._log_fallback(effective_key, next_key, e, attempt)
                 current_key = next_key
 
     # =========================================================================
@@ -461,23 +478,25 @@ class FallbackClient(ChatClient):
 
     async def _chat_async_with_fallback(self, request: ChatRequest) -> ChatResponse:
         """Execute async chat with fallback, following pairs until success or no fallback."""
-        current_key = request.model
-        original_key = current_key
+        current_key: str | None = request.model
+        original_key: str | None = None
         attempt = 0
 
         while True:
             attempt += 1
-            client, resolved_model, resolved_backend = self._resolve_target(current_key)
-            req = dataclasses.replace(request, model=resolved_model)
+            client, resolved, effective_key = self._resolve_target(current_key)
+            if original_key is None:
+                original_key = effective_key
+            req = dataclasses.replace(request, model=resolved.model)
             try:
                 return await client._chat_async(req)
             except BackendError as e:
                 if not self._should_fallback(e):
                     raise
                 next_key = self._next_or_exhaust(
-                    str(current_key), resolved_backend, original_key, e
+                    effective_key, resolved.backend, original_key, e
                 )
-                self._log_fallback(str(current_key), next_key, e, attempt)
+                self._log_fallback(effective_key, next_key, e, attempt)
                 current_key = next_key
 
     def chat_stream_async(
@@ -515,15 +534,17 @@ class FallbackClient(ChatClient):
         self, request: ChatRequest, holder: ResponseHolder
     ) -> AsyncIterator[str]:
         """Execute async streaming chat with fallback, following pairs."""
-        current_key = request.model
-        original_key = current_key
+        current_key: str | None = request.model
+        original_key: str | None = None
         attempt = 0
 
         while True:
             attempt += 1
             streamed = False
-            client, resolved_model, resolved_backend = self._resolve_target(current_key)
-            req = dataclasses.replace(request, model=resolved_model)
+            client, resolved, effective_key = self._resolve_target(current_key)
+            if original_key is None:
+                original_key = effective_key
+            req = dataclasses.replace(request, model=resolved.model)
             try:
                 async for token in client._chat_stream_async(req, holder):
                     streamed = True
@@ -533,9 +554,9 @@ class FallbackClient(ChatClient):
                 if streamed or not self._should_fallback(e):
                     raise
                 next_key = self._next_or_exhaust(
-                    str(current_key), resolved_backend, original_key, e
+                    effective_key, resolved.backend, original_key, e
                 )
-                self._log_fallback(str(current_key), next_key, e, attempt)
+                self._log_fallback(effective_key, next_key, e, attempt)
                 current_key = next_key
 
     # =========================================================================
