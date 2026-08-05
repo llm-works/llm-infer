@@ -41,9 +41,12 @@ from appinfra.yaml import SecretStr
 
 from .backends import Backend, BackendContext, BackendFactory, RetryConfig
 from .backends.auth import AuthProvider, auth_from_config
+from .backends.factory import NON_CHAT_BACKEND_TYPES
+from .backends.vertex_native import NativeVertexBackend
 from .client import LLMClient
 from .discovery import ModelDiscovery
 from .embedding import EmbeddingCallbacks, EmbeddingClient
+from .errors import ConfigError
 from .router import LLMRouter
 from .types import LLMCallbacks
 
@@ -161,14 +164,146 @@ class Factory:
                 callbacks,
             )
 
+        default_name = config.get("default")
+        chat_configs = self._chat_configs_only(backends_config, default_name)
+
         return self._create_multi_backend_router(
-            backends_config,
-            config.get("default"),
+            chat_configs,
+            default_name,
             discover_models,
             rate_limit_config,
             retry_config,
             strategy,
             callbacks,
+        )
+
+    def _chat_configs_only(
+        self,
+        backends_config: dict[str, dict[str, Any]],
+        default_name: str | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Return only entries with a chat ``type:``; DEBUG-log the rest.
+
+        Non-chat types (see :data:`NON_CHAT_BACKEND_TYPES`) are built by
+        dedicated accessors (e.g. :meth:`vertex_natives_from_config`) and
+        never enter the :class:`~..router.LLMRouter`. Raises
+        :class:`ConfigError` when ``default:`` points at a non-chat entry
+        or when all enabled backends are non-chat types.
+        """
+        chat_configs: dict[str, dict[str, Any]] = {}
+        non_chat_names: list[str] = []
+        for name, cfg in backends_config.items():
+            if not cfg.get("enabled", True):
+                continue
+            backend_type = cfg.get("type", "openai_compatible")
+            if backend_type in NON_CHAT_BACKEND_TYPES:
+                if name == default_name:
+                    raise ConfigError(
+                        f"Default backend {name!r} has non-chat type "
+                        f"{backend_type!r}; 'default:' must reference a "
+                        f"chat backend"
+                    )
+                self._lg.debug(
+                    "backend excluded from LLMRouter (non-chat type)",
+                    extra={"backend": name, "type": backend_type},
+                )
+                non_chat_names.append(name)
+                continue
+            chat_configs[name] = cfg
+        if not chat_configs and non_chat_names:
+            raise ConfigError(
+                f"No chat backends in config — only non-chat types found: "
+                f"{non_chat_names}. Use vertex_natives_from_config() for "
+                f"vertex_native backends; from_config() builds the chat router."
+            )
+        return chat_configs
+
+    def vertex_natives_from_config(
+        self,
+        config: dict[str, Any],
+        callbacks: LLMCallbacks | None = None,
+    ) -> dict[str, NativeVertexBackend]:
+        """Build all ``type: vertex_native`` backends from a shared config.
+
+        Reads the same top-level ``config`` shape :meth:`from_config`
+        consumes. Chat entries are ignored — build them with
+        :meth:`from_config`. Disabled entries are dropped. Global
+        ``rate_limit`` / ``retry`` merge into each per-backend block the
+        same way :meth:`from_config` merges them for chat backends
+        (per-backend wins on conflict).
+
+        Args:
+            config: Full config dict (same shape as :meth:`from_config`).
+            callbacks: Optional lifecycle callbacks; applied to every
+                returned backend.
+
+        Returns:
+            Mapping of backend name -> :class:`NativeVertexBackend`. Empty
+            if the config has no ``type: vertex_native`` entries.
+
+        Raises:
+            ValueError: If a vertex_native block is missing ``project`` /
+                ``region`` / ``auth`` — surfaces at wire-up, not first
+                call. Backends already built in this call are dropped;
+                httpx's finalizer reclaims their sockets.
+        """
+        backends_config = config.get("backends", {})
+        rate_limit_config = config.get("rate_limit")
+        retry_config = config.get("retry")
+
+        result: dict[str, NativeVertexBackend] = {}
+        try:
+            for name, cfg in backends_config.items():
+                if not cfg.get("enabled", True):
+                    continue
+                if cfg.get("type") != "vertex_native":
+                    continue
+                merged = self._merge_backend_config(
+                    cfg, rate_limit_config, retry_config
+                )
+                result[name] = self._backend_factory.create_vertex_native(
+                    name, DotDict(merged), callbacks=callbacks
+                )
+        except Exception:
+            # Already-created backends haven't made requests yet — no open
+            # connections to close. Let GC reclaim them; httpx.AsyncClient
+            # has no sync close and async cleanup isn't available here.
+            raise
+        return result
+
+    def vertex_native_from_backend_config(
+        self,
+        config: dict[str, Any],
+        name: str = "default",
+        callbacks: LLMCallbacks | None = None,
+    ) -> NativeVertexBackend:
+        """Create a single :class:`NativeVertexBackend` from a backend config.
+
+        Symmetric with :meth:`from_backend_config` for chat backends. Use when
+        constructing a single vertex_native backend directly rather than
+        extracting from :meth:`vertex_natives_from_config`.
+
+        Args:
+            config: Backend config dict. Must contain ``type: vertex_native``,
+                ``project``, ``region``, and ``auth`` sub-block.
+            name: Backend name — used in error messages and log ``extra``.
+            callbacks: Optional lifecycle callbacks (retry / error).
+
+        Returns:
+            Configured :class:`NativeVertexBackend` instance.
+
+        Raises:
+            ValueError: If ``project`` / ``region`` / ``auth`` is missing, or
+                if ``type`` is not ``vertex_native``.
+        """
+        backend_type = config.get("type")
+        if backend_type != "vertex_native":
+            raise ValueError(
+                f"vertex_native_from_backend_config requires type: vertex_native, "
+                f"got {backend_type!r}"
+            )
+        return self._backend_factory.create_vertex_native(
+            name, DotDict(config), callbacks=callbacks
         )
 
     def _create_single_backend_router(

@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,8 +19,14 @@ from llm_infer.client import (
     ModelConflictError,
     ResponseHolder,
 )
-from llm_infer.client.backends import Backend, BackendContext, OpenAICompatibleBackend
+from llm_infer.client.backends import (
+    Backend,
+    BackendContext,
+    NativeVertexBackend,
+    OpenAICompatibleBackend,
+)
 from llm_infer.client.backends.auth import StaticAPIKeyAuth
+from llm_infer.client.errors import ConfigError
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
 
 pytestmark = pytest.mark.unit
@@ -1847,3 +1854,208 @@ class TestSendCallbacks:
         assert before_calls[0].attempt == 1
         assert after_calls[0][1].status_code == 200
         client.close()
+
+
+class TestFactoryVertexNativeFromConfig:
+    """``Factory.vertex_natives_from_config`` extracts ``type: vertex_native``
+    entries from the shared config shape and returns them keyed by name.
+    Chat entries in the same config are ignored — they belong to
+    ``from_config``. Disabled entries are dropped from both surfaces."""
+
+    def _vertex_cfg(
+        self, project: str = "p", region: str = "us-central1"
+    ) -> dict[str, Any]:
+        return {
+            "type": "vertex_native",
+            "project": project,
+            "region": region,
+            "auth": {"mode": "api_key", "api_key": "test-key"},
+        }
+
+    def test_returns_backends_by_name(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "vertex_a": self._vertex_cfg(project="proj-a", region="us-central1"),
+                "vertex_b": self._vertex_cfg(project="proj-b", region="us-east4"),
+            }
+        }
+        backends = factory.vertex_natives_from_config(config)
+        assert set(backends) == {"vertex_a", "vertex_b"}
+        assert all(isinstance(b, NativeVertexBackend) for b in backends.values())
+        assert backends["vertex_a"]._project == "proj-a"
+        assert backends["vertex_b"]._region == "us-east4"
+
+    def test_ignores_chat_entries(self, mock_lg: Logger) -> None:
+        # A mixed yaml is the intended use — chat entries land in from_config,
+        # vertex_native entries land here, both read the same file.
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "vertex_direct": self._vertex_cfg(),
+            }
+        }
+        backends = factory.vertex_natives_from_config(config)
+        assert set(backends) == {"vertex_direct"}
+
+    def test_skips_disabled_entries(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        cfg = self._vertex_cfg()
+        cfg["enabled"] = False
+        config = {"backends": {"vertex_off": cfg}}
+        assert factory.vertex_natives_from_config(config) == {}
+
+    def test_returns_empty_when_no_vertex_native(self, mock_lg: Logger) -> None:
+        # Not an error — chat-only configs are the common case for callers
+        # that don't use native Vertex.
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            }
+        }
+        assert factory.vertex_natives_from_config(config) == {}
+
+    def test_merges_global_retry_and_rate_limit(self, mock_lg: Logger) -> None:
+        # Same convention as from_config: top-level defaults merge into each
+        # per-backend block, per-backend value wins on conflict.
+        factory = Factory(mock_lg)
+        config = {
+            "retry": {"base": 3.0, "timeout": 60},
+            "rate_limit": {"per_minute": 200},
+            "backends": {
+                "vertex_direct": {
+                    **self._vertex_cfg(),
+                    # override global retry.timeout, inherit base
+                    "retry": {"timeout": 40},
+                },
+            },
+        }
+        backends = factory.vertex_natives_from_config(config)
+        ctx = backends["vertex_direct"]._ctx
+        assert ctx.retry is not None
+        assert ctx.retry.base == 3.0
+        assert ctx.retry.timeout == 40
+        assert ctx.rate_limiter is not None
+        assert ctx.rate_limiter.per_minute == 200
+
+    def test_missing_project_or_region_raises_at_wire_up(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        cfg = self._vertex_cfg()
+        del cfg["project"]
+        config = {"backends": {"vertex_direct": cfg}}
+        with pytest.raises(ValueError, match="project.*region.*are required"):
+            factory.vertex_natives_from_config(config)
+
+
+class TestFromConfigFiltersVertexNative:
+    """``from_config`` skips ``type: vertex_native`` entries when building
+    the router. The dedicated accessor builds them separately, so the router
+    never sees a non-chat surface."""
+
+    def test_from_config_skips_vertex_native_entries(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        config = {
+            "default": "chat_a",
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                    "model": "m",
+                },
+                "vertex_direct": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        router = factory.from_config(config)
+        try:
+            assert set(router.clients) == {"chat_a"}
+        finally:
+            router.close()
+
+    def test_default_pointing_at_vertex_native_raises_config_error(
+        self, mock_lg: Logger
+    ) -> None:
+        factory = Factory(mock_lg)
+        config = {
+            "default": "vertex_direct",
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "vertex_direct": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        with pytest.raises(
+            ConfigError, match="Default backend.*vertex_native.*chat backend"
+        ):
+            factory.from_config(config)
+
+    def test_router_error_names_chat_scope(self, mock_lg: Logger) -> None:
+        # Non-chat backends live in their own accessor; the router's error
+        # should tell the user that instead of a generic "not found".
+        factory = Factory(mock_lg)
+        config = {
+            "default": "chat_a",
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                    "model": "m",
+                },
+                "vertex_direct": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        router = factory.from_config(config)
+        try:
+            with pytest.raises(ValueError, match="Chat backend.*not found"):
+                router.get_client(backend="vertex_direct")
+        finally:
+            router.close()
+
+    def test_only_vertex_native_backends_raises_clear_error(
+        self, mock_lg: Logger
+    ) -> None:
+        # If all enabled backends are vertex_native, from_config should raise
+        # a clear error directing users to vertex_natives_from_config.
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "vertex_a": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+                "vertex_b": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-east4",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        with pytest.raises(ConfigError, match="No chat backends.*vertex_natives"):
+            factory.from_config(config)

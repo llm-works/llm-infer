@@ -2,16 +2,30 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.yaml import SecretStr
 
+from ..types import LLMCallbacks
 from .auth import AuthProvider, auth_from_config
 from .base import Backend
 from .context import BackendContext, context_from_config
 from .provider import Provider, ProviderDetector
+from .vertex_native import NativeVertexBackend, NativeVertexFactory
+
+NON_CHAT_BACKEND_TYPES: frozenset[str] = frozenset({"vertex_native"})
+
+_VERTEX_REGION_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^global$")
+"""Valid Vertex AI region: lowercase alphanumeric with hyphens, or 'global'.
+
+Rejects URL-delimiter characters that could enable SSRF via hostname
+interpolation (e.g. 'attacker.example/#' would route requests off-GCP)."""
+"""Backend ``type:`` values that are sibling to :class:`Backend` rather than
+implementations of it — routed through dedicated ``Factory.<surface>s_from_config()``
+accessors, not through :class:`~..router.LLMRouter`."""
 
 
 class BackendFactory:
@@ -31,7 +45,9 @@ class BackendFactory:
             Configured backend instance.
 
         Raises:
-            ValueError: If backend type is unknown.
+            ValueError: If backend type is unknown, or when called with a non-chat
+                ``type:`` (see :data:`NON_CHAT_BACKEND_TYPES`) that requires a
+                dedicated accessor (e.g. :meth:`create_vertex_native`).
         """
         ctx = self._create_context(config)
         backend_type = config.get("type", "openai_compatible")
@@ -41,8 +57,61 @@ class BackendFactory:
             return self._create_openai(name, ctx, default_model, config)
         elif backend_type == "anthropic":
             return self._create_anthropic(name, ctx, default_model, config)
+        elif backend_type in NON_CHAT_BACKEND_TYPES:
+            raise ValueError(
+                f"Backend {name!r} has non-chat type {backend_type!r}; "
+                f"use Factory.vertex_natives_from_config() to build these entries"
+            )
         else:
             raise ValueError(f"Unknown backend type: {backend_type}")
+
+    def create_vertex_native(
+        self,
+        name: str,
+        config: DotDict,
+        *,
+        callbacks: LLMCallbacks | None = None,
+    ) -> NativeVertexBackend:
+        """Create a :class:`NativeVertexBackend` from a yaml block.
+
+        Symmetric with :meth:`create` for chat backends, but returns the
+        sibling (non-chat) native Vertex surface. ``project`` and ``region``
+        are read from the yaml block — they were kwargs before PR #138 when
+        the design still assumed one Vertex block could serve both the
+        chat and native paths; ground truth was that consumers deep-copied
+        the block with per-path overrides, so both paths now own their own
+        block.
+
+        Args:
+            name: Backend name — used in error messages and log ``extra``.
+            config: Backend yaml block. Must contain ``project``, ``region``,
+                and an ``auth`` sub-block; may include ``service_tier``,
+                ``rate_limit``, ``retry``, ``timeout``.
+            callbacks: Optional lifecycle callbacks (retry / error).
+
+        Raises:
+            ValueError: If ``project`` or ``region`` is missing / empty,
+                if ``region`` contains invalid characters (SSRF prevention),
+                or if the ``auth`` sub-block is missing (native Vertex requires
+                SA credentials).
+        """
+        project = config.get("project")
+        region = config.get("region")
+        if not project or not region:
+            raise ValueError(
+                f"Backend {name!r} (type: vertex_native): 'project' and 'region' "
+                f"are required yaml fields "
+                f"(got project={project!r}, region={region!r})"
+            )
+        if not _VERTEX_REGION_RE.match(region):
+            raise ValueError(
+                f"Backend {name!r}: invalid region {region!r}. "
+                f"Must be 'global' or lowercase alphanumeric with hyphens "
+                f"(e.g. 'us-central1')"
+            )
+        return NativeVertexFactory(self._lg).create(
+            config, project=project, region=region, callbacks=callbacks
+        )
 
     def _create_context(self, config: DotDict) -> BackendContext:
         """Create BackendContext from config."""

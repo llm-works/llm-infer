@@ -311,6 +311,18 @@ backends:
     type: anthropic
     model: claude-sonnet-4-20250514
     max_tokens: 4096
+  vertex_direct:
+    # Native Vertex REST (cachedContents + generateContent).
+    # Built by Factory.vertex_natives_from_config(config), NOT from_config —
+    # from_config filters non-chat types out of the router.
+    type: vertex_native
+    project: my-gcp-project
+    region: us-central1
+    auth:
+      mode: gcp_sa
+      credentials_path: /path/to/sa.json
+    service_tier: priority   # optional
+    timeout: 60
 
 # Single backend configuration
 type: openai_compatible
