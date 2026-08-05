@@ -10,6 +10,43 @@ from collections.abc import Mapping
 from appinfra.log import Logger
 
 
+def parse_fallback_key(key: str) -> tuple[str, str | None]:
+    """Split a fallback map key or value into ``(model, backend_or_none)``.
+
+    The fallback map accepts two forms:
+
+    * ``"model"`` — bare, backend is resolved from the router's routing table
+      (unambiguous only when a single backend serves the model).
+    * ``"model@backend"`` — qualified, pins the model to the named backend.
+      Chosen over ``/`` because ``/`` collides with OpenRouter's own
+      ``provider/model`` convention.
+
+    Args:
+        key: A fallback map key or value.
+
+    Returns:
+        ``(model, backend)`` where ``backend`` is ``None`` for bare keys.
+
+    Raises:
+        ValueError: If ``@`` appears with either side empty.
+
+    Examples:
+        >>> parse_fallback_key("gpt-4o")
+        ('gpt-4o', None)
+        >>> parse_fallback_key("gpt-4o@openai")
+        ('gpt-4o', 'openai')
+    """
+    if "@" not in key:
+        return key, None
+    model, _, backend = key.partition("@")
+    if not model or not backend:
+        raise ValueError(
+            f"invalid fallback ref {key!r}: both model and backend are required "
+            "(expected 'model@backend')"
+        )
+    return model, backend
+
+
 def detect_cycles(fallbacks: Mapping[str, str], lg: Logger) -> set[str]:
     """Detect cycles in fallback pairs and log warnings.
 
