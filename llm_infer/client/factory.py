@@ -188,10 +188,10 @@ class Factory:
         dedicated accessors (e.g. :meth:`vertex_natives_from_config`) and
         never enter the :class:`~..router.LLMRouter`. Raises
         :class:`ConfigError` when ``default:`` points at a non-chat entry
-        — router-level errors call out the "chat" scope, so a wrong
-        surface pointed at at runtime surfaces the same way.
+        or when all enabled backends are non-chat types.
         """
         chat_configs: dict[str, dict[str, Any]] = {}
+        non_chat_names: list[str] = []
         for name, cfg in backends_config.items():
             if not cfg.get("enabled", True):
                 continue
@@ -207,8 +207,15 @@ class Factory:
                     "backend excluded from LLMRouter (non-chat type)",
                     extra={"backend": name, "type": backend_type},
                 )
+                non_chat_names.append(name)
                 continue
             chat_configs[name] = cfg
+        if not chat_configs and non_chat_names:
+            raise ConfigError(
+                f"No chat backends in config — only non-chat types found: "
+                f"{non_chat_names}. Use vertex_natives_from_config() for "
+                f"vertex_native backends; from_config() builds the chat router."
+            )
         return chat_configs
 
     def vertex_natives_from_config(
@@ -258,13 +265,9 @@ class Factory:
                     name, DotDict(merged), callbacks=callbacks
                 )
         except Exception:
-            for backend in result.values():
-                try:
-                    backend.close()
-                except Exception as e:
-                    self._lg.warning(
-                        "Error closing backend during cleanup", extra={"exception": e}
-                    )
+            # Already-created backends haven't made requests yet — no open
+            # connections to close. Let GC reclaim them; httpx.AsyncClient
+            # has no sync close and async cleanup isn't available here.
             raise
         return result
 

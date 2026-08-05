@@ -400,3 +400,26 @@ class TestBackendFactoryVertexNative:
         )
         with pytest.raises(ValueError, match="vertex_natives_from_config"):
             factory.create("vertex_direct", cfg)
+
+    @pytest.mark.parametrize(
+        "bad_region",
+        [
+            "attacker.example/#",  # SSRF attempt via URL fragment
+            "us-central1/../../etc",  # path traversal
+            "region with spaces",
+            "UPPERCASE",
+        ],
+    )
+    def test_rejects_invalid_region(self, mock_lg: Logger, bad_region: str) -> None:
+        # Prevent SSRF via region interpolation in hostname.
+        factory = BackendFactory(mock_lg)
+        cfg = DotDict(
+            {
+                "type": "vertex_native",
+                "project": "my-proj",
+                "region": bad_region,
+                "auth": {"mode": "api_key", "api_key": "k"},
+            }
+        )
+        with pytest.raises(ValueError, match="invalid region"):
+            factory.create_vertex_native("vertex_direct", cfg)

@@ -2034,3 +2034,28 @@ class TestFromConfigFiltersVertexNative:
                 router.get_client(backend="vertex_direct")
         finally:
             router.close()
+
+    def test_only_vertex_native_backends_raises_clear_error(
+        self, mock_lg: Logger
+    ) -> None:
+        # If all enabled backends are vertex_native, from_config should raise
+        # a clear error directing users to vertex_natives_from_config.
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "vertex_a": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+                "vertex_b": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-east4",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        with pytest.raises(ConfigError, match="No chat backends.*vertex_natives"):
+            factory.from_config(config)

@@ -113,16 +113,6 @@ class NativeVertexBackend:
         (tests, backend swap)."""
         await self._client.aclose()
 
-    def close(self) -> None:
-        """Sync close for cleanup in sync contexts (e.g. factory error paths).
-
-        httpx.AsyncClient has no sync close method — we delete our reference
-        and let the finalizer reclaim sockets. This is safe because:
-        1. We're in an error path where the backend was never used
-        2. httpx's finalizer properly closes the transport on __del__
-        """
-        del self._client
-
     async def cache_create(
         self,
         model: str,

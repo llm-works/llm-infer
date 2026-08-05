@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from appinfra.dot_dict import DotDict
@@ -16,6 +17,12 @@ from .provider import Provider, ProviderDetector
 from .vertex_native import NativeVertexBackend, NativeVertexFactory
 
 NON_CHAT_BACKEND_TYPES: frozenset[str] = frozenset({"vertex_native"})
+
+_VERTEX_REGION_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^global$")
+"""Valid Vertex AI region: lowercase alphanumeric with hyphens, or 'global'.
+
+Rejects URL-delimiter characters that could enable SSRF via hostname
+interpolation (e.g. 'attacker.example/#' would route requests off-GCP)."""
 """Backend ``type:`` values that are sibling to :class:`Backend` rather than
 implementations of it — routed through dedicated ``Factory.<surface>s_from_config()``
 accessors, not through :class:`~..router.LLMRouter`."""
@@ -83,8 +90,9 @@ class BackendFactory:
             callbacks: Optional lifecycle callbacks (retry / error).
 
         Raises:
-            ValueError: If ``project`` or ``region`` is missing / empty, or
-                if the ``auth`` sub-block is missing (native Vertex requires
+            ValueError: If ``project`` or ``region`` is missing / empty,
+                if ``region`` contains invalid characters (SSRF prevention),
+                or if the ``auth`` sub-block is missing (native Vertex requires
                 SA credentials).
         """
         project = config.get("project")
@@ -94,6 +102,12 @@ class BackendFactory:
                 f"Backend {name!r} (type: vertex_native): 'project' and 'region' "
                 f"are required yaml fields "
                 f"(got project={project!r}, region={region!r})"
+            )
+        if not _VERTEX_REGION_RE.match(region):
+            raise ValueError(
+                f"Backend {name!r}: invalid region {region!r}. "
+                f"Must be 'global' or lowercase alphanumeric with hyphens "
+                f"(e.g. 'us-central1')"
             )
         return NativeVertexFactory(self._lg).create(
             config, project=project, region=region, callbacks=callbacks
