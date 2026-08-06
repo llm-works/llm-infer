@@ -37,11 +37,16 @@ from typing import TYPE_CHECKING, Any, cast
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
+from appinfra.yaml import SecretStr
 
 from .backends import Backend, BackendContext, BackendFactory, RetryConfig
+from .backends.auth import AuthProvider, auth_from_config
+from .backends.factory import NON_CHAT_BACKEND_TYPES
+from .backends.vertex_native import NativeVertexBackend
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .embedding import EmbeddingClient
+from .embedding import EmbeddingCallbacks, EmbeddingClient
+from .errors import ConfigError
 from .router import LLMRouter
 from .types import LLMCallbacks
 
@@ -159,14 +164,146 @@ class Factory:
                 callbacks,
             )
 
+        default_name = config.get("default")
+        chat_configs = self._chat_configs_only(backends_config, default_name)
+
         return self._create_multi_backend_router(
-            backends_config,
-            config.get("default"),
+            chat_configs,
+            default_name,
             discover_models,
             rate_limit_config,
             retry_config,
             strategy,
             callbacks,
+        )
+
+    def _chat_configs_only(
+        self,
+        backends_config: dict[str, dict[str, Any]],
+        default_name: str | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Return only entries with a chat ``type:``; DEBUG-log the rest.
+
+        Non-chat types (see :data:`NON_CHAT_BACKEND_TYPES`) are built by
+        dedicated accessors (e.g. :meth:`vertex_natives_from_config`) and
+        never enter the :class:`~..router.LLMRouter`. Raises
+        :class:`ConfigError` when ``default:`` points at a non-chat entry
+        or when all enabled backends are non-chat types.
+        """
+        chat_configs: dict[str, dict[str, Any]] = {}
+        non_chat_names: list[str] = []
+        for name, cfg in backends_config.items():
+            if not cfg.get("enabled", True):
+                continue
+            backend_type = cfg.get("type", "openai_compatible")
+            if backend_type in NON_CHAT_BACKEND_TYPES:
+                if name == default_name:
+                    raise ConfigError(
+                        f"Default backend {name!r} has non-chat type "
+                        f"{backend_type!r}; 'default:' must reference a "
+                        f"chat backend"
+                    )
+                self._lg.debug(
+                    "backend excluded from LLMRouter (non-chat type)",
+                    extra={"backend": name, "type": backend_type},
+                )
+                non_chat_names.append(name)
+                continue
+            chat_configs[name] = cfg
+        if not chat_configs and non_chat_names:
+            raise ConfigError(
+                f"No chat backends in config — only non-chat types found: "
+                f"{non_chat_names}. Use vertex_natives_from_config() for "
+                f"vertex_native backends; from_config() builds the chat router."
+            )
+        return chat_configs
+
+    def vertex_natives_from_config(
+        self,
+        config: dict[str, Any],
+        callbacks: LLMCallbacks | None = None,
+    ) -> dict[str, NativeVertexBackend]:
+        """Build all ``type: vertex_native`` backends from a shared config.
+
+        Reads the same top-level ``config`` shape :meth:`from_config`
+        consumes. Chat entries are ignored — build them with
+        :meth:`from_config`. Disabled entries are dropped. Global
+        ``rate_limit`` / ``retry`` merge into each per-backend block the
+        same way :meth:`from_config` merges them for chat backends
+        (per-backend wins on conflict).
+
+        Args:
+            config: Full config dict (same shape as :meth:`from_config`).
+            callbacks: Optional lifecycle callbacks; applied to every
+                returned backend.
+
+        Returns:
+            Mapping of backend name -> :class:`NativeVertexBackend`. Empty
+            if the config has no ``type: vertex_native`` entries.
+
+        Raises:
+            ValueError: If a vertex_native block is missing ``project`` /
+                ``region`` / ``auth`` — surfaces at wire-up, not first
+                call. Backends already built in this call are dropped;
+                httpx's finalizer reclaims their sockets.
+        """
+        backends_config = config.get("backends", {})
+        rate_limit_config = config.get("rate_limit")
+        retry_config = config.get("retry")
+
+        result: dict[str, NativeVertexBackend] = {}
+        try:
+            for name, cfg in backends_config.items():
+                if not cfg.get("enabled", True):
+                    continue
+                if cfg.get("type") != "vertex_native":
+                    continue
+                merged = self._merge_backend_config(
+                    cfg, rate_limit_config, retry_config
+                )
+                result[name] = self._backend_factory.create_vertex_native(
+                    name, DotDict(merged), callbacks=callbacks
+                )
+        except Exception:
+            # Already-created backends haven't made requests yet — no open
+            # connections to close. Let GC reclaim them; httpx.AsyncClient
+            # has no sync close and async cleanup isn't available here.
+            raise
+        return result
+
+    def vertex_native_from_backend_config(
+        self,
+        config: dict[str, Any],
+        name: str = "default",
+        callbacks: LLMCallbacks | None = None,
+    ) -> NativeVertexBackend:
+        """Create a single :class:`NativeVertexBackend` from a backend config.
+
+        Symmetric with :meth:`from_backend_config` for chat backends. Use when
+        constructing a single vertex_native backend directly rather than
+        extracting from :meth:`vertex_natives_from_config`.
+
+        Args:
+            config: Backend config dict. Must contain ``type: vertex_native``,
+                ``project``, ``region``, and ``auth`` sub-block.
+            name: Backend name — used in error messages and log ``extra``.
+            callbacks: Optional lifecycle callbacks (retry / error).
+
+        Returns:
+            Configured :class:`NativeVertexBackend` instance.
+
+        Raises:
+            ValueError: If ``project`` / ``region`` / ``auth`` is missing, or
+                if ``type`` is not ``vertex_native``.
+        """
+        backend_type = config.get("type")
+        if backend_type != "vertex_native":
+            raise ValueError(
+                f"vertex_native_from_backend_config requires type: vertex_native, "
+                f"got {backend_type!r}"
+            )
+        return self._backend_factory.create_vertex_native(
+            name, DotDict(config), callbacks=callbacks
         )
 
     def _create_single_backend_router(
@@ -206,7 +343,18 @@ class Factory:
             backend.close()
             raise
 
-    def _create_multi_backend_router(  # cq: max-lines=35
+    def _validate_default_backend(
+        self, default_name: str | None, backends: dict[str, Backend]
+    ) -> str:
+        """Validate and resolve default backend name."""
+        if default_name and default_name not in backends:
+            self._close_backends_safely(backends)
+            raise ValueError(
+                f"Default backend '{default_name}' not in enabled backends"
+            )
+        return default_name or next(iter(backends.keys()))
+
+    def _create_multi_backend_router(
         self,
         backends_config: dict[str, dict[str, Any]],
         default_name: str | None,
@@ -216,23 +364,13 @@ class Factory:
         strategy: RoutingStrategy | None = None,
         callbacks: LLMCallbacks | None = None,
     ) -> LLMRouter:
-        """Create router from multi-backend config.
-
-        On failure during router init, closes all backends/clients before re-raising.
-        """
+        """Create router from multi-backend config."""
         backends, configs = self._create_enabled_backends(
             backends_config, rate_limit_config, retry_config
         )
         if not backends:
             raise ValueError("No enabled backends in config")
-
-        if default_name and default_name not in backends:
-            self._close_backends_safely(backends)
-            raise ValueError(
-                f"Default backend '{default_name}' not found in enabled backends"
-            )
-        if not default_name:
-            default_name = next(iter(backends.keys()))
+        default_name = self._validate_default_backend(default_name, backends)
 
         try:
             discovery = ModelDiscovery(self._lg, backends, configs)
@@ -240,13 +378,8 @@ class Factory:
                 name: LLMClient(self._lg, backend, discovery, callbacks)
                 for name, backend in backends.items()
             }
-
             return LLMRouter(
-                self._lg,
-                clients,
-                default_name,
-                discovery=discovery,
-                strategy=strategy,
+                self._lg, clients, default_name, discovery=discovery, strategy=strategy
             )
         except Exception:
             self._close_backends_safely(backends)
@@ -305,7 +438,7 @@ class Factory:
                     "Error closing backend during cleanup", extra={"exception": e}
                 )
 
-    def _create_strategy(  # cq: max-lines=40
+    def _create_strategy(
         self, strategy_config: dict[str, Any] | None
     ) -> RoutingStrategy | None:
         """Create routing strategy from config.
@@ -354,9 +487,7 @@ class Factory:
 
         if strategy_type not in factories:
             raise ValueError(
-                f"Unknown strategy type '{strategy_type}'. "
-                f"Available: {list(factories.keys())}. "
-                f"For fallback/resilience, use FallbackClient instead."
+                f"Unknown strategy '{strategy_type}'; use FallbackClient for fallback"
             )
 
         return factories[strategy_type]().create(self._lg, config)
@@ -384,7 +515,7 @@ class Factory:
         self,
         base_url: str = "http://localhost:8000/v1",
         default_model: str | None = None,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
         callbacks: LLMCallbacks | None = None,
@@ -396,7 +527,7 @@ class Factory:
         Args:
             base_url: API base URL.
             default_model: Default model name.
-            api_key: Optional API key.
+            api_key: Optional API key (``str`` or ``SecretStr``).
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
             callbacks: Optional callbacks for request/response/error lifecycle events.
@@ -408,7 +539,7 @@ class Factory:
             "type": "openai_compatible",
             "base_url": base_url,
             "model": default_model,
-            "api_key": api_key,
+            "api_key": SecretStr.ensure(api_key),
             "timeout": timeout,
         }
         if rate_limit:
@@ -418,7 +549,7 @@ class Factory:
     def anthropic(
         self,
         default_model: str = "claude-sonnet-4-20250514",
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         max_tokens: int = 4096,
         timeout: float = 120.0,
         rate_limit: dict[str, Any] | None = None,
@@ -430,7 +561,8 @@ class Factory:
 
         Args:
             default_model: Claude model name.
-            api_key: Anthropic API key (uses ANTHROPIC_API_KEY env var if not provided).
+            api_key: Anthropic API key as ``str`` or ``SecretStr``. Falls back
+                to the ``ANTHROPIC_API_KEY`` env var if not provided.
             max_tokens: Default max tokens for responses.
             timeout: Request timeout in seconds.
             rate_limit: Optional rate limit config (e.g., {"per_minute": 60}).
@@ -445,7 +577,7 @@ class Factory:
         config: dict[str, Any] = {
             "type": "anthropic",
             "model": default_model,
-            "api_key": api_key,
+            "api_key": SecretStr.ensure(api_key),
             "max_tokens": max_tokens,
             "timeout": timeout,
         }
@@ -457,11 +589,12 @@ class Factory:
         self,
         base_url: str = "http://localhost:8001/v1",
         model: str = "default",
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         timeout: float = 120.0,
         retry: RetryConfig | None = None,
         rate_limit: dict[str, Any] | None = None,
         dimensions: int | None = None,
+        callbacks: EmbeddingCallbacks | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for OpenAI-compatible embeddings API.
 
@@ -470,11 +603,14 @@ class Factory:
         Args:
             base_url: API base URL for embeddings endpoint.
             model: Model name to send in requests.
-            api_key: Optional API key for Authorization header.
+            api_key: Optional API key (``str`` or ``SecretStr``) for
+                Authorization header.
             timeout: Request timeout in seconds.
             retry: Retry configuration for transient errors. None disables retry.
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
             dimensions: Default output dimensions. None uses provider default.
+            callbacks: Optional embedding lifecycle callbacks (cost tracking,
+                tracing). See ``EmbeddingCallbacks``.
 
         Returns:
             EmbeddingClient configured for the embeddings API.
@@ -487,16 +623,21 @@ class Factory:
             self._lg,
             base_url=base_url,
             model=model,
-            api_key=api_key,
+            api_key=SecretStr.ensure(api_key),
             ctx=ctx,
         )
         return EmbeddingClient(
-            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+            self._lg,
+            backend,
+            retry=retry,
+            model=model,
+            dimensions=dimensions,
+            callbacks=callbacks,
         )
 
     def embeddings_google(
         self,
-        api_key: str,
+        api_key: str | SecretStr | None = None,
         model: str = "gemini-embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
         timeout: float = 120.0,
@@ -504,11 +645,15 @@ class Factory:
         rate_limit: dict[str, Any] | None = None,
         dimensions: int | None = None,
         count_tokens: bool = False,
+        base_url: str | None = None,
+        auth: AuthProvider | None = None,
+        callbacks: EmbeddingCallbacks | None = None,
     ) -> EmbeddingClient:
         """Create EmbeddingClient for Google Generative AI embeddings.
 
         Args:
-            api_key: Google API key.
+            api_key: Google API key (AI Studio) as ``str`` or ``SecretStr``.
+                Either this or ``auth`` must be provided.
             model: Model name (default: gemini-embedding-001).
             task_type: Task type for optimized embeddings. One of:
                 RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
@@ -518,6 +663,12 @@ class Factory:
             rate_limit: Rate limit config (e.g., {"per_minute": 60}).
             dimensions: Default output dimensions. None uses provider default.
             count_tokens: If True, populate prompt_tokens via countTokens API (extra call).
+            base_url: API base URL override. Defaults to the AI Studio endpoint;
+                set to ``https://<region>-aiplatform.googleapis.com/v1/...`` for Vertex.
+            auth: Auth provider. Takes precedence over ``api_key``. Use
+                ``GCPServiceAccountAuth`` for Vertex.
+            callbacks: Optional embedding lifecycle callbacks (cost tracking,
+                tracing). See ``EmbeddingCallbacks``.
 
         Returns:
             EmbeddingClient configured for Google embeddings.
@@ -529,14 +680,21 @@ class Factory:
         ctx = BackendContext(rate_limiter=rate_limiter, request_timeout=timeout)
         backend = GoogleBackend(
             self._lg,
-            api_key=api_key,
+            api_key=SecretStr.ensure(api_key),
             model=model,
             task_type=GoogleEmbeddingTaskType(task_type),
             ctx=ctx,
             count_tokens=count_tokens,
+            base_url=base_url,
+            auth=auth,
         )
         return EmbeddingClient(
-            self._lg, backend, retry=retry, model=model, dimensions=dimensions
+            self._lg,
+            backend,
+            retry=retry,
+            model=model,
+            dimensions=dimensions,
+            callbacks=callbacks,
         )
 
     def _create_rate_limiter(self, config: dict[str, Any] | None) -> RateLimiter | None:
@@ -568,6 +726,7 @@ class Factory:
         timeout: float,
         retry: RetryConfig | None,
         dimensions: int | None,
+        callbacks: EmbeddingCallbacks | None,
     ) -> EmbeddingClient:
         """Create OpenAI embedding client from config."""
         if not cfg.get("base_url"):
@@ -575,11 +734,12 @@ class Factory:
         return self.embeddings(
             base_url=cfg.base_url,
             model=cfg.get("model", "default"),
-            api_key=cfg.get("api_key"),
+            api_key=SecretStr.ensure(cfg.get("api_key")),
             timeout=timeout,
             retry=retry,
             rate_limit=cfg.get("rate_limit"),
             dimensions=dimensions,
+            callbacks=callbacks,
         )
 
     def _embeddings_google_from_config(
@@ -589,12 +749,20 @@ class Factory:
         retry: RetryConfig | None,
         dimensions: int | None,
         count_tokens: bool,
+        callbacks: EmbeddingCallbacks | None,
     ) -> EmbeddingClient:
         """Create Google embedding client from config."""
-        if not cfg.get("api_key"):
-            raise ValueError("api_key required for google embedding backend")
+        auth_cfg = cfg.get("auth")
+        api_key = SecretStr.ensure(cfg.get("api_key"))
+        auth = auth_from_config(
+            self._lg,
+            dict(auth_cfg) if auth_cfg else None,
+            api_key=api_key,
+            api_key_header="x-goog-api-key",
+        )
+        if auth is None:
+            raise ValueError("api_key or auth required for google embedding backend")
         return self.embeddings_google(
-            api_key=cfg.api_key,
             model=cfg.get("model", "gemini-embedding-001"),
             task_type=cfg.get("task_type", "RETRIEVAL_DOCUMENT"),
             timeout=timeout,
@@ -602,9 +770,16 @@ class Factory:
             rate_limit=cfg.get("rate_limit"),
             dimensions=dimensions,
             count_tokens=count_tokens,
+            base_url=cfg.get("base_url"),
+            auth=auth,
+            callbacks=callbacks,
         )
 
-    def embeddings_from_config(self, config: dict[str, Any]) -> EmbeddingClient:
+    def embeddings_from_config(
+        self,
+        config: dict[str, Any],
+        callbacks: EmbeddingCallbacks | None = None,
+    ) -> EmbeddingClient:
         """Create EmbeddingClient from configuration dict.
 
         Config format:
@@ -625,6 +800,8 @@ class Factory:
 
         Args:
             config: Configuration dict.
+            callbacks: Optional embedding lifecycle callbacks (cost tracking,
+                tracing). See ``EmbeddingCallbacks``.
 
         Returns:
             Configured EmbeddingClient.
@@ -640,10 +817,12 @@ class Factory:
         count_tokens = cfg.get("count_tokens", False)
 
         if backend_type in ("openai", "openai_compatible"):
-            return self._embeddings_openai_from_config(cfg, timeout, retry, dimensions)
+            return self._embeddings_openai_from_config(
+                cfg, timeout, retry, dimensions, callbacks
+            )
         elif backend_type == "google":
             return self._embeddings_google_from_config(
-                cfg, timeout, retry, dimensions, count_tokens
+                cfg, timeout, retry, dimensions, count_tokens, callbacks
             )
         else:
             raise ValueError(f"Unknown embedding backend type: {backend_type}")

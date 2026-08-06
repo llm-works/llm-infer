@@ -411,6 +411,33 @@ class TestStreamState:
         assert resp.tool_calls is not None
         assert resp.tool_calls[0].id == "tc1"
         assert resp.tool_calls[0].function.arguments == '{"x":1}'
+        assert resp.tool_calls[0].extra_content is None
+
+    def test_tool_call_buffering_extra_content(self) -> None:
+        """`extra_content` on any delta chunk lands on the finalized tool_call."""
+        extra = {"google": {"thought_signature": "stub-sig"}}
+        state = _StreamState()
+        state.process_chunk(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "tc1",
+                                    "function": {"name": "f", "arguments": "{}"},
+                                    "extra_content": extra,
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        resp = state.to_response("m")
+        assert resp.tool_calls is not None
+        assert resp.tool_calls[0].extra_content == extra
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +450,7 @@ class _FakeStreamResponse:
 
     def __init__(self, lines: list[str]) -> None:
         self._lines = lines
+        self.headers: dict[str, str] = {}
 
     def raise_for_status(self) -> None:
         pass
@@ -504,7 +532,7 @@ class TestExecuteStreamSyncErrors:
 
         backend._client.stream = MagicMock(return_value=_CM())
         with pytest.raises(BackendUnavailableError):
-            list(backend._execute_stream_sync("http://x", {}))
+            list(backend._execute_stream_sync("http://x", {}, _StreamState()))
         backend.close()
 
     def test_timeout(self, mock_lg: Logger) -> None:
@@ -519,5 +547,5 @@ class TestExecuteStreamSyncErrors:
 
         backend._client.stream = MagicMock(return_value=_CM())
         with pytest.raises(BackendTimeoutError):
-            list(backend._execute_stream_sync("http://x", {}))
+            list(backend._execute_stream_sync("http://x", {}, _StreamState()))
         backend.close()

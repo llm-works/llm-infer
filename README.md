@@ -106,7 +106,7 @@ The client library exposes these as keyword arguments:
 ```python
 response = client.chat(messages, think=True, adapter="my-adapter")
 print(response.thinking)  # Reasoning content
-print(response.content)   # Final answer
+print(response.content)  # Final answer
 ```
 
 ### Multiple Backends

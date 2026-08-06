@@ -6,7 +6,7 @@ Concrete backend implementations for specific LLM providers.
 
 ### OpenAICompatibleBackend
 
-Works with OpenAI, Azure OpenAI, vLLM, and any server implementing `/v1/chat/completions`.
+Works with OpenAI, vLLM, and any server implementing `/v1/chat/completions`.
 
 ```python
 from llm_infer.client.backends import OpenAICompatibleBackend

@@ -94,6 +94,7 @@ Three execution strategies with a common interface:
 ```python
 from inference.dispatch import RequestHandler, Request, Response
 
+
 class RequestHandler(ABC):
     def submit(self, request: Request) -> bool:
         """Submit request. Returns False if rejected."""

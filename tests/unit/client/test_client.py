@@ -2,10 +2,12 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from llm_infer.client import (
     ChatRequest,
@@ -17,7 +19,14 @@ from llm_infer.client import (
     ModelConflictError,
     ResponseHolder,
 )
-from llm_infer.client.backends import Backend, BackendContext, OpenAICompatibleBackend
+from llm_infer.client.backends import (
+    Backend,
+    BackendContext,
+    NativeVertexBackend,
+    OpenAICompatibleBackend,
+)
+from llm_infer.client.backends.auth import StaticAPIKeyAuth
+from llm_infer.client.errors import ConfigError
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
 
 pytestmark = pytest.mark.unit
@@ -144,6 +153,51 @@ class TestFactory:
         assert "default" in router.clients
         router.close()
 
+    def test_from_config_accepts_secret_api_key(self, mock_lg: Logger) -> None:
+        """from_config accepts SecretStr in nested backends[].api_key.
+
+        The reveal must happen at the outbound header build, not at parse
+        time. This guards the xray → llm_infer wiring where LLMConfig
+        already stores keys as SecretStr.
+        """
+        factory = Factory(mock_lg)
+        config = {
+            "default": "openai",
+            "backends": {
+                "openai": {
+                    "type": "openai_compatible",
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key": SecretStr("sk-from-xray"),
+                },
+            },
+        }
+        router = factory.from_config(config)
+        try:
+            backend = router.clients["openai"].backend
+            assert isinstance(backend, OpenAICompatibleBackend)
+            assert isinstance(backend._auth, StaticAPIKeyAuth)
+            assert backend._build_headers()["Authorization"] == "Bearer sk-from-xray"
+        finally:
+            router.close()
+
+    def test_embeddings_from_config_accepts_secret_api_key(
+        self, mock_lg: Logger
+    ) -> None:
+        """embeddings_from_config accepts SecretStr for embedding.api_key."""
+        factory = Factory(mock_lg)
+        config = {
+            "type": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "model": "text-embedding-3-small",
+            "api_key": SecretStr("sk-embed-secret"),
+        }
+        emb_client = factory.embeddings_from_config(config)
+        try:
+            headers = emb_client.backend._build_headers()
+            assert headers["Authorization"] == "Bearer sk-embed-secret"
+        finally:
+            emb_client.close()
+
     def test_from_config_multi_backend_returns_router(self, mock_lg: Logger) -> None:
         """Test from_config with multiple backends returns router."""
         factory = Factory(mock_lg)
@@ -267,7 +321,9 @@ class TestFactory:
                 },
             },
         }
-        with pytest.raises(ValueError, match="Default backend 'disabled' not found"):
+        with pytest.raises(
+            ValueError, match="Default backend 'disabled' not in enabled"
+        ):
             factory.from_config(config)
 
     def test_from_config_with_discover_models_false(self, mock_lg: Logger) -> None:
@@ -797,6 +853,242 @@ class TestLLMClientRetry:
         assert call_count == 1
 
 
+class TestLLMClientStreamRetry:
+    """Test pre-first-token retry behavior for streaming calls."""
+
+    def test_stream_retries_429_before_first_token(self, mock_lg: Logger) -> None:
+        """A 429 at stream setup is retried; the retried stream succeeds."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        response = ChatResponse(content="Hello")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                yield from super().chat_stream(request, holder)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        tokens = list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert "".join(tokens) == "Hello"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_stream_async_retries_429_before_first_token(
+        self, mock_lg: Logger
+    ) -> None:
+        """A 429 at async stream setup is retried; the retried stream succeeds."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        response = ChatResponse(content="Hello")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            async def chat_stream_async(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> AsyncIterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                async for token in super().chat_stream_async(request, holder):
+                    yield token
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        tokens = []
+        async for token in client.chat_stream_async(
+            messages=[{"role": "user", "content": "Hi"}]
+        ):
+            tokens.append(token)
+
+        assert "".join(tokens) == "Hello"
+        assert call_count == 2
+
+    def test_stream_retry_timeout_exceeded(self, mock_lg: Logger) -> None:
+        """Retry stops and raises once the retry budget is exhausted."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                raise BackendRequestError("Rate limited", status_code=429)
+                yield ""  # unreachable; makes this a generator
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.02, timeout=0.05))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        with pytest.raises(BackendRequestError):
+            list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert call_count >= 2
+
+    def test_stream_no_retry_after_first_token(self, mock_lg: Logger) -> None:
+        """An error after the first token raises immediately, no retry."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        call_count = 0
+
+        class MidStreamFailBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                yield "x"
+                raise BackendRequestError("Rate limited", status_code=429)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = MidStreamFailBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        received = []
+        with pytest.raises(BackendRequestError):
+            for token in client.chat_stream(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                received.append(token)
+
+        assert received == ["x"]
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_async_no_retry_after_first_token(
+        self, mock_lg: Logger
+    ) -> None:
+        """An async error after the first token raises immediately, no retry."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        call_count = 0
+
+        class MidStreamFailBackend(MockBackend):
+            async def chat_stream_async(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> AsyncIterator[str]:
+                nonlocal call_count
+                call_count += 1
+                yield "x"
+                raise BackendRequestError("Rate limited", status_code=429)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = MidStreamFailBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        received = []
+        with pytest.raises(BackendRequestError):
+            async for token in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                received.append(token)
+
+        assert received == ["x"]
+        assert call_count == 1
+
+    def test_stream_no_retry_when_backoff_not_configured(self, mock_lg: Logger) -> None:
+        """Without retry config, a setup error raises immediately."""
+        from llm_infer.client import BackendRequestError
+
+        call_count = 0
+
+        class FailingBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                raise BackendRequestError("Rate limited", status_code=429)
+                yield ""  # unreachable; makes this a generator
+
+        backend = FailingBackend(mock_lg, "test")
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        with pytest.raises(BackendRequestError):
+            list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert call_count == 1
+
+    def test_stream_retry_fires_on_request_callback(self, mock_lg: Logger) -> None:
+        """on_request fires with the retry count on each streaming attempt."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        response = ChatResponse(content="Hi")
+        call_count = 0
+        attempts: list[int] = []
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                yield from super().chat_stream(request, holder)
+
+        callbacks = LLMCallbacks(on_request=lambda req, retry: attempts.append(retry))
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(lg=mock_lg, backend=backend, callbacks=callbacks)
+
+        list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert attempts == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_stream_async_cancel_interrupts_backoff(
+        self, mock_lg: Logger
+    ) -> None:
+        """Task cancellation interrupts a pending backoff sleep promptly."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import RetryConfig
+
+        class RetryBackend(MockBackend):
+            async def chat_stream_async(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> AsyncIterator[str]:
+                raise BackendRequestError("Rate limited", status_code=429)
+                yield ""  # unreachable; makes this an async generator
+
+        ctx = BackendContext(retry=RetryConfig(base=30.0, max_delay=30.0))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx)
+        client = LLMClient(lg=mock_lg, backend=backend)
+
+        async def consume() -> None:
+            async for _ in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            ):
+                pass
+
+        task = asyncio.create_task(consume())
+        await asyncio.sleep(0.05)  # let the stream hit the 429 and enter backoff
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+
+
 class TestFactoryRetryConfig:
     """Test Factory retry configuration."""
 
@@ -1114,6 +1406,187 @@ class TestLLMClientCallbacks:
         assert len(error_calls) == 0
         client.close()
 
+    def test_on_retry_fires_with_raw_exception(self, mock_lg: Logger) -> None:
+        """on_retry fires once per transient retry with the raw exception."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="Success!")
+        call_count = 0
+        transient = BackendRequestError("Rate limited", status_code=429)
+
+        class RetryBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise transient
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+        error_calls: list[tuple[ChatRequest, Exception]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                ),
+                on_error=lambda req, err: error_calls.append((req, err)),
+            )
+        )
+
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success!"
+        assert call_count == 3
+        # Two transient failures → two on_retry fires with attempts 1, 2.
+        assert len(retry_calls) == 2
+        assert retry_calls[0][1] is transient
+        assert retry_calls[0][2] == 1
+        assert retry_calls[0][3] > 0
+        assert retry_calls[1][2] == 2
+        # Successful terminal → no on_error.
+        assert error_calls == []
+        client.close()
+
+    def test_on_retry_not_fired_on_terminal_error(self, mock_lg: Logger) -> None:
+        """Non-transient failures skip on_retry and go straight to on_error."""
+        from llm_infer.client import BackendRequestError
+
+        class FailingBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                raise BackendRequestError("bad request", status_code=400)
+
+        backend = FailingBackend(mock_lg, "test")
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+        error_calls: list[tuple[ChatRequest, Exception]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                ),
+                on_error=lambda req, err: error_calls.append((req, err)),
+            )
+        )
+
+        with pytest.raises(BackendRequestError):
+            client.chat(messages=[{"role": "user", "content": "Hi"}])
+
+        assert retry_calls == []
+        assert len(error_calls) == 1
+        client.close()
+
+    def test_on_retry_callback_exception_swallowed(self, mock_lg: Logger) -> None:
+        """A raising on_retry does not derail the retry loop."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="ok")
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+
+        def bad_on_retry(*_: object) -> None:
+            raise RuntimeError("tracker down")
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(on_retry=bad_on_retry)
+        )
+
+        result = client.chat(messages=[{"role": "user", "content": "Hi"}])
+        assert result.content == "ok"
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_on_retry_fires_async(self, mock_lg: Logger) -> None:
+        """on_retry fires on the async path with the raw exception."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="ok")
+        call_count = 0
+        transient = BackendRequestError("Rate limited", status_code=429)
+
+        class RetryBackend(MockBackend):
+            async def chat_async(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise transient
+                return next(self._responses)
+
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+
+        client = LLMClient(lg=mock_lg, backend=backend).with_callbacks(
+            LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                )
+            )
+        )
+
+        result = await client.chat_async(messages=[{"role": "user", "content": "Hi"}])
+        assert result.content == "ok"
+        assert len(retry_calls) == 1
+        assert retry_calls[0][1] is transient
+        assert retry_calls[0][2] == 1
+        await client.aclose()
+
+    def test_stream_on_retry_fires_on_pre_first_token_error(
+        self, mock_lg: Logger
+    ) -> None:
+        """on_retry fires when a stream error before the first token is retried."""
+        from llm_infer.client import BackendRequestError
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        response = ChatResponse(content="Hi")
+        call_count = 0
+        transient = BackendRequestError("Rate limited", status_code=429)
+
+        class RetryBackend(MockBackend):
+            def chat_stream(
+                self, request: ChatRequest, holder: ResponseHolder | None = None
+            ) -> Iterator[str]:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise transient
+                yield from super().chat_stream(request, holder)
+
+        retry_calls: list[tuple[ChatRequest, Exception, int, float]] = []
+        ctx = BackendContext(retry=RetryConfig(base=0.01, max_delay=0.1))
+        backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
+        client = LLMClient(
+            lg=mock_lg,
+            backend=backend,
+            callbacks=LLMCallbacks(
+                on_retry=lambda req, err, attempt, delay: retry_calls.append(
+                    (req, err, attempt, delay)
+                )
+            ),
+        )
+
+        list(client.chat_stream(messages=[{"role": "user", "content": "Hi"}]))
+
+        assert len(retry_calls) == 1
+        assert retry_calls[0][1] is transient
+        assert retry_calls[0][2] == 1
+        client.close()
+
     def test_stream_on_request_fires_before_stream(self, mock_lg: Logger) -> None:
         """on_request callback fires before streaming starts."""
         response = ChatResponse(content="hello")
@@ -1200,3 +1673,389 @@ class TestLLMClientCallbacks:
         assert len(response_calls) == 1
         assert response_calls[0][1].content == "hello"
         await client.aclose()
+
+
+class TestSendCallbacks:
+    """Tests for on_before_send / on_after_send callbacks."""
+
+    def test_on_before_send_fires_before_request(self, mock_lg: Logger) -> None:
+        """on_before_send fires before HTTP request with SendContext."""
+        from llm_infer.client import SendContext
+
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        send_calls: list[SendContext] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_before_send=lambda ctx: send_calls.append(ctx))
+        )
+        client.chat([{"role": "user", "content": "Hi"}])
+
+        assert len(send_calls) == 1
+        ctx = send_calls[0]
+        assert ctx.attempt == 1
+        assert ctx.retry_reason is None
+        assert ctx.delay_seconds is None
+        assert ctx.backend == "mock"  # MockBackend.provider returns "mock"
+        assert ctx.req_id is not None
+        client.close()
+
+    def test_on_after_send_fires_after_response(self, mock_lg: Logger) -> None:
+        """on_after_send fires after HTTP response with SendResult."""
+        from llm_infer.client import SendContext, SendResult
+
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_after_send=lambda ctx, res: after_calls.append((ctx, res)))
+        )
+        client.chat([{"role": "user", "content": "Hi"}])
+
+        assert len(after_calls) == 1
+        ctx, result = after_calls[0]
+        assert ctx.attempt == 1
+        assert result.status_code == 200
+        assert result.error is None
+        assert result.elapsed_ms > 0
+        client.close()
+
+    def test_on_after_send_fires_on_error(self, mock_lg: Logger) -> None:
+        """on_after_send fires with error details when request fails."""
+        from llm_infer.client import BackendRequestError, SendContext, SendResult
+
+        class FailingBackend(MockBackend):
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                raise BackendRequestError("Server error", status_code=500)
+
+        backend = FailingBackend(mock_lg, "test", responses=[])
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(on_after_send=lambda ctx, res: after_calls.append((ctx, res)))
+        )
+
+        with pytest.raises(BackendRequestError):
+            client.chat([{"role": "user", "content": "Hi"}])
+
+        assert len(after_calls) == 1
+        ctx, result = after_calls[0]
+        assert result.status_code == 500
+        assert isinstance(result.error, BackendRequestError)
+        client.close()
+
+    def test_send_callbacks_fire_on_retry(self, mock_lg: Logger) -> None:
+        """Send callbacks fire for each attempt during retry."""
+        from llm_infer.client import BackendRequestError, SendContext, SendResult
+        from llm_infer.client.backends import BackendContext, RetryConfig
+
+        call_count = 0
+
+        class RetryBackend(MockBackend):
+            def __init__(self, lg: Logger) -> None:
+                super().__init__(lg, "test", responses=[])
+                self._ctx = BackendContext(
+                    retry=RetryConfig(base=0.01, factor=1, max_delay=0.1, timeout=10)
+                )
+
+            @property
+            def ctx(self) -> BackendContext:
+                return self._ctx
+
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 3:
+                    raise BackendRequestError("Rate limited", status_code=429)
+                return ChatResponse(content="Success!")
+
+        backend = RetryBackend(mock_lg)
+        before_calls: list[SendContext] = []
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_before_send=lambda ctx: before_calls.append(ctx),
+                on_after_send=lambda ctx, res: after_calls.append((ctx, res)),
+            )
+        )
+        result = client.chat([{"role": "user", "content": "Hi"}])
+
+        assert result.content == "Success!"
+        assert len(before_calls) == 3
+        assert len(after_calls) == 3
+
+        # First attempt: no retry info
+        assert before_calls[0].attempt == 1
+        assert before_calls[0].retry_reason is None
+        assert before_calls[0].delay_seconds is None
+
+        # Second attempt: has retry info
+        assert before_calls[1].attempt == 2
+        assert before_calls[1].retry_reason == "rate_limit"
+        assert before_calls[1].delay_seconds is not None
+        assert before_calls[1].delay_seconds > 0
+
+        # Third attempt: also has retry info
+        assert before_calls[2].attempt == 3
+        assert before_calls[2].retry_reason == "rate_limit"
+
+        # Check after_send results
+        assert after_calls[0][1].status_code == 429
+        assert after_calls[1][1].status_code == 429
+        assert after_calls[2][1].status_code == 200
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_async_send_callbacks_fire(self, mock_lg: Logger) -> None:
+        """Send callbacks fire for async requests."""
+        from llm_infer.client import SendContext, SendResult
+
+        response = ChatResponse(content="Hello!")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        before_calls: list[SendContext] = []
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_before_send=lambda ctx: before_calls.append(ctx),
+                on_after_send=lambda ctx, res: after_calls.append((ctx, res)),
+            )
+        )
+        await client.chat_async([{"role": "user", "content": "Hi"}])
+
+        assert len(before_calls) == 1
+        assert len(after_calls) == 1
+        assert before_calls[0].attempt == 1
+        assert after_calls[0][1].status_code == 200
+        await client.aclose()
+
+    def test_stream_send_callbacks_fire(self, mock_lg: Logger) -> None:
+        """Send callbacks fire for streaming requests."""
+        from llm_infer.client import SendContext, SendResult
+
+        response = ChatResponse(content="hello")
+        backend = MockBackend(mock_lg, "test", responses=[response])
+        before_calls: list[SendContext] = []
+        after_calls: list[tuple[SendContext, SendResult]] = []
+
+        client = LLMClient(mock_lg, backend).with_callbacks(
+            LLMCallbacks(
+                on_before_send=lambda ctx: before_calls.append(ctx),
+                on_after_send=lambda ctx, res: after_calls.append((ctx, res)),
+            )
+        )
+        tokens = list(client.chat_stream([{"role": "user", "content": "Hi"}]))
+
+        assert tokens == ["h", "e", "l", "l", "o"]
+        assert len(before_calls) == 1
+        assert len(after_calls) == 1
+        assert before_calls[0].attempt == 1
+        assert after_calls[0][1].status_code == 200
+        client.close()
+
+
+class TestFactoryVertexNativeFromConfig:
+    """``Factory.vertex_natives_from_config`` extracts ``type: vertex_native``
+    entries from the shared config shape and returns them keyed by name.
+    Chat entries in the same config are ignored — they belong to
+    ``from_config``. Disabled entries are dropped from both surfaces."""
+
+    def _vertex_cfg(
+        self, project: str = "p", region: str = "us-central1"
+    ) -> dict[str, Any]:
+        return {
+            "type": "vertex_native",
+            "project": project,
+            "region": region,
+            "auth": {"mode": "api_key", "api_key": "test-key"},
+        }
+
+    def test_returns_backends_by_name(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "vertex_a": self._vertex_cfg(project="proj-a", region="us-central1"),
+                "vertex_b": self._vertex_cfg(project="proj-b", region="us-east4"),
+            }
+        }
+        backends = factory.vertex_natives_from_config(config)
+        assert set(backends) == {"vertex_a", "vertex_b"}
+        assert all(isinstance(b, NativeVertexBackend) for b in backends.values())
+        assert backends["vertex_a"]._project == "proj-a"
+        assert backends["vertex_b"]._region == "us-east4"
+
+    def test_ignores_chat_entries(self, mock_lg: Logger) -> None:
+        # A mixed yaml is the intended use — chat entries land in from_config,
+        # vertex_native entries land here, both read the same file.
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "vertex_direct": self._vertex_cfg(),
+            }
+        }
+        backends = factory.vertex_natives_from_config(config)
+        assert set(backends) == {"vertex_direct"}
+
+    def test_skips_disabled_entries(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        cfg = self._vertex_cfg()
+        cfg["enabled"] = False
+        config = {"backends": {"vertex_off": cfg}}
+        assert factory.vertex_natives_from_config(config) == {}
+
+    def test_returns_empty_when_no_vertex_native(self, mock_lg: Logger) -> None:
+        # Not an error — chat-only configs are the common case for callers
+        # that don't use native Vertex.
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+            }
+        }
+        assert factory.vertex_natives_from_config(config) == {}
+
+    def test_merges_global_retry_and_rate_limit(self, mock_lg: Logger) -> None:
+        # Same convention as from_config: top-level defaults merge into each
+        # per-backend block, per-backend value wins on conflict.
+        factory = Factory(mock_lg)
+        config = {
+            "retry": {"base": 3.0, "timeout": 60},
+            "rate_limit": {"per_minute": 200},
+            "backends": {
+                "vertex_direct": {
+                    **self._vertex_cfg(),
+                    # override global retry.timeout, inherit base
+                    "retry": {"timeout": 40},
+                },
+            },
+        }
+        backends = factory.vertex_natives_from_config(config)
+        ctx = backends["vertex_direct"]._ctx
+        assert ctx.retry is not None
+        assert ctx.retry.base == 3.0
+        assert ctx.retry.timeout == 40
+        assert ctx.rate_limiter is not None
+        assert ctx.rate_limiter.per_minute == 200
+
+    def test_missing_project_or_region_raises_at_wire_up(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        cfg = self._vertex_cfg()
+        del cfg["project"]
+        config = {"backends": {"vertex_direct": cfg}}
+        with pytest.raises(ValueError, match="project.*region.*are required"):
+            factory.vertex_natives_from_config(config)
+
+
+class TestFromConfigFiltersVertexNative:
+    """``from_config`` skips ``type: vertex_native`` entries when building
+    the router. The dedicated accessor builds them separately, so the router
+    never sees a non-chat surface."""
+
+    def test_from_config_skips_vertex_native_entries(self, mock_lg: Logger) -> None:
+        factory = Factory(mock_lg)
+        config = {
+            "default": "chat_a",
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                    "model": "m",
+                },
+                "vertex_direct": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        router = factory.from_config(config)
+        try:
+            assert set(router.clients) == {"chat_a"}
+        finally:
+            router.close()
+
+    def test_default_pointing_at_vertex_native_raises_config_error(
+        self, mock_lg: Logger
+    ) -> None:
+        factory = Factory(mock_lg)
+        config = {
+            "default": "vertex_direct",
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                },
+                "vertex_direct": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        with pytest.raises(
+            ConfigError, match="Default backend.*vertex_native.*chat backend"
+        ):
+            factory.from_config(config)
+
+    def test_router_error_names_chat_scope(self, mock_lg: Logger) -> None:
+        # Non-chat backends live in their own accessor; the router's error
+        # should tell the user that instead of a generic "not found".
+        factory = Factory(mock_lg)
+        config = {
+            "default": "chat_a",
+            "backends": {
+                "chat_a": {
+                    "type": "openai_compatible",
+                    "base_url": "http://localhost:8000/v1",
+                    "model": "m",
+                },
+                "vertex_direct": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        router = factory.from_config(config)
+        try:
+            with pytest.raises(ValueError, match="Chat backend.*not found"):
+                router.get_client(backend="vertex_direct")
+        finally:
+            router.close()
+
+    def test_only_vertex_native_backends_raises_clear_error(
+        self, mock_lg: Logger
+    ) -> None:
+        # If all enabled backends are vertex_native, from_config should raise
+        # a clear error directing users to vertex_natives_from_config.
+        factory = Factory(mock_lg)
+        config = {
+            "backends": {
+                "vertex_a": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-central1",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+                "vertex_b": {
+                    "type": "vertex_native",
+                    "project": "p",
+                    "region": "us-east4",
+                    "auth": {"mode": "api_key", "api_key": "k"},
+                },
+            },
+        }
+        with pytest.raises(ConfigError, match="No chat backends.*vertex_natives"):
+            factory.from_config(config)

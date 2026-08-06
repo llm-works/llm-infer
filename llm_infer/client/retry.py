@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from typing import Any, TypeVar
 
 from appinfra import Backoff
@@ -13,7 +13,7 @@ from appinfra.log import Logger
 from .backends import BackendContext, RetryConfig
 from .errors import BackendRequestError, BackendUnavailableError
 from .log_utils import fmt_error
-from .types import ChatRequest, LLMCallbacks
+from .types import ChatRequest, LLMCallbacks, SendContext, SendResult
 
 # Non-5xx status codes that should trigger retry (5xx are always retried)
 # 429 = rate limited, 529 = site overloaded (Cloudflare)
@@ -103,6 +103,8 @@ def _fire_response(
     response: Any,
 ) -> None:
     """Fire on_response callback if configured."""
+    if request and hasattr(response, "request"):
+        response.request = request
     if callbacks and callbacks.on_response and request:
         try:
             callbacks.on_response(request, response)
@@ -122,6 +124,64 @@ def _fire_error(
             callbacks.on_error(request, error)
         except Exception as e:
             lg.warning("on_error callback failed", extra={"exception": e})
+
+
+def _fire_retry(
+    lg: Logger,
+    callbacks: LLMCallbacks | None,
+    request: ChatRequest | None,
+    error: Exception,
+    attempt: int,
+    delay_seconds: float,
+) -> None:
+    """Fire on_retry callback if configured (before backoff sleep)."""
+    if callbacks and callbacks.on_retry and request:
+        try:
+            callbacks.on_retry(request, error, attempt, delay_seconds)
+        except Exception as e:
+            lg.warning("on_retry callback failed", extra={"exception": e})
+
+
+def _fire_on_before_send(
+    lg: Logger,
+    callbacks: LLMCallbacks | None,
+    ctx: SendContext,
+) -> None:
+    """Fire on_before_send callback if configured."""
+    if callbacks and callbacks.on_before_send:
+        try:
+            callbacks.on_before_send(ctx)
+        except Exception as e:
+            lg.warning("on_before_send callback failed", extra={"exception": e})
+
+
+def _fire_on_after_send(
+    lg: Logger,
+    callbacks: LLMCallbacks | None,
+    ctx: SendContext,
+    result: SendResult,
+) -> None:
+    """Fire on_after_send callback if configured."""
+    if callbacks and callbacks.on_after_send:
+        try:
+            callbacks.on_after_send(ctx, result)
+        except Exception as e:
+            lg.warning("on_after_send callback failed", extra={"exception": e})
+
+
+def _retry_reason(error: BackendUnavailableError | BackendRequestError) -> str:
+    """Determine retry reason from error type."""
+    if isinstance(error, BackendUnavailableError):
+        return "unavailable"
+    if isinstance(error, BackendRequestError):
+        code = error.status_code
+        if code == 429:
+            return "rate_limit"
+        if code == 529:
+            return "overloaded"
+        if code is not None and 500 <= code < 600:
+            return "server_error"
+    return "timeout"
 
 
 class RetryHelper(RetryBase):
@@ -179,6 +239,86 @@ class RetryHelper(RetryBase):
 
         self._lg.debug("retrying request...", extra=extra)
 
+    def _send_context(
+        self,
+        attempt: int,
+        model: str | None,
+        req_id: str | None,
+        last_error: BackendUnavailableError | BackendRequestError | None = None,
+        last_delay: float | None = None,
+    ) -> SendContext:
+        """Build SendContext for on_before_send/on_after_send callbacks."""
+        return SendContext(
+            attempt=attempt,
+            retry_reason=_retry_reason(last_error) if last_error else None,
+            delay_seconds=last_delay,
+            model=model,
+            backend=self._provider,
+            req_id=req_id,
+        )
+
+    def _on_after_send(
+        self,
+        callbacks: LLMCallbacks | None,
+        ctx: SendContext,
+        start: float,
+        error: Exception | None = None,
+    ) -> None:
+        """Fire on_after_send callback with timing."""
+        elapsed_ms = (time.monotonic() - start) * 1000
+        status_code = 200 if error is None else None
+        if isinstance(error, BackendRequestError):
+            status_code = error.status_code
+        _fire_on_after_send(
+            self._lg, callbacks, ctx, SendResult(status_code, error, elapsed_ms)
+        )
+
+    def _retry_delay(
+        self,
+        e: BackendUnavailableError | BackendRequestError,
+        backoff: Backoff,
+        retry: RetryConfig,
+        start_time: float,
+    ) -> float | None:
+        """Compute delay if retry is possible, else None."""
+        if not self.should_retry(e, start_time, retry.timeout):
+            return None
+        return self.compute_delay(backoff, retry.timeout, start_time)
+
+    def _prep_retry(
+        self,
+        e: BackendUnavailableError | BackendRequestError,
+        delay: float,
+        retry_count: int,
+        callbacks: LLMCallbacks | None = None,
+        request: ChatRequest | None = None,
+    ) -> None:
+        """Fire on_retry, log+sleep, then fire on_request for the next attempt."""
+        req_id = request.id if request else None
+        model = request.model if request else None
+        self._log_retry(e, retry_count, delay, req_id, model)
+        _fire_retry(self._lg, callbacks, request, e, retry_count, delay)
+        time.sleep(delay)
+        self._log_retry_send(retry_count, model, req_id)
+        _fire_request(self._lg, callbacks, request, retry_count)
+
+    async def _prep_retry_async(
+        self,
+        e: BackendUnavailableError | BackendRequestError,
+        delay: float,
+        retry_count: int,
+        callbacks: LLMCallbacks | None = None,
+        request: ChatRequest | None = None,
+    ) -> None:
+        """Async variant of _prep_retry: on_retry → sleep → on_request."""
+        req_id = request.id if request else None
+        model = request.model if request else None
+        self._log_retry(e, retry_count, delay, req_id, model)
+        _fire_retry(self._lg, callbacks, request, e, retry_count, delay)
+        await asyncio.sleep(delay)
+        self._log_retry_send(retry_count, model, req_id)
+        _fire_request(self._lg, callbacks, request, retry_count)
+
     def call(
         self,
         fn: Callable[[], T],
@@ -202,11 +342,18 @@ class RetryHelper(RetryBase):
         callbacks: LLMCallbacks | None,
     ) -> T:
         """Execute without retry, firing callbacks."""
+        req_id = request.id if request else None
+        model = request.model if request else None
+        ctx = self._send_context(1, model, req_id)
+        _fire_on_before_send(self._lg, callbacks, ctx)
+        start = time.monotonic()
         try:
             result = fn()
+            self._on_after_send(callbacks, ctx, start)
             _fire_response(self._lg, callbacks, request, result)
             return result
         except Exception as e:
+            self._on_after_send(callbacks, ctx, start, e)
             _fire_error(self._lg, callbacks, request, e)
             raise
 
@@ -219,29 +366,31 @@ class RetryHelper(RetryBase):
         retry_count: int,
     ) -> T:
         """Execute with retry loop, firing callbacks."""
-        backoff = self.create_backoff(retry)
-        start_time = time.monotonic()
+        backoff, t0 = self.create_backoff(retry), time.monotonic()
         req_id = request.id if request else None
         model = request.model if request else None
+        last_err: BackendUnavailableError | BackendRequestError | None = None
+        last_dly: float | None = None
         while True:
+            ctx = self._send_context(retry_count + 1, model, req_id, last_err, last_dly)
+            _fire_on_before_send(self._lg, callbacks, ctx)
+            start = time.monotonic()
             try:
                 result = fn()
+                self._on_after_send(callbacks, ctx, start)
                 _fire_response(self._lg, callbacks, request, result)
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self.should_retry(e, start_time, retry.timeout):
+                self._on_after_send(callbacks, ctx, start, e)
+                dly = self._retry_delay(e, backoff, retry, t0)
+                if dly is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                delay = self.compute_delay(backoff, retry.timeout, start_time)
-                if delay is None:
-                    _fire_error(self._lg, callbacks, request, e)
-                    raise
-                self._log_retry(e, retry_count + 1, delay, req_id, model)
-                time.sleep(delay)
                 retry_count += 1
-                self._log_retry_send(retry_count, model, req_id)
-                _fire_request(self._lg, callbacks, request, retry_count)
+                last_err, last_dly = e, dly
+                self._prep_retry(e, dly, retry_count, callbacks, request)
             except Exception as e:
+                self._on_after_send(callbacks, ctx, start, e)
                 _fire_error(self._lg, callbacks, request, e)
                 raise
 
@@ -270,11 +419,18 @@ class RetryHelper(RetryBase):
         callbacks: LLMCallbacks | None,
     ) -> T:
         """Execute without retry, firing callbacks (async)."""
+        req_id = request.id if request else None
+        model = request.model if request else None
+        ctx = self._send_context(1, model, req_id)
+        _fire_on_before_send(self._lg, callbacks, ctx)
+        start = time.monotonic()
         try:
             result = await fn()
+            self._on_after_send(callbacks, ctx, start)
             _fire_response(self._lg, callbacks, request, result)
             return result
         except Exception as e:
+            self._on_after_send(callbacks, ctx, start, e)
             _fire_error(self._lg, callbacks, request, e)
             raise
 
@@ -287,28 +443,233 @@ class RetryHelper(RetryBase):
         retry_count: int,
     ) -> T:
         """Execute with retry loop, firing callbacks (async)."""
-        backoff = self.create_backoff(retry)
-        start_time = time.monotonic()
+        backoff, t0 = self.create_backoff(retry), time.monotonic()
         req_id = request.id if request else None
         model = request.model if request else None
+        last_err: BackendUnavailableError | BackendRequestError | None = None
+        last_dly: float | None = None
         while True:
+            ctx = self._send_context(retry_count + 1, model, req_id, last_err, last_dly)
+            _fire_on_before_send(self._lg, callbacks, ctx)
+            start = time.monotonic()
             try:
                 result = await fn()
+                self._on_after_send(callbacks, ctx, start)
                 _fire_response(self._lg, callbacks, request, result)
                 return result
             except (BackendUnavailableError, BackendRequestError) as e:
-                if not self.should_retry(e, start_time, retry.timeout):
+                self._on_after_send(callbacks, ctx, start, e)
+                dly = self._retry_delay(e, backoff, retry, t0)
+                if dly is None:
                     _fire_error(self._lg, callbacks, request, e)
                     raise
-                delay = self.compute_delay(backoff, retry.timeout, start_time)
-                if delay is None:
-                    _fire_error(self._lg, callbacks, request, e)
-                    raise
-                self._log_retry(e, retry_count + 1, delay, req_id, model)
-                await asyncio.sleep(delay)
                 retry_count += 1
-                self._log_retry_send(retry_count, model, req_id)
-                _fire_request(self._lg, callbacks, request, retry_count)
+                last_err, last_dly = e, dly
+                await self._prep_retry_async(e, dly, retry_count, callbacks, request)
             except Exception as e:
+                self._on_after_send(callbacks, ctx, start, e)
                 _fire_error(self._lg, callbacks, request, e)
                 raise
+
+    def _stream_retry_delay(
+        self,
+        e: BackendUnavailableError | BackendRequestError,
+        backoff: Backoff,
+        retry: RetryConfig,
+        start_time: float,
+    ) -> float | None:
+        """Compute delay before retrying a pre-first-token stream error.
+
+        Returns None when the error is not transient or the retry budget is
+        exhausted, in which case the caller must re-raise.
+        """
+        return self._retry_delay(e, backoff, retry, start_time)
+
+    def stream(
+        self,
+        fn: Callable[[], Iterator[str]],
+        request: ChatRequest | None = None,
+        callbacks: LLMCallbacks | None = None,
+    ) -> Iterator[str]:
+        """Execute streaming fn with retry until the first token is yielded.
+
+        Retries the same transient errors as call(), but only while no token
+        has been yielded yet. Once streaming has started, errors propagate
+        unchanged: partial output cannot be replayed safely. fn is invoked
+        fresh on every attempt.
+
+        Unlike call(), the caller is responsible for firing the initial
+        on_request callback (retry_count=0); this method fires on_request
+        only on retries. This avoids duplicate callbacks when the client
+        layer manages the initial event.
+
+        The backoff sleep is a blocking time.sleep and cannot be interrupted;
+        abort/cancellation during backoff is only supported on the async path
+        (stream_async).
+        """
+        retry = self._ctx.retry
+        req_id = request.id if request else None
+        model = request.model if request else None
+
+        if retry is None:
+            yield from self._stream_no_retry(fn, model, req_id, callbacks)
+            return
+
+        yield from self._stream_with_retry(fn, request, model, req_id, callbacks, retry)
+
+    def _stream_no_retry(
+        self,
+        fn: Callable[[], Iterator[str]],
+        model: str | None,
+        req_id: str | None,
+        callbacks: LLMCallbacks | None,
+    ) -> Iterator[str]:
+        """Stream without retry, firing send callbacks."""
+        ctx = self._send_context(1, model, req_id)
+        _fire_on_before_send(self._lg, callbacks, ctx)
+        start = time.monotonic()
+        try:
+            it = fn()
+            first = next(it)
+        except StopIteration:
+            self._on_after_send(callbacks, ctx, start)
+            return
+        except Exception as e:
+            self._on_after_send(callbacks, ctx, start, e)
+            raise
+        self._on_after_send(callbacks, ctx, start)
+        yield first
+        yield from it
+
+    def _stream_with_retry(
+        self,
+        fn: Callable[[], Iterator[str]],
+        request: ChatRequest | None,
+        model: str | None,
+        req_id: str | None,
+        callbacks: LLMCallbacks | None,
+        retry: RetryConfig,
+    ) -> Iterator[str]:
+        """Stream with retry loop, firing send callbacks."""
+        backoff, t0, retry_count = self.create_backoff(retry), time.monotonic(), 0
+        last_err: BackendUnavailableError | BackendRequestError | None = None
+        last_dly: float | None = None
+        while True:
+            ctx = self._send_context(retry_count + 1, model, req_id, last_err, last_dly)
+            _fire_on_before_send(self._lg, callbacks, ctx)
+            start = time.monotonic()
+            try:
+                it = fn()
+                first = next(it)
+            except StopIteration:
+                self._on_after_send(callbacks, ctx, start)
+                return
+            except (BackendUnavailableError, BackendRequestError) as e:
+                self._on_after_send(callbacks, ctx, start, e)
+                dly = self._stream_retry_delay(e, backoff, retry, t0)
+                if dly is None:
+                    raise
+                last_err, last_dly, retry_count = e, dly, retry_count + 1
+                self._prep_retry(e, dly, retry_count, callbacks, request)
+                continue
+            except Exception as e:
+                self._on_after_send(callbacks, ctx, start, e)
+                raise
+            self._on_after_send(callbacks, ctx, start)
+            yield first
+            yield from it
+            return
+
+    async def stream_async(
+        self,
+        fn: Callable[[], AsyncIterator[str]],
+        request: ChatRequest | None = None,
+        callbacks: LLMCallbacks | None = None,
+    ) -> AsyncIterator[str]:
+        """Async variant of stream(): retry until the first token is yielded.
+
+        Like stream(), the caller fires the initial on_request callback.
+
+        The backoff sleep uses asyncio.sleep, so task cancellation (e.g. an
+        abort signal racing the stream task) propagates promptly.
+        """
+        retry = self._ctx.retry
+        req_id = request.id if request else None
+        model = request.model if request else None
+
+        if retry is None:
+            async for token in self._stream_no_retry_async(
+                fn, model, req_id, callbacks
+            ):
+                yield token
+            return
+
+        async for token in self._stream_with_retry_async(
+            fn, request, model, req_id, callbacks, retry
+        ):
+            yield token
+
+    async def _stream_no_retry_async(
+        self,
+        fn: Callable[[], AsyncIterator[str]],
+        model: str | None,
+        req_id: str | None,
+        callbacks: LLMCallbacks | None,
+    ) -> AsyncIterator[str]:
+        """Async stream without retry, firing send callbacks."""
+        ctx = self._send_context(1, model, req_id)
+        _fire_on_before_send(self._lg, callbacks, ctx)
+        start = time.monotonic()
+        try:
+            it = fn()
+            first = await anext(it)
+        except StopAsyncIteration:
+            self._on_after_send(callbacks, ctx, start)
+            return
+        except Exception as e:
+            self._on_after_send(callbacks, ctx, start, e)
+            raise
+        self._on_after_send(callbacks, ctx, start)
+        yield first
+        async for token in it:
+            yield token
+
+    async def _stream_with_retry_async(
+        self,
+        fn: Callable[[], AsyncIterator[str]],
+        request: ChatRequest | None,
+        model: str | None,
+        req_id: str | None,
+        callbacks: LLMCallbacks | None,
+        retry: RetryConfig,
+    ) -> AsyncIterator[str]:
+        """Async stream with retry loop, firing send callbacks."""
+        backoff, t0, retry_count = self.create_backoff(retry), time.monotonic(), 0
+        last_err: BackendUnavailableError | BackendRequestError | None = None
+        last_dly: float | None = None
+        while True:
+            ctx = self._send_context(retry_count + 1, model, req_id, last_err, last_dly)
+            _fire_on_before_send(self._lg, callbacks, ctx)
+            start = time.monotonic()
+            try:
+                it = fn()
+                first = await anext(it)
+            except StopAsyncIteration:
+                self._on_after_send(callbacks, ctx, start)
+                return
+            except (BackendUnavailableError, BackendRequestError) as e:
+                self._on_after_send(callbacks, ctx, start, e)
+                dly = self._stream_retry_delay(e, backoff, retry, t0)
+                if dly is None:
+                    raise
+                last_err, last_dly, retry_count = e, dly, retry_count + 1
+                await self._prep_retry_async(e, dly, retry_count, callbacks, request)
+                continue
+            except Exception as e:
+                self._on_after_send(callbacks, ctx, start, e)
+                raise
+            self._on_after_send(callbacks, ctx, start)
+            yield first
+            async for token in it:
+                yield token
+            return

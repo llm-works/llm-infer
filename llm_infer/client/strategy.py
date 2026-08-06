@@ -145,7 +145,8 @@ class DefaultTransientDetector:
 
     Classification:
     - RETRY_NEXT: BackendUnavailableError, BackendTimeoutError, 5xx errors
-    - RETRY_SAME: 429 rate limit (let client backoff handle it)
+    - RETRY_SAME: 429 rate limit (inner retry backs off on the same backend;
+      FallbackClient escalates once that budget is exhausted)
     - FAIL: All other errors (4xx client errors)
     """
 

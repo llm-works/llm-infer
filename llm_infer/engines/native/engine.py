@@ -224,7 +224,7 @@ class InferenceEngine:
             [request.output_tokens[-1]], skip_special_tokens=True
         )
 
-    async def generate_stream(  # cq: max-lines=40
+    async def generate_stream(  # cq: max-lines=36
         self,
         prompt: str,
         max_tokens: int = 100,

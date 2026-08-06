@@ -66,13 +66,21 @@ from .base import ChatClient
 from .bound import BoundChatClient
 from .client import LLMClient
 from .discovery import ModelDiscovery
-from .embedding import EmbeddingClient
+from .embedding import (
+    EmbeddingCallbacks,
+    EmbeddingClient,
+    EmbeddingErrorCallback,
+    EmbeddingRequest,
+    EmbeddingRequestCallback,
+    EmbeddingResponseCallback,
+)
 from .errors import (
     BackendError,
     BackendRequestError,
     BackendTimeoutError,
     BackendUnavailableError,
     ConfigError,
+    FallbackAmbiguityError,
     ModelConflictError,
 )
 from .factory import Factory
@@ -102,6 +110,8 @@ from .types import (
     LLMResponseCallback,
     Provider,
     ResponseHolder,
+    SendContext,
+    SendResult,
 )
 
 __all__ = [
@@ -114,8 +124,13 @@ __all__ = [
     "LLMClient",
     # Embeddings client
     "EmbeddingClient",
+    "EmbeddingRequest",
     "EmbeddingResult",
     "BatchEmbeddingResult",
+    "EmbeddingCallbacks",
+    "EmbeddingRequestCallback",
+    "EmbeddingResponseCallback",
+    "EmbeddingErrorCallback",
     # Retry configuration
     "RetryConfig",
     # Router (multi-backend)
@@ -145,6 +160,8 @@ __all__ = [
     "LLMRequestCallback",
     "LLMResponseCallback",
     "LLMErrorCallback",
+    "SendContext",
+    "SendResult",
     # Backend base class
     "Backend",
     "OpenAICompatibleBackend",
@@ -154,6 +171,7 @@ __all__ = [
     "BackendTimeoutError",
     "BackendUnavailableError",
     "ConfigError",
+    "FallbackAmbiguityError",
     "ModelConflictError",
 ]
 

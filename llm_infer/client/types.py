@@ -27,6 +27,8 @@ __all__ = [
     "LLMCallbacks",
     "Provider",
     "ResponseHolder",
+    "SendContext",
+    "SendResult",
 ]
 
 
@@ -159,6 +161,20 @@ class ChatResponse:
         provider: Backend/provider that generated the response (see Provider enum).
         raw: Raw response from the provider API. Contains provider-specific
             fields not normalized into the standard response (e.g., cost_in_usd_ticks).
+        headers: Lowercased HTTP response headers, when the backend captured
+            them. Useful for provider signals carried out of band — e.g.
+            Vertex's ``x-gemini-service-tier`` indicating which tier actually
+            served the request (may differ from the requested tier under
+            capacity pressure).
+        request: The originating ``ChatRequest`` (backreference, mirrors
+            ``httpx.Response.request``). Populated by ``LLMClient`` before
+            the response is returned or surfaced to ``on_response``. Enables
+            callers of ``chat_async``/``chat_stream_async`` to correlate a
+            response back to its ``ChatRequest.id`` without side-channel
+            state. Backends leave it ``None``; the client fills it in.
+            Note: ``ChatRequest.messages`` may be large — callers that hold
+            responses long-term should copy out what they need if the memory
+            is a concern.
 
     llm-infer Extensions:
         thinking: Extracted thinking/reasoning content from <think> blocks.
@@ -175,6 +191,8 @@ class ChatResponse:
     model: str | None = None
     provider: str | None = None
     raw: dict[str, Any] | None = None
+    headers: dict[str, str] | None = None
+    request: ChatRequest | None = None
     # llm-infer extensions
     thinking: str | None = None
     tool_calls: list[ToolCall] | None = field(default=None)
@@ -189,6 +207,52 @@ class ChatResponse:
 LLMRequestCallback = Callable[["ChatRequest", int], None]
 LLMResponseCallback = Callable[["ChatRequest", "ChatResponse"], None]
 LLMErrorCallback = Callable[["ChatRequest", Exception], None]
+LLMRetryCallback = Callable[["ChatRequest", Exception, int, float], None]
+
+
+@dataclass
+class SendContext:
+    """Context passed to on_before_send/on_after_send callbacks.
+
+    Provides visibility into the HTTP-level request lifecycle, including
+    retry state and timing. Unlike on_request (which fires at retry-loop
+    entry), these callbacks fire at the actual HTTP send.
+
+    Attributes:
+        attempt: Attempt number (1 = first, 2+ = retry).
+        retry_reason: Why this attempt is a retry. None for first attempt.
+            Values: "rate_limit", "overloaded", "server_error", "timeout", "unavailable".
+        delay_seconds: Backoff delay before this attempt. None for first attempt.
+        model: Model being requested.
+        backend: Backend name handling the request.
+        req_id: Request ID for log correlation.
+    """
+
+    attempt: int
+    retry_reason: str | None
+    delay_seconds: float | None
+    model: str | None
+    backend: str
+    req_id: str | None
+
+
+@dataclass
+class SendResult:
+    """Result passed to on_after_send callback.
+
+    Attributes:
+        status_code: HTTP status code, or None if connection failed.
+        error: Exception if the request failed, None on success.
+        elapsed_ms: Time from send to response headers (or error).
+    """
+
+    status_code: int | None
+    error: Exception | None
+    elapsed_ms: float
+
+
+BeforeSendCallback = Callable[[SendContext], None]
+AfterSendCallback = Callable[[SendContext, SendResult], None]
 
 
 @dataclass
@@ -198,17 +262,36 @@ class LLMCallbacks:
     Configure callbacks to observe request/response flow for cost tracking,
     logging, tracing, or metrics collection.
 
-    Attributes:
+    Retry-loop level (fires once per retry-loop entry, before backoff):
         on_request: Called before each request attempt. Args: (request, retry).
             retry is 0 for first attempt, 1+ for retries after transient errors.
         on_response: Called after successful response. Args: (request, response).
-            For streaming, fires after stream completes.
+            For streaming, fires after stream completes. ``response.request`` is
+            the same object as the ``request`` argument — the pair is passed
+            positionally for symmetry with ``on_request``/``on_error``.
+        on_retry: Called on a transient error that will be retried, before the
+            backoff sleep. Args: (request, exception, attempt, delay_seconds).
+            ``attempt`` is the upcoming retry index (1-based), matching the
+            ``retry`` argument the following ``on_request`` fires with.
+            ``exception`` is the raw exception object — the callback owns the
+            formatting decision (useful for logging full 429/quota bodies past
+            the truncated internal warning). Not fired on terminal errors;
+            those still route through ``on_error``.
         on_error: Called after failed request. Args: (request, exception).
+
+    HTTP level (fires at actual send, after any backoff delay):
+        on_before_send: Called immediately before HTTP request. Args: (SendContext).
+            Includes retry_reason and delay_seconds for visibility into backoff.
+        on_after_send: Called after HTTP response/error. Args: (SendContext, SendResult).
+            Includes status_code, error, and elapsed_ms.
     """
 
     on_request: LLMRequestCallback | None = None
     on_response: LLMResponseCallback | None = None
     on_error: LLMErrorCallback | None = None
+    on_retry: LLMRetryCallback | None = None
+    on_before_send: BeforeSendCallback | None = None
+    on_after_send: AfterSendCallback | None = None
 
 
 class _ChatStream:

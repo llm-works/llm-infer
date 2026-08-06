@@ -79,6 +79,15 @@ class ToolCall(BaseModel):
     id: str = Field(..., description="Unique ID for this tool call")
     type: Literal["function"] = "function"
     function: FunctionCall
+    extra_content: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Provider round-trip data on a tool call. Populated from the "
+            "wire's `extra_content`; must be echoed back on the next turn "
+            "or Gemini 3.x reasoning models 400. Callers should round-trip "
+            "with `model_dump(exclude_none=True)`."
+        ),
+    )
 
 
 # =============================================================================

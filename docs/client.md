@@ -26,6 +26,7 @@ backends. Built for autonomous agents and production use.
 ```python
 # Preferred: import from root package
 from llm_infer import client
+
 factory = client.Factory(lg)
 
 # Or import specific classes directly
@@ -264,16 +265,16 @@ The client facade that delegates to backend implementations. Create instances us
 ```python
 @dataclass
 class ChatResponse:
-    content: str                              # Generated text
+    content: str  # Generated text
     usage: ChatCompletionUsage | None = None  # Token usage stats
-    finish_reason: FinishReason | None = None # Why generation stopped
-    model: str | None = None                  # Model that generated response
+    finish_reason: FinishReason | None = None  # Why generation stopped
+    model: str | None = None  # Model that generated response
 
     # llm-infer extensions
-    thinking: str | None = None               # Extracted <think> content
+    thinking: str | None = None  # Extracted <think> content
     tool_calls: list[ToolCall] | None = None  # Function calls
 
-    def has_tool_calls(self) -> bool: ...     # Check if tool calls present
+    def has_tool_calls(self) -> bool: ...  # Check if tool calls present
 ```
 
 ### Configuration Format
@@ -300,6 +301,9 @@ backends:
     base_url: http://localhost:8000/v1
     model: qwen2.5-72b
     timeout: 120.0
+    # provider: <name>  # optional; overrides URL-based auto-detection.
+                        # Valid: anthropic, openai, xai, google, local, unknown.
+                        # Mismatch with URL-detected value logs a WARN.
     # Per-backend overrides (optional)
     rate_limit:
       per_minute: 120
@@ -307,6 +311,18 @@ backends:
     type: anthropic
     model: claude-sonnet-4-20250514
     max_tokens: 4096
+  vertex_direct:
+    # Native Vertex REST (cachedContents + generateContent).
+    # Built by Factory.vertex_natives_from_config(config), NOT from_config —
+    # from_config filters non-chat types out of the router.
+    type: vertex_native
+    project: my-gcp-project
+    region: us-central1
+    auth:
+      mode: gcp_sa
+      credentials_path: /path/to/sa.json
+    service_tier: priority   # optional
+    timeout: 60
 
 # Single backend configuration
 type: openai_compatible
@@ -333,6 +349,7 @@ lg = Logger("proxy")
 factory = Factory(lg)
 client = factory.openai(base_url="http://backend:8000/v1")
 
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
     messages = request["messages"]
@@ -351,6 +368,7 @@ async def chat_completions(request: dict):
         response = client.chat(messages)
         return {"choices": [{"message": {"content": response.content}}]}
 
+
 @app.on_event("shutdown")
 async def shutdown():
     await client.aclose()
@@ -362,6 +380,7 @@ Use the `Backend` ABC for type-safe mocking:
 
 ```python
 from llm_infer.client import Backend, ChatResponse, LLMClient
+
 
 class MockBackend(Backend):
     def __init__(self, responses: list[str]):
@@ -390,11 +409,13 @@ class MockBackend(Backend):
         async def gen():
             for token in self.chat_stream(messages, **kwargs):
                 yield token
+
         return gen()
 
     @classmethod
     def from_config(cls, lg: Logger, config: dict) -> "MockBackend":
         return cls(responses=[])
+
 
 # Use in tests
 backend = MockBackend(["Hello!", "Goodbye!"])

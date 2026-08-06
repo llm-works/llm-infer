@@ -52,13 +52,19 @@ class SAIAAdapter(Backend):
     - Tool call argument parsing (JSON string -> dict)
     """
 
-    def __init__(self, client: ChatClient) -> None:
+    def __init__(self, client: ChatClient, *, streaming: bool = True) -> None:
         """Initialize the adapter with a ChatClient.
 
         Args:
             client: The ChatClient to wrap (LLMClient, LLMRouter, etc.).
+            streaming: If True (default), abort_signal calls use streaming
+                so abort can interrupt during time-to-first-token. If False,
+                they use chat_async and abort by cancelling the pending task.
+                Streaming matters on slow providers; for fast providers
+                (sub-second TTFT) non-streaming is simpler.
         """
         self._client = client
+        self._streaming = streaming
         self._chat_args: dict[str, Any] = {}
 
     def with_chat_args(self, **kwargs: Any) -> Self:
@@ -101,8 +107,8 @@ class SAIAAdapter(Backend):
             temperature: Sampling temperature (default 1.0).
             context: User context passed to callbacks (cost tracking, tracing).
             abort_signal: Optional event that, when set, aborts the request.
-                Raises PauseRequested on abort. Uses streaming internally
-                for fast abort even during time-to-first-token.
+                Raises PauseRequested on abort. Abort mechanism depends on
+                the ``streaming`` constructor parameter.
 
         Returns:
             SAIA ChatResponse with content, tool calls, token usage, resolved
@@ -129,7 +135,9 @@ class SAIAAdapter(Backend):
             call_kwargs["context"] = context
 
         if abort_signal is not None:
-            return await self._chat_with_abort(call_kwargs, abort_signal)
+            if self._streaming:
+                return await self._chat_with_abort(call_kwargs, abort_signal)
+            return await self._chat_async_with_abort(call_kwargs, abort_signal)
 
         response = await self._client.chat_async(**call_kwargs)
         return self._convert_response(response)
@@ -170,6 +178,32 @@ class SAIAAdapter(Backend):
             raise stream_task.exception()  # type: ignore[misc]
         raise RuntimeError("No response available after streaming")
 
+    async def _chat_async_with_abort(
+        self,
+        call_kwargs: dict[str, Any],
+        abort_signal: asyncio.Event,
+    ) -> SAIAChatResponse:
+        """Non-streaming chat with abort support via task cancellation."""
+        from llm_saia.core.errors import PauseRequested
+
+        if abort_signal.is_set():
+            raise PauseRequested()
+
+        chat_task = asyncio.create_task(self._client.chat_async(**call_kwargs))
+        abort_task = asyncio.create_task(abort_signal.wait())
+        done, pending = await asyncio.wait(
+            [chat_task, abort_task], return_when=asyncio.FIRST_COMPLETED
+        )
+        await self._cancel_tasks(pending)
+
+        if chat_task in done and chat_task.exception() is None:
+            return self._convert_response(chat_task.result())
+        if abort_task in done:
+            raise PauseRequested()
+        if chat_task.exception():
+            raise chat_task.exception()  # type: ignore[misc]
+        raise RuntimeError("No response available after non-streaming call")
+
     @staticmethod
     async def _consume_stream(stream: Any, abort_signal: asyncio.Event) -> None:
         """Consume stream tokens, returning early if abort fires."""
@@ -206,20 +240,26 @@ class SAIAAdapter(Backend):
             return {
                 "role": "assistant",
                 "content": msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in msg.tool_calls
-                ],
+                "tool_calls": [self._tool_call_to_dict(tc) for tc in msg.tool_calls],
             }
 
         return {"role": msg.role, "content": msg.content or ""}
+
+    @staticmethod
+    def _tool_call_to_dict(tc: SAIAToolCall) -> dict[str, Any]:
+        """Serialize a SAIA tool call to the OpenAI-compat wire dict.
+
+        ``extra_content`` is echoed back only when populated so non-Gemini
+        backends see byte-identical output to the pre-round-trip shape.
+        """
+        out: dict[str, Any] = {
+            "id": tc.id,
+            "type": "function",
+            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+        }
+        if tc.extra_content is not None:
+            out["extra_content"] = tc.extra_content
+        return out
 
     def _convert_tools(self, tools: list[ToolDef]) -> list[dict[str, Any]]:
         """Convert SAIA tool definitions to llm-infer format."""
@@ -258,18 +298,15 @@ class SAIAAdapter(Backend):
         need backend-specific fields (thinking, adapter info, detailed usage)
         can reach them without another round of adapter churn.
         """
-        tool_calls: list[SAIAToolCall] = []
-
-        if response.tool_calls:
-            for tc in response.tool_calls:
-                arguments = self._parse_tool_arguments(tc.function.arguments)
-                tool_calls.append(
-                    SAIAToolCall(
-                        id=tc.id,
-                        name=tc.function.name,
-                        arguments=arguments,
-                    )
-                )
+        tool_calls: list[SAIAToolCall] = [
+            SAIAToolCall(
+                id=tc.id,
+                name=tc.function.name,
+                arguments=self._parse_tool_arguments(tc.function.arguments),
+                extra_content=tc.extra_content,
+            )
+            for tc in (response.tool_calls or [])
+        ]
 
         input_tokens = 0
         output_tokens = 0
@@ -287,6 +324,7 @@ class SAIAAdapter(Backend):
             output_tokens=output_tokens,
             model=response.model,
             raw=response,
+            llm_request_id=response.request.id if response.request else None,
         )
 
     def _parse_tool_arguments(self, args_str: str) -> dict[str, Any]:

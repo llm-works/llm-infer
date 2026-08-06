@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-05
+
+### Added
+
+- **`type: vertex_native` in the shared `backends:` yaml**: native Vertex
+  entries live alongside chat backends, with `project` / `region` as yaml
+  fields. Build via `Factory.vertex_natives_from_config(cfg)`; `from_config`
+  skips these entries when constructing the router.
+- **`model@backend` syntax in `FallbackClient` maps**: pin a fallback step
+  to a specific backend when a model is served by more than one. Ambiguity
+  in bare refs raises `FallbackAmbiguityError` at construction, listing the
+  qualified alternatives.
+- **`NativeVertexBackend`** + **`NativeVertexFactory`**: Vertex REST client
+  for `cachedContents` + `generateContent` (sibling to `Backend`, not a
+  subclass). Exposes `cache_create` / `generate_content` / `cache_delete`.
+  `NativeVertexFactory(lg).create(cfg, project=..., region=...)` consumes
+  the same yaml block shape as the OpenAI-compat Vertex path.
+- **Explicit `provider:` in backend config**: yaml backend blocks can
+  now set `provider: <name>` to override URL-based auto-detection
+  (still the default when absent). Invalid names raise; explicit-vs-
+  detected mismatch logs a WARN and honors the explicit value.
+- **`on_retry` callback** on `LLMCallbacks` and `EmbeddingCallbacks`. Fires
+  once per transient retry before the backoff sleep with
+  `(request, exception, attempt, delay_seconds)` — raw exception, so callers
+  can capture full 429/quota bodies past the internal warning truncation.
+- **`EmbeddingClient` callbacks and `context=`**: `EmbeddingCallbacks`
+  (`on_request`/`on_response`/`on_error`), `context=` on all `embed*`
+  methods, and `with_callbacks()` — mirrors `LLMClient`.
+- **`ToolCall.extra_content`**: preserves the wire's `extra_content` on
+  tool calls (streaming and non-streaming). Required to round-trip
+  Gemini 3.x `thought_signature`, without which the follow-up tool turn
+  400s. Round-trip with `model_dump(exclude_none=True)`.
+- **`EmbeddingClient` DEBUG progress logs** around all four public methods,
+  matching the `ChatClient` request/response pattern.
+- **Vertex AI Priority service tier** on `GeminiBackend`. Set
+  `service_tier: priority` in the backend config to send the Vertex
+  Priority header and body param; observed downgrades log at WARN.
+- **`ChatResponse.headers`**: lowercased HTTP response headers, when the
+  backend captured them. Lets callers read provider signals carried out
+  of band (e.g. `x-gemini-service-tier`).
+- **`ChatResponse.request`**: backreference to the originating `ChatRequest`
+  (mirrors `httpx.Response.request`), so callers can correlate a response
+  to its `ChatRequest.id` without wiring `on_response`.
+- **`SAIAAdapter(streaming=...)`**: opt out of streaming for `abort_signal`
+  calls. Defaults to `True` (unchanged). With `streaming=False`, the adapter
+  uses `chat_async` and aborts by cancelling the pending task — simpler path
+  for fast providers where TTFT is sub-second.
+- **`SAIAAdapter` propagates `llm_request_id`**: `_convert_response` copies
+  `ChatResponse.request.id` into `SAIAChatResponse.llm_request_id`, so SAIA
+  tracers can join `Step.llm_call` records with backend `on_response`
+  callback events on the same identifier instead of matching on timestamps.
+- **HTTP-level send callbacks**: `on_before_send` and `on_after_send` in
+  `LLMCallbacks` fire at actual HTTP send time (after backoff), providing
+  accurate request timestamps. New `SendContext` carries attempt number,
+  retry reason, and delay; `SendResult` carries status code and elapsed time.
+- **Vertex AI support** for chat (`GeminiBackend`) and embedding
+  (`GoogleEmbeddingBackend`) via GCP service-account auth. Selectable from
+  config alone: `auth: {mode: gcp_sa, credentials_path: ...}` (defaults to
+  `GOOGLE_APPLICATION_CREDENTIALS`). Token refresh is lazy and cached.
+- **`AuthProvider` abstraction**: `StaticAPIKeyAuth`,
+  `GoogleAPIKeyHeaderAuth`, `GCPServiceAccountAuth`. Backends accept an
+  `auth=` parameter; existing `api_key=` still works. Async refresh is
+  off-loop via `asyncio.to_thread`.
+- **`base_url` override on `GoogleEmbeddingBackend`** so the same backend
+  targets AI Studio (default) or a Vertex endpoint.
+- **`[gcp]` optional extra** (`google-auth`). Folded into `[client]`.
+
+### Changed
+
+- **`SecretStr` accepted for `api_key`**: `Factory` config and backend
+  constructors now accept `str | SecretStr` for `api_key`. Keys are coerced
+  to `SecretStr` at the boundary and revealed only at the SDK/HTTP call site,
+  so `str()`/`repr()`/logging never leaks the raw value.
+- **Fallback on rate limit**: `FallbackClient` now falls back to the paired
+  model when a 429 persists past the backend's retry budget (previously 429
+  never triggered fallback). Without `retry`, fallback engages immediately.
+
+### Removed
+
+- **`Provider.AZURE`**: unused enum entry — no code branched on it and
+  no Azure-specific dispatch existed. URL pattern for `openai.azure.com`
+  removed alongside. Azure OpenAI endpoints still work via
+  `OpenAICompatibleBackend` (they always did — the enum entry was
+  passive metadata).
+
+### Fixed
+
+- **Streaming retry**: transient errors (429/5xx/529) before the first token
+  are now retried with the same backoff policy as non-streaming calls (sync
+  and async). Errors after the first token still raise immediately.
+- **Vertex `reasoning_effort`**: `GeminiBackend` sends `"minimal"` on Vertex
+  when thinking is disabled — Vertex's OpenAI-compat surface rejects
+  `"none"`. AI Studio still gets `"none"` (fully disabled).
+- **Vertex embedding body**: `GoogleEmbeddingBackend` omits the body `model`
+  field on Vertex (the model is already in the URL path; Vertex rejects the
+  conflict).
+
 ## [0.5.0] - 2026-06-06
 
 ### Added
@@ -286,7 +383,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/llm-works/llm-infer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/llm-infer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/llm-works/llm-infer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/llm-works/llm-infer/compare/v0.2.0...v0.3.0

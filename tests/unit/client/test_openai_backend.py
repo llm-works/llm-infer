@@ -37,7 +37,7 @@ class TestOpenAICompatibleBackendInit:
         backend = OpenAICompatibleBackend(mock_lg, "test")
         assert backend._base_url == "http://localhost:8000/v1"
         assert backend.default_model is None
-        assert backend._api_key is None
+        assert backend._auth is None
         assert backend._ctx.request_timeout == 120.0
         assert backend.last_response is None
         backend.close()
@@ -57,7 +57,7 @@ class TestOpenAICompatibleBackendInit:
         )
         assert backend._base_url == "http://custom:9000/api"
         assert backend.default_model == "gpt-4"
-        assert backend._api_key == "sk-test"
+        assert backend._build_headers()["Authorization"] == "Bearer sk-test"
         assert backend._ctx.request_timeout == 60.0
         backend.close()
 
@@ -295,6 +295,31 @@ class TestOpenAICompatibleBackendChat:
         assert backend.last_response == response
         backend.close()
 
+    def test_chat_captures_lowercased_response_headers(self, mock_lg: Logger) -> None:
+        """Response headers are captured on ChatResponse.headers, lowercased."""
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "model": "m",
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.headers = {
+            "X-Gemini-Service-Tier": "priority",
+            "Content-Type": "application/json",
+        }
+
+        request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
+        with patch.object(backend._client, "post", return_value=mock_response):
+            response = backend.chat(request)
+
+        assert response.headers == {
+            "x-gemini-service-tier": "priority",
+            "content-type": "application/json",
+        }
+        backend.close()
+
     def test_chat_with_tool_calls(self, mock_lg: Logger) -> None:
         """Test chat returns tool calls when present."""
         backend = OpenAICompatibleBackend(mock_lg, "test")
@@ -332,7 +357,46 @@ class TestOpenAICompatibleBackendChat:
         assert len(response.tool_calls) == 1
         assert response.tool_calls[0].id == "call_123"
         assert response.tool_calls[0].function.name == "get_weather"
+        assert response.tool_calls[0].extra_content is None
         assert response.finish_reason == FinishReason.TOOL_CALLS
+        backend.close()
+
+    def test_chat_tool_call_extra_content_preserved(self, mock_lg: Logger) -> None:
+        """Gemini 3.x wire `extra_content` (thought_signature) survives parsing."""
+        backend = OpenAICompatibleBackend(mock_lg, "test")
+        extra = {"google": {"thought_signature": "stub-sig"}}
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "model": "google/gemini-3.1-pro-preview",
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_123",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"city": "Berlin"}',
+                                },
+                                "extra_content": extra,
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        request = ChatRequest(messages=[{"role": "user", "content": "Weather?"}])
+        with patch.object(backend._client, "post", return_value=mock_response):
+            response = backend.chat(request)
+
+        assert response.tool_calls is not None
+        assert response.tool_calls[0].extra_content == extra
         backend.close()
 
     def test_chat_gemini_function_call_filter_finish_reason(

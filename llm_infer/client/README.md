@@ -119,7 +119,7 @@ with factory.openai(base_url="https://api.openai.com/v1") as client:
 with factory.from_config(config) as router:
     response = router.chat(messages)
     response = router.chat(messages, backend="fallback")  # Explicit backend
-    response = router.chat(messages, model="gpt-4")       # Route by model
+    response = router.chat(messages, model="gpt-4")  # Route by model
 ```
 
 ### Async
@@ -163,16 +163,40 @@ from llm_infer.client import Factory, FallbackClient
 router = Factory(lg).from_config(config)
 fallbacks = {
     "gpt-4o": "claude-sonnet-4-20250514",
-    "claude-sonnet-4-20250514": "gemini-2.0-pro",   # chains: gpt-4o -> claude -> gemini
+    "claude-sonnet-4-20250514": "gemini-2.0-pro",  # chains: gpt-4o -> claude -> gemini
 }
 client = FallbackClient(lg, router, fallbacks)
 
 response = client.chat(messages, model="gpt-4o")
 ```
 
-Rate-limit errors (429) are *not* retried via fallback — they bubble up so
-callers can apply their own backoff. Cycles (A->B->A) are detected and retried
-round-robin until one succeeds.
+Rate-limit errors (429) are first retried with backoff against the same model
+(per the backend's `retry` config); once that budget is exhausted, fallback
+engages like any other transient error. A backend configured without `retry`
+falls back on its first transient error — a warning is logged at construction.
+Cycles (A->B->A) are detected and retried round-robin until one succeeds.
+
+#### Pinning a fallback to a backend (`model@backend`)
+
+Keys and values may take the form `model@backend` to pin a fallback step to a
+specific backend. `@` is used rather than `/` to avoid clashing with
+OpenRouter's `provider/model` names. When the same model is served by more
+than one backend, `FallbackClient` raises `FallbackAmbiguityError` at
+construction and requires the caller to disambiguate:
+
+```python
+# gpt-4o is served by two backends: qualify to pick one
+fallbacks = {
+    "gpt-4o@openai_primary": "gpt-4o@openai_backup",
+    "gpt-4o@openai_backup": "claude-sonnet-4-20250514",
+}
+```
+
+Lookup is qualified-first: at each step `FallbackClient` first tries
+`f"{model}@{resolved_backend}"` before falling back to the bare key, so bare
+and qualified entries mix cleanly within a single map. Ambiguity is checked
+eagerly at `__init__` (backend catalogs are probed once and cached), which
+surfaces misconfiguration at wire-up instead of at 3 AM.
 
 ## Embeddings
 
@@ -197,7 +221,7 @@ backend = embedding.OpenAIBackend(
 with backend:
     result = backend.embed("Hello world")
     print(f"Dimensions: {len(result.embedding)}")  # 1536
-    print(f"Tokens: {result.prompt_tokens}")       # from API response
+    print(f"Tokens: {result.prompt_tokens}")  # from API response
 
     # Batch embedding
     results = backend.embed_batch(["Text one", "Text two", "Text three"])
@@ -219,7 +243,7 @@ backend = embedding.GoogleBackend(
 with backend:
     result = backend.embed("Hello world")
     print(f"Dimensions: {len(result.embedding)}")  # 3072
-    print(f"Tokens: {result.prompt_tokens}")       # None (use count_tokens)
+    print(f"Tokens: {result.prompt_tokens}")  # None (use count_tokens)
 ```
 
 ### With Retry
@@ -236,11 +260,11 @@ client = EmbeddingClient(
     backend,
     retry=RetryConfig(timeout=120.0),
     model="text-embedding-3-small",  # client-level default
-    dimensions=384,                   # client-level default (per-call overrides win)
+    dimensions=384,  # client-level default (per-call overrides win)
 )
 
 with client:
-    result = client.embed("Hello world")              # uses defaults
+    result = client.embed("Hello world")  # uses defaults
     result = client.embed("Hello world", dimensions=1536)  # per-call override
 ```
 
@@ -283,6 +307,7 @@ through retries and fallbacks:
 
 ```python
 import logging
+
 logging.getLogger("my-app").setLevel(logging.DEBUG)
 ```
 

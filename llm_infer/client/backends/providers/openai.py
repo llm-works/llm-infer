@@ -23,6 +23,7 @@ from typing import Any, NoReturn
 
 import httpx
 from appinfra.log import Logger
+from appinfra.yaml import SecretStr
 
 from ....schemas.openai import (
     ChatCompletionUsage,
@@ -39,12 +40,13 @@ from ...errors import (
     BackendUnavailableError,
 )
 from ...types import AdapterInfo, ChatRequest, ChatResponse, ResponseHolder
+from ..auth import AuthProvider, StaticAPIKeyAuth
 from ..base import Backend
 from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
 from ..embedding import BatchEmbeddingResult, EmbeddingResult
 from ..mixins import AsyncRequestTrackingMixin
-from ..provider import ProviderDetector
+from ..provider import Provider, ProviderDetector
 
 
 class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
@@ -57,7 +59,9 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         ctx: BackendContext | None = None,
         default_model: str | None = None,
         base_url: str = "http://localhost:8000/v1",
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
+        auth: AuthProvider | None = None,
+        provider: Provider | None = None,
     ) -> None:
         """Initialize the backend.
 
@@ -67,12 +71,26 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             ctx: Backend context with rate limiter, backoff, and timeouts.
             default_model: Default model if not specified per-request.
             base_url: Base URL for the API.
-            api_key: API key for authentication.
+            api_key: Static API key (``str`` or ``SecretStr``). Wrapped as
+                ``StaticAPIKeyAuth`` if ``auth`` is not provided. Ignored
+                when ``auth`` is provided.
+            auth: Auth provider. Takes precedence over ``api_key``. Use this
+                for non-static auth schemes (e.g. ``GCPServiceAccountAuth``).
+            provider: Explicit provider override. When set, skips URL/key-based
+                auto-detection. Used by :class:`BackendFactory` to honor the
+                ``provider:`` config field.
         """
         super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
-        self._provider = ProviderDetector.detect(base_url, api_key)
+        ensured_key = SecretStr.ensure(api_key)
+        if auth is None and ensured_key is not None:
+            auth = StaticAPIKeyAuth(ensured_key)
+        self._auth = auth
+        if provider is not None:
+            self._provider = provider
+        else:
+            detect_key = ensured_key.reveal() if ensured_key is not None else None
+            self._provider = ProviderDetector.detect(base_url, detect_key)
         self._last_response: ChatResponse | None = None
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
@@ -95,9 +113,12 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     def chat(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (sync)."""
         url, payload = self._prepare_request(request, stream=False)
-        data = self._execute_sync(url, payload)
-        response = self._parse_chat_response(data, request.model or self.default_model)
+        data, headers = self._execute_sync(url, payload)
+        response = self._parse_chat_response(
+            data, request.model or self.default_model, headers
+        )
         self._last_response = response
+        self._after_response(request, response)
         return response
 
     def chat_stream(
@@ -106,12 +127,13 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """Send a streaming chat completion request (sync)."""
         url, payload = self._prepare_request(request, stream=True)
         state = _StreamState()
-        for chunk in self._execute_stream_sync(url, payload):
+        for chunk in self._execute_stream_sync(url, payload, state):
             token = state.process_chunk(chunk)
             if token:
                 yield token
         response = state.to_response(request.model or self.default_model, self.provider)
         self._last_response = response
+        self._after_response(request, response)
         if holder is not None:
             holder.value = response
 
@@ -122,9 +144,12 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     async def chat_async(self, request: ChatRequest) -> ChatResponse:
         """Send a non-streaming chat completion request (async)."""
         url, payload = self._prepare_request(request, stream=False)
-        data = await self._execute_async(url, payload)
-        response = self._parse_chat_response(data, request.model or self.default_model)
+        data, headers = await self._execute_async(url, payload)
+        response = self._parse_chat_response(
+            data, request.model or self.default_model, headers
+        )
         self._last_response = response
+        self._after_response(request, response)
         return response
 
     async def chat_stream_async(
@@ -133,12 +158,13 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """Send a streaming chat completion request (async)."""
         url, payload = self._prepare_request(request, stream=True)
         state = _StreamState()
-        async for chunk in self._execute_stream_async(url, payload):
+        async for chunk in self._execute_stream_async(url, payload, state):
             token = state.process_chunk(chunk)
             if token:
                 yield token
         response = state.to_response(request.model or self.default_model, self.provider)
         self._last_response = response
+        self._after_response(request, response)
         if holder is not None:
             holder.value = response
 
@@ -198,22 +224,31 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             raise BackendRequestError(f"Invalid JSON response: {e}") from e
         raise e
 
-    def _execute_sync(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Execute sync request with error translation."""
+    def _execute_sync(
+        self, url: str, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Execute sync request with error translation.
+
+        Returns parsed JSON body and lowercased response headers.
+        """
         if self._ctx.rate_limiter is not None:
             self._ctx.rate_limiter.next()
         try:
             resp = self._client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
-            return result
+            return result, _lower_headers(resp.headers)
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             self._raise_backend_error(e)
 
     def _execute_stream_sync(
-        self, url: str, payload: dict[str, Any]
+        self, url: str, payload: dict[str, Any], state: _StreamState
     ) -> Iterator[dict[str, Any]]:
-        """Execute sync streaming request with error translation."""
+        """Execute sync streaming request with error translation.
+
+        Captures response headers into ``state.headers`` once the response
+        starts; the caller passes the same ``state`` it uses for chunks.
+        """
         if self._ctx.rate_limiter is not None:
             self._ctx.rate_limiter.next()
         try:
@@ -225,43 +260,56 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                 except httpx.HTTPStatusError:
                     resp.read()
                     raise
+                state.headers = _lower_headers(resp.headers)
                 yield from self._parse_sse_stream_sync(resp)
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             self._raise_backend_error(e)
 
-    async def _execute_async(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Execute async request with error translation."""
+    async def _execute_async(
+        self, url: str, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """Execute async request with error translation.
+
+        Returns parsed JSON body and lowercased response headers.
+        """
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
         self._acquire_async_request()
         try:
             client = self._get_async_client()
-            resp = await client.post(url, json=payload, headers=self._build_headers())
+            headers = await self._build_headers_async()
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
-            return result
+            return result, _lower_headers(resp.headers)
         except (httpx.HTTPError, json.JSONDecodeError) as e:
             self._raise_backend_error(e)
         finally:
             self._release_async_request()
 
     async def _execute_stream_async(
-        self, url: str, payload: dict[str, Any]
+        self, url: str, payload: dict[str, Any], state: _StreamState
     ) -> AsyncIterator[dict[str, Any]]:
-        """Execute async streaming request with error translation."""
+        """Execute async streaming request with error translation.
+
+        Captures response headers into ``state.headers`` once the response
+        starts; the caller passes the same ``state`` it uses for chunks.
+        """
         if self._ctx.rate_limiter is not None:
             await asyncio.to_thread(self._ctx.rate_limiter.next)
         self._acquire_async_request()
         try:
             client = self._get_async_client()
+            headers = await self._build_headers_async()
             async with client.stream(
-                "POST", url, json=payload, headers=self._build_headers()
+                "POST", url, json=payload, headers=headers
             ) as resp:
                 try:
                     resp.raise_for_status()
                 except httpx.HTTPStatusError:
                     await resp.aread()
                     raise
+                state.headers = _lower_headers(resp.headers)
                 async for chunk in self._parse_sse_stream_async(resp):
                     yield chunk
         except (httpx.HTTPError, json.JSONDecodeError) as e:
@@ -303,6 +351,13 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # Request preparation
     # =========================================================================
 
+    def _after_response(self, request: ChatRequest, response: ChatResponse) -> None:
+        """Post-response hook for subclasses (e.g. tier-downgrade logging).
+
+        Fires once per request, after ``self._last_response`` is updated, for
+        both streaming and non-streaming. No-op by default.
+        """
+
     def _prepare_request(
         self, request: ChatRequest, stream: bool
     ) -> tuple[str, dict[str, Any]]:
@@ -313,10 +368,17 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         return url, payload
 
     def _build_headers(self) -> dict[str, str]:
-        """Build request headers."""
+        """Build request headers (sync)."""
         headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        if self._auth is not None:
+            headers.update(self._auth.headers())
+        return headers
+
+    async def _build_headers_async(self) -> dict[str, str]:
+        """Build request headers (async, may refresh credentials off-loop)."""
+        headers = {"Content-Type": "application/json"}
+        if self._auth is not None:
+            headers.update(await self._auth.headers_async())
         return headers
 
     def _build_messages(
@@ -392,7 +454,10 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # =========================================================================
 
     def _parse_chat_response(
-        self, data: dict[str, Any], model: str | None
+        self,
+        data: dict[str, Any],
+        model: str | None,
+        headers: dict[str, str] | None = None,
     ) -> ChatResponse:
         """Parse API response data into ChatResponse."""
         choices = data.get("choices", [])
@@ -410,6 +475,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             model=data.get("model", model),
             provider=self.provider,
             raw=data,
+            headers=headers,
             thinking=message.get("thinking"),
             tool_calls=tool_calls,
             adapter=_parse_adapter_info(data.get("adapter")),
@@ -429,6 +495,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
                     name=tc["function"]["name"],
                     arguments=tc["function"].get("arguments") or "",
                 ),
+                extra_content=tc.get("extra_content"),
             )
             for tc in raw_tool_calls
         ]
@@ -488,6 +555,7 @@ class _StreamState:
     usage: ChatCompletionUsage | None = None
     adapter: AdapterInfo | None = None
     raw: dict[str, Any] | None = None
+    headers: dict[str, str] | None = None
 
     def process_chunk(self, chunk: dict[str, Any]) -> str | None:
         """Process a single SSE chunk, returning token content if present."""
@@ -539,6 +607,7 @@ class _StreamState:
                 self._tool_call_buffer[idx] = {
                     "id": delta.get("id", ""),
                     "function": {"name": "", "arguments": ""},
+                    "extra_content": None,
                 }
             self._update_tool_call_buffer(self._tool_call_buffer[idx], delta)
 
@@ -553,6 +622,10 @@ class _StreamState:
             buf["function"]["name"] = func["name"]
         if func.get("arguments"):
             buf["function"]["arguments"] += func["arguments"]
+        # `extra_content` (Gemini 3.x thought_signature) is a whole object,
+        # not a token stream — last-writer-wins is correct here.
+        if "extra_content" in delta:
+            buf["extra_content"] = delta["extra_content"]
 
     def to_response(
         self, model: str | None, provider: str | None = None
@@ -566,6 +639,7 @@ class _StreamState:
             model=model,
             provider=provider,
             raw=self.raw,
+            headers=self.headers,
             thinking="".join(self.thinking) if self.thinking else None,
             tool_calls=tool_calls,
             adapter=self.adapter,
@@ -583,11 +657,22 @@ class _StreamState:
                     name=buf["function"]["name"],
                     arguments=buf["function"]["arguments"],
                 ),
+                extra_content=buf.get("extra_content"),
             )
             for buf in (
                 self._tool_call_buffer[i] for i in sorted(self._tool_call_buffer)
             )
         ]
+
+
+def _lower_headers(headers: Any) -> dict[str, str]:
+    """Normalize an httpx Headers (or any mapping) to a lowercased dict.
+
+    HTTP header names are case-insensitive but httpx preserves the server's
+    casing. Lowercasing here gives callers a predictable key for lookups
+    like ``headers["x-gemini-service-tier"]``.
+    """
+    return {str(k).lower(): str(v) for k, v in headers.items()}
 
 
 def _parse_finish_reason(value: str | None) -> FinishReason | str | None:
@@ -647,7 +732,7 @@ def _parse_adapter_info(data: dict[str, Any] | None) -> AdapterInfo | None:
 class OpenAIEmbeddingBackend(EmbeddingBackend):
     """OpenAI-compatible embedding backend.
 
-    Works with OpenAI, Azure OpenAI, and any API following the /v1/embeddings format.
+    Works with OpenAI and any API following the /v1/embeddings format.
 
     Example:
         backend = OpenAIEmbeddingBackend(
@@ -664,7 +749,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         lg: Logger,
         base_url: str,
         model: str,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         ctx: BackendContext | None = None,
     ) -> None:
         """Initialize OpenAI-compatible embedding backend.
@@ -673,30 +758,41 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             lg: Logger instance.
             base_url: Base URL (e.g., "https://api.openai.com/v1").
             model: Model name (e.g., "text-embedding-3-small").
-            api_key: Optional API key for Authorization header.
+            api_key: Optional API key (``str`` or ``SecretStr``) for
+                Authorization header. Stored as ``SecretStr`` inside a
+                ``StaticAPIKeyAuth``; the plain value is only produced at
+                the moment each request's headers are built.
             ctx: Backend context with rate limiter and timeouts.
         """
         super().__init__(lg, model, ctx)
         self._base_url = base_url.rstrip("/")
-
-        headers: dict[str, str] = {}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        self._client = httpx.Client(timeout=self._ctx.request_timeout, headers=headers)
+        ensured_key = SecretStr.ensure(api_key)
+        self._auth: AuthProvider | None = (
+            StaticAPIKeyAuth(ensured_key) if ensured_key is not None else None
+        )
+        self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None
-        self._headers = headers
 
     @property
     def provider(self) -> str:
         return "openai"
 
+    def _build_headers(self) -> dict[str, str]:
+        """Build request headers (sync). Reveals the api_key at call time."""
+        return self._auth.headers() if self._auth is not None else {}
+
+    async def _build_headers_async(self) -> dict[str, str]:
+        """Build request headers (async).
+
+        Reveals at call time; kept async so future non-static auth providers
+        can refresh off-loop without the caller changing shape.
+        """
+        return await self._auth.headers_async() if self._auth is not None else {}
+
     def _get_async_client(self) -> httpx.AsyncClient:
         """Get or create the async HTTP client (lazy initialization)."""
         if self._async_client is None:
-            self._async_client = httpx.AsyncClient(
-                timeout=self._ctx.request_timeout, headers=self._headers
-            )
+            self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
         return self._async_client
 
     # =========================================================================
@@ -715,7 +811,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         if dimensions is not None:
             payload["dimensions"] = dimensions
         try:
-            resp = self._client.post(url, json=payload)
+            resp = self._client.post(url, json=payload, headers=self._build_headers())
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
@@ -749,7 +845,8 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             payload["dimensions"] = dimensions
         client = self._get_async_client()
         try:
-            resp = await client.post(url, json=payload)
+            headers = await self._build_headers_async()
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
