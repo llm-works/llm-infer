@@ -229,28 +229,31 @@ from llm_infer.client import Factory, LLMCallbacks, EmbeddingCallbacks
 lg = Logger("my-app")
 factory = Factory(lg)
 
+
 # OpenAI-compatible API
-factory.openai(
+def openai(
     base_url: str = "http://localhost:8000/v1",
     default_model: str | None = None,
     api_key: str | SecretStr | None = None,
     timeout: float = 120.0,
-    rate_limit: dict[str, Any] | None = None,      # e.g., {"per_minute": 60}
+    rate_limit: dict[str, Any] | None = None,
     callbacks: LLMCallbacks | None = None,
-) -> LLMClient
+) -> LLMClient: ...
+
 
 # Anthropic Claude API
-factory.anthropic(
+def anthropic(
     default_model: str = "claude-sonnet-4-20250514",
     api_key: str | SecretStr | None = None,
     max_tokens: int = 4096,
     timeout: float = 120.0,
     rate_limit: dict[str, Any] | None = None,
     callbacks: LLMCallbacks | None = None,
-) -> LLMClient
+) -> LLMClient: ...
+
 
 # OpenAI-compatible embeddings
-factory.embeddings(
+def embeddings(
     base_url: str = "http://localhost:8001/v1",
     model: str = "default",
     api_key: str | SecretStr | None = None,
@@ -259,25 +262,32 @@ factory.embeddings(
     rate_limit: dict[str, Any] | None = None,
     dimensions: int | None = None,
     callbacks: EmbeddingCallbacks | None = None,
-) -> EmbeddingClient
+) -> EmbeddingClient: ...
+
 
 # Google Generative AI / Vertex embeddings
-factory.embeddings_google(
-    api_key: str | SecretStr | None = None,        # or use auth= for Vertex SA
+def embeddings_google(
+    api_key: str | SecretStr | None = None,
     model: str = "gemini-embedding-001",
     task_type: str = "RETRIEVAL_DOCUMENT",
-    ...,
+    *,
     callbacks: EmbeddingCallbacks | None = None,
-) -> EmbeddingClient
+) -> EmbeddingClient: ...
+
 
 # From configuration dict
-factory.from_config(config: dict, callbacks=None) -> LLMRouter
-factory.from_backend_config(config: dict, name: str, callbacks=None) -> LLMClient
-factory.embeddings_from_config(config: dict, name: str = "default") -> EmbeddingClient
+def from_config(config: dict, callbacks: LLMCallbacks | None = None) -> LLMRouter: ...
+def from_backend_config(
+    config: dict, name: str, callbacks: LLMCallbacks | None = None
+) -> LLMClient: ...
+def embeddings_from_config(config: dict, name: str = "default") -> EmbeddingClient: ...
+
 
 # Native Vertex REST (cachedContents + generateContent)
-factory.vertex_natives_from_config(config: dict) -> dict[str, NativeVertexBackend]
-factory.vertex_native_from_backend_config(config: dict, name: str) -> NativeVertexBackend
+def vertex_natives_from_config(config: dict) -> dict[str, NativeVertexBackend]: ...
+def vertex_native_from_backend_config(
+    config: dict, name: str
+) -> NativeVertexBackend: ...
 ```
 
 `from_config` always returns an `LLMRouter`. A bare single-backend config
@@ -336,8 +346,9 @@ class ChatResponse:
 
 ### LLMRouter
 
-Multi-backend router returned by `Factory.from_config()` when the config has
-a `backends:` block. Routes each request to a named backend via a
+Multi-backend router returned by `Factory.from_config()`. Single-backend
+configs (no `backends:` block) are wrapped in a one-entry router so calling
+code gets a consistent surface. Routes each request to a named backend via a
 `RoutingStrategy` (default: round-robin over enabled backends that serve the
 requested model). Model discovery is lazy — backends are probed on first use.
 
@@ -580,14 +591,28 @@ async def chat_completions(request: dict):
         return StreamingResponse(
             stream_chat_completion(
                 request_id=str(uuid4()),
-                model=model or router.default,
+                model=model or "default",
                 token_iterator=client.chat_stream(messages, model=model),
                 get_finish_reason=lambda: FinishReason.STOP,
             ),
             media_type="text/event-stream",
         )
     response = client.chat(messages, model=model)
-    return {"choices": [{"message": {"content": response.content}}]}
+    return {
+        "id": f"chatcmpl-{uuid4().hex[:8]}",
+        "object": "chat.completion",
+        "model": response.model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": response.content},
+                "finish_reason": response.finish_reason.value
+                if response.finish_reason
+                else "stop",
+            }
+        ],
+        "usage": response.usage.model_dump() if response.usage else None,
+    }
 
 
 @app.get("/v1/models")

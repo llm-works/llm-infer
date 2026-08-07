@@ -144,7 +144,8 @@ with factory.openai(
     response = client.chat(messages)
 
 # Vertex AI native REST (cachedContents + generateContent) via config
-router_backends = factory.vertex_natives_from_config(config)
+# config = {"backends": {"vertex": {"type": "vertex_native", "project": "...", ...}}}
+vertex_backends = factory.vertex_natives_from_config(config)
 ```
 
 ## Engines

@@ -349,6 +349,8 @@ histograms), use `LLMClient.with_callbacks()` or pass `callbacks=` to any
 ```python
 from llm_infer.client import Factory, LLMCallbacks
 
+# lg, messages from Quick Start; metrics is your observability client
+
 
 def record_latency(ctx, result):
     metrics.histogram(
@@ -370,6 +372,6 @@ with Factory(lg).openai(callbacks=callbacks) as client:
 
 llm-infer does not ship a control plane. When the backend catalog needs to
 change without restarting the process, wire `appinfra`'s YAML watcher to a
-handler that rebuilds the router from the new config and atomically swaps it
-into your request path; discard the previous `LLMRouter` after in-flight
-requests drain.
+handler that rebuilds the `LLMRouter` (and any `FallbackClient` wrapper) from
+the new config and atomically swaps it into your request path. Drain in-flight
+requests against the previous router before calling `aclose()` on it.
