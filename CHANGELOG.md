@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Client docs refreshed to cover Gemini/Vertex backends, `LLMRouter`,
+  `FallbackClient`, `EmbeddingClient`, and the `LLMCallbacks` hook set;
+  corrected drifted `Factory.openai()`/`anthropic()` signatures.
+
 ## [0.6.0] - 2026-08-05
 
 ### Added
