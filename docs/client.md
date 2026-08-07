@@ -21,6 +21,12 @@ backends. Built for autonomous agents and production use.
 **Supported Backends:**
 - **OpenAI-compatible**: OpenAI, llm-infer server, vLLM, Ollama
 - **Anthropic**: Claude models
+- **Google**: Gemini via AI Studio or Vertex AI OpenAI-compat endpoint
+  (auto-selects `GeminiBackend` when `provider: google` or a
+  `googleapis.com` `base_url` is detected)
+- **Vertex AI native REST**: `cachedContents` + `generateContent` via
+  `type: vertex_native` (sibling to `Backend`, built through
+  `Factory.vertex_natives_from_config()`)
 
 **Public API paths:**
 ```python
@@ -40,15 +46,28 @@ from llm_infer.api import Factory, LLMClient, ChatResponse, Backend
 
 | Type | Kind | Description |
 |------|------|-------------|
-| `Factory` | Class | Factory for creating LLMClient instances |
-| `LLMClient` | Class | Unified client facade |
-| `Backend` | ABC | Abstract base class for backend implementations |
+| `Factory` | Class | Factory for creating clients, routers, and embedding clients from config |
+| `ChatClient` | ABC | Abstract base for all chat clients (`LLMClient`, `LLMRouter`, `FallbackClient`) |
+| `LLMClient` | Class | Single-backend client with rate limiting, retry, and callbacks |
+| `LLMRouter` | Class | Multi-backend router with strategy-based routing and model discovery |
+| `FallbackClient` | Class | Wraps `LLMRouter` with cross-provider model fallback on transient errors |
+| `EmbeddingClient` | Class | Embedding client with retry and callbacks |
+| `Backend` | ABC | Abstract base class for chat backend implementations |
 | `OpenAICompatibleBackend` | Class | Backend for OpenAI-compatible APIs |
-| `ChatResponse` | Dataclass | Response with content, usage, thinking, tool_calls |
+| `Provider` | Enum | Detected provider (`openai`, `anthropic`, `google`, `xai`, `local`, `unknown`) |
+| `LLMCallbacks` | Dataclass | Six lifecycle hooks: `on_request`, `on_response`, `on_retry`, `on_error`, `on_before_send`, `on_after_send` |
+| `EmbeddingCallbacks` | Dataclass | Embedding equivalents of the retry-loop-level hooks |
+| `ChatRequest` | Dataclass | Request carrier with 8-hex-char `id` for log correlation |
+| `ChatResponse` | Dataclass | Response with content, usage, thinking, tool_calls, and a `request` backreference |
+| `SendContext` / `SendResult` | Dataclass | HTTP-level context/result passed to `on_before_send`/`on_after_send` |
+| `RoutingStrategy` | Protocol | Custom backend-selection logic; built-in `DefaultStrategy` is round-robin |
 | `BackendError` | Exception | Base exception for all backend errors |
 | `BackendUnavailableError` | Exception | Connection failed |
 | `BackendTimeoutError` | Exception | Request timed out |
 | `BackendRequestError` | Exception | HTTP error from backend |
+| `ConfigError` | Exception | Base exception for configuration problems |
+| `FallbackAmbiguityError` | Exception | Bare model in a `FallbackClient` map resolves to more than one backend |
+| `ModelConflictError` | Exception | Same model registered by two backends |
 
 ## Quick Start
 
@@ -125,7 +144,7 @@ lg = Logger("my-app")
 factory = Factory(lg)
 
 # Requires: pip install llm-infer[anthropic]
-async with factory.anthropic(model="claude-sonnet-4-20250514") as client:
+async with factory.anthropic(default_model="claude-sonnet-4-20250514") as client:
     response = await client.chat_async(
         messages=[{"role": "user", "content": "Hello!"}],
         system="You are a helpful assistant.",
@@ -198,11 +217,14 @@ with factory.openai() as client:
 
 ### Factory
 
-Factory class for creating LLMClient instances. Requires a `Logger` instance.
+Factory class for creating clients, routers, and embedding clients from
+config. Requires a `Logger` instance. Every constructor accepts an optional
+`callbacks=` argument (see [Callbacks](#callbacks)).
 
 ```python
 from appinfra.log import Logger
-from llm_infer.client import Factory
+from appinfra.yaml import SecretStr
+from llm_infer.client import Factory, LLMCallbacks, EmbeddingCallbacks
 
 lg = Logger("my-app")
 factory = Factory(lg)
@@ -210,28 +232,59 @@ factory = Factory(lg)
 # OpenAI-compatible API
 factory.openai(
     base_url: str = "http://localhost:8000/v1",
-    model: str = "default",
-    api_key: str | None = None,
+    default_model: str | None = None,
+    api_key: str | SecretStr | None = None,
     timeout: float = 120.0,
-    rate_limit: dict = {"per_minute": 60},  # Rate limiting config
+    rate_limit: dict[str, Any] | None = None,      # e.g., {"per_minute": 60}
+    callbacks: LLMCallbacks | None = None,
 ) -> LLMClient
 
 # Anthropic Claude API
 factory.anthropic(
-    model: str = "claude-sonnet-4-20250514",
-    api_key: str | None = None,
+    default_model: str = "claude-sonnet-4-20250514",
+    api_key: str | SecretStr | None = None,
     max_tokens: int = 4096,
     timeout: float = 120.0,
-    rate_limit: dict = {"per_minute": 60},  # Rate limiting config
+    rate_limit: dict[str, Any] | None = None,
+    callbacks: LLMCallbacks | None = None,
 ) -> LLMClient
 
-# From configuration dict
-factory.from_config(config: dict) -> LLMClient
-factory.from_backend_config(config: dict) -> LLMClient
+# OpenAI-compatible embeddings
+factory.embeddings(
+    base_url: str = "http://localhost:8001/v1",
+    model: str = "default",
+    api_key: str | SecretStr | None = None,
+    timeout: float = 120.0,
+    retry: RetryConfig | None = None,
+    rate_limit: dict[str, Any] | None = None,
+    dimensions: int | None = None,
+    callbacks: EmbeddingCallbacks | None = None,
+) -> EmbeddingClient
 
-# Register custom backend (class method)
-Factory.register(name: str, backend_class: type[Backend]) -> None
+# Google Generative AI / Vertex embeddings
+factory.embeddings_google(
+    api_key: str | SecretStr | None = None,        # or use auth= for Vertex SA
+    model: str = "gemini-embedding-001",
+    task_type: str = "RETRIEVAL_DOCUMENT",
+    ...,
+    callbacks: EmbeddingCallbacks | None = None,
+) -> EmbeddingClient
+
+# From configuration dict
+factory.from_config(config: dict, callbacks=None) -> LLMRouter
+factory.from_backend_config(config: dict, name: str, callbacks=None) -> LLMClient
+factory.embeddings_from_config(config: dict, name: str = "default") -> EmbeddingClient
+
+# Native Vertex REST (cachedContents + generateContent)
+factory.vertex_natives_from_config(config: dict) -> dict[str, NativeVertexBackend]
+factory.vertex_native_from_backend_config(config: dict, name: str) -> NativeVertexBackend
 ```
+
+`from_config` always returns an `LLMRouter`. A bare single-backend config
+(no `backends:` block) is wrapped in a one-entry router so the calling code
+gets the same surface either way. Non-chat types listed in
+`NON_CHAT_BACKEND_TYPES` (currently `vertex_native`) are filtered out of
+the router and must be built through their dedicated accessor.
 
 ### LLMClient
 
@@ -245,6 +298,9 @@ The client facade that delegates to backend implementations. Create instances us
 | `chat_stream(messages, ...)` | `Iterator[str]` | Sync streaming |
 | `chat_async(messages, ...)` | `ChatResponse` | Async chat completion |
 | `chat_stream_async(messages, ...)` | `AsyncIterator[str]` | Async streaming |
+| `with_callbacks(callbacks)` | `LLMClient` | Return a copy with callbacks configured |
+| `last_response` (property) | `ChatResponse \| None` | Last response captured after a streaming call (falls back to `backend.last_response`) |
+| `close()` / `aclose()` | — | Release sync / async HTTP resources |
 
 #### Common Parameters
 
@@ -269,6 +325,7 @@ class ChatResponse:
     usage: ChatCompletionUsage | None = None  # Token usage stats
     finish_reason: FinishReason | None = None  # Why generation stopped
     model: str | None = None  # Model that generated response
+    request: ChatRequest | None = None  # Backreference to the originating request
 
     # llm-infer extensions
     thinking: str | None = None  # Extracted <think> content
@@ -276,6 +333,161 @@ class ChatResponse:
 
     def has_tool_calls(self) -> bool: ...  # Check if tool calls present
 ```
+
+### LLMRouter
+
+Multi-backend router returned by `Factory.from_config()` when the config has
+a `backends:` block. Routes each request to a named backend via a
+`RoutingStrategy` (default: round-robin over enabled backends that serve the
+requested model). Model discovery is lazy — backends are probed on first use.
+
+```python
+router = Factory(lg).from_config(config)
+
+# Use the default backend
+response = router.chat(messages)
+
+# Route to a specific backend
+response = router.chat(messages, backend="anthropic")
+
+# Route by model (model-to-backend resolution via ModelDiscovery)
+response = router.chat(messages, model="claude-sonnet-4-20250514")
+
+# Inspect routing without sending
+target = router.resolve(model="gpt-4")  # -> ResolvedTarget(backend=..., model=...)
+
+# Read-only views into current state
+router.clients  # Mapping[str, LLMClient]
+router.default  # default backend name
+router.models  # Mapping[str, str] (model -> backend)
+```
+
+Custom routing strategies (weighted, latency-aware, etc.) implement the
+`RoutingStrategy` protocol and are wired via `strategy: {factory: myapp.routing}`
+in config. The built-in `DefaultStrategy` covers round-robin.
+
+### FallbackClient
+
+Wraps an `LLMRouter` and transparently retries on transient errors (5xx,
+timeout, unavailable, 429) with an equivalent model, until the chain is
+exhausted. For 429s the inner `RetryHelper` backs off against the same model
+first; fallback engages once that budget is exhausted.
+
+```python
+from llm_infer.client import Factory, FallbackClient
+
+router = Factory(lg).from_config(config)
+fallbacks = {
+    "gpt-4o": "claude-sonnet-4-20250514",
+    "claude-sonnet-4-20250514": "gemini-2.0-pro",  # chains implicitly
+}
+client = FallbackClient(lg, router, fallbacks)
+response = client.chat(messages, model="gpt-4o")
+```
+
+**Pinning a fallback to a backend** — keys and values accept `model@backend`
+to pin a step to a specific backend. `@` is used (not `/`) to avoid clashing
+with OpenRouter's `provider/model` names:
+
+```python
+fallbacks = {
+    "gpt-4o@openai_primary": "gpt-4o@openai_backup",
+    "gpt-4o@openai_backup": "claude-sonnet-4-20250514",
+}
+```
+
+If a bare model resolves to more than one backend, construction raises
+`FallbackAmbiguityError` — disambiguate with `model@backend`. Cycles
+(`A → B → A`) are detected and retried round-robin until one succeeds. A
+backend configured without `retry` falls back on its first transient error
+(a warning is logged at construction).
+
+### EmbeddingClient
+
+Wraps an embedding backend and adds retry, callbacks, and client-level
+defaults. Built via `Factory.embeddings()`, `Factory.embeddings_google()`,
+or `Factory.embeddings_from_config()`.
+
+```python
+from llm_infer.client import EmbeddingClient
+from llm_infer.client.backends import RetryConfig
+
+client = Factory(lg).embeddings(
+    base_url="https://api.openai.com/v1",
+    api_key="sk-...",
+    model="text-embedding-3-small",
+    dimensions=384,  # client-level default; per-call overrides win
+    retry=RetryConfig(timeout=120.0),
+)
+
+with client:
+    result = client.embed("Hello world")
+    result = client.embed("Hello world", dimensions=1536)
+    batch = client.embed_batch(["one", "two", "three"])
+    tokens = client.count_tokens("Hello world")
+
+# Async
+async with client:
+    result = await client.embed_async("Hello world")
+    batch = await client.embed_batch_async(["one", "two"])
+```
+
+Token-source semantics:
+
+| Backend | `result.prompt_tokens`  | `count_tokens()`  |
+|---------|-------------------------|-------------------|
+| OpenAI  | populated from response | tiktoken (local)  |
+| Google  | `None`                  | `countTokens` API |
+
+### Callbacks
+
+`LLMCallbacks` exposes six hooks split across two levels. Pass one via
+`callbacks=` on any `Factory` constructor, or attach later with
+`LLMClient.with_callbacks()`.
+
+**Retry-loop level** (fires once per retry-loop entry, before backoff):
+
+| Hook | Signature | Purpose |
+|------|-----------|---------|
+| `on_request` | `(request, retry)` | Fires before each attempt; `retry=0` for first |
+| `on_response` | `(request, response)` | Fires after a successful response (after stream completes for streaming) |
+| `on_retry` | `(request, exception, attempt, delay_seconds)` | Fires on a transient error before the backoff sleep |
+| `on_error` | `(request, exception)` | Fires after a terminal failure |
+
+**HTTP level** (fires at actual send, after any backoff delay):
+
+| Hook | Signature | Purpose |
+|------|-----------|---------|
+| `on_before_send` | `(SendContext)` | Immediately before HTTP request |
+| `on_after_send` | `(SendContext, SendResult)` | After HTTP response/error |
+
+`SendContext` carries `attempt`, `retry_reason`, `delay_seconds`, `model`,
+`backend`, and `req_id`. `SendResult` carries `status_code`, `error`, and
+`elapsed_ms`.
+
+```python
+from llm_infer.client import Factory, LLMCallbacks
+
+
+def log_attempt(req, retry):
+    lg.info("chat.request", extra={"req_id": req.id, "retry": retry})
+
+
+def record_http(ctx, result):
+    metrics.histogram(
+        "llm.http_ms",
+        result.elapsed_ms,
+        tags={"backend": ctx.backend, "status": result.status_code},
+    )
+
+
+callbacks = LLMCallbacks(on_request=log_attempt, on_after_send=record_http)
+with Factory(lg).openai(callbacks=callbacks) as client:
+    client.chat(messages)
+```
+
+`EmbeddingCallbacks` mirrors the retry-loop-level surface for
+`EmbeddingClient`.
 
 ### Configuration Format
 
@@ -332,7 +544,14 @@ model: default
 
 ## Usage Patterns
 
-### Building a Proxy
+### Building a Gateway
+
+`llm_infer.client` is a library, not a standalone gateway process. When a
+single OpenAI-compatible HTTP surface in front of an `LLMRouter` is needed
+(so downstream clients can point at one URL), wrap the router in FastAPI.
+Routing, model discovery, retry, fallback, and callbacks are already
+covered by the library; the wrapper adds the HTTP surface, hot-reload
+wiring, `/health`, and `/metrics`.
 
 ```python
 from uuid import uuid4
@@ -341,38 +560,58 @@ from fastapi.responses import StreamingResponse
 
 from appinfra.log import Logger
 from llm_infer.api import FinishReason
-from llm_infer.client import Factory
+from llm_infer.client import Factory, FallbackClient
 from llm_infer.serving.api.openai.streaming import stream_chat_completion
 
 app = FastAPI()
-lg = Logger("proxy")
+lg = Logger("gateway")
 factory = Factory(lg)
-client = factory.openai(base_url="http://backend:8000/v1")
+router = factory.from_config(load_config())
+client = FallbackClient(lg, router, fallbacks={"gpt-4o": "claude-sonnet-4-20250514"})
 
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
     messages = request["messages"]
+    model = request.get("model")
 
     if request.get("stream"):
         return StreamingResponse(
             stream_chat_completion(
                 request_id=str(uuid4()),
-                model="proxied-model",
-                token_iterator=client.chat_stream(messages),
+                model=model or router.default,
+                token_iterator=client.chat_stream(messages, model=model),
                 get_finish_reason=lambda: FinishReason.STOP,
             ),
             media_type="text/event-stream",
         )
-    else:
-        response = client.chat(messages)
-        return {"choices": [{"message": {"content": response.content}}]}
+    response = client.chat(messages, model=model)
+    return {"choices": [{"message": {"content": response.content}}]}
+
+
+@app.get("/v1/models")
+async def list_models():
+    return {
+        "object": "list",
+        "data": [
+            {"id": m, "object": "model", "owned_by": b}
+            for m, b in router.models.items()
+        ],
+    }
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    await client.aclose()
+    await router.aclose()
 ```
+
+**Runtime config reload.** The library does not ship a control plane; the
+router is immutable after construction. To add/remove/enable backends
+without restarting the process, subscribe to `appinfra`'s YAML watcher on
+the config file, rebuild an `LLMRouter` (and any `FallbackClient` wrapper)
+from the new config in the reload handler, and atomically swap the module
+reference used by request handlers. Drain in-flight requests against the
+previous router before calling `aclose()` on it.
 
 ### Mocking in Tests
 
