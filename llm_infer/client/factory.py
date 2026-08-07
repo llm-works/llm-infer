@@ -14,7 +14,7 @@ Example:
 
     # Direct factory methods - return LLMClient (single backend)
     client = factory.openai(base_url="http://localhost:8000/v1")
-    client = factory.anthropic(model="claude-sonnet-4-20250514")
+    client = factory.anthropic(default_model="claude-sonnet-4-20250514")
 
     # From configuration - returns LLMRouter (multi-backend support)
     config = {

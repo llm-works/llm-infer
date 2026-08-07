@@ -424,7 +424,6 @@ with client:
     result = client.embed("Hello world")
     result = client.embed("Hello world", dimensions=1536)
     batch = client.embed_batch(["one", "two", "three"])
-    tokens = client.count_tokens("Hello world")
 
 # Async
 async with client:
@@ -451,7 +450,7 @@ Token-source semantics:
 |------|-----------|---------|
 | `on_request` | `(request, retry)` | Fires before each attempt; `retry=0` for first |
 | `on_response` | `(request, response)` | Fires after a successful response (after stream completes for streaming) |
-| `on_retry` | `(request, exception, attempt, delay_seconds)` | Fires on a transient error before the backoff sleep |
+| `on_retry` | `(request, exception, attempt, delay_seconds)` | Fires on a transient error that will be retried, before the backoff sleep |
 | `on_error` | `(request, exception)` | Fires after a terminal failure |
 
 **HTTP level** (fires at actual send, after any backoff delay):
@@ -467,6 +466,8 @@ Token-source semantics:
 
 ```python
 from llm_infer.client import Factory, LLMCallbacks
+
+# lg, messages from Quick Start; metrics is your observability client
 
 
 def log_attempt(req, retry):
