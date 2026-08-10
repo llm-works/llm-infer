@@ -133,8 +133,10 @@ class FallbackClient(ChatClient):
         Bare refs are accepted without probing: cross-backend collisions in
         declared configs are already surfaced upstream by ``ModelDiscovery``
         as ``ModelConflictError``, and a bare ref that no backend declares
-        resolves at request time via the router. This keeps wire-up quiet —
-        ``Backend.list_models`` is not called during fallback validation.
+        resolves at request time via the router. Models discovered at runtime
+        (via ``list_models``) are routed first-wins. This keeps wire-up
+        quiet — ``Backend.list_models`` is not called during fallback
+        validation.
 
         Skipped when the router does not expose the ``clients`` surface
         (e.g., test doubles).
