@@ -66,7 +66,6 @@ from llm_infer.api import Factory, LLMClient, ChatResponse, Backend
 | `BackendTimeoutError` | Exception | Request timed out |
 | `BackendRequestError` | Exception | HTTP error from backend |
 | `ConfigError` | Exception | Base exception for configuration problems |
-| `FallbackAmbiguityError` | Exception | Bare model in a `FallbackClient` map resolves to more than one backend |
 | `ModelConflictError` | Exception | Same model registered by two backends |
 
 ## Quick Start
@@ -407,11 +406,15 @@ fallbacks = {
 }
 ```
 
-If a bare model resolves to more than one backend, construction raises
-`FallbackAmbiguityError` — disambiguate with `model@backend`. Cycles
-(`A → B → A`) are detected and retried round-robin until one succeeds. A
-backend configured without `retry` falls back on its first transient error
-(a warning is logged at construction).
+Bare refs are accepted without cross-backend probing: declared-config
+collisions are already caught upstream by `ModelDiscovery` as
+`ModelConflictError`, and a bare ref that no backend declares resolves at
+request time via the router's default. Models discovered at runtime (via
+`list_models()`) are routed first-wins. Qualified `model@backend` refs are
+validated at construction to name a configured backend; unknown backends
+raise `ConfigError`. Cycles (`A → B → A`) are detected and retried
+round-robin until one succeeds. A backend configured without `retry` falls
+back on its first transient error (a warning is logged at construction).
 
 ### EmbeddingClient
 

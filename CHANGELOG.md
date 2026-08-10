@@ -9,9 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `FallbackClient` no longer probes backend model catalogs at construction:
+  bare refs are accepted without `list_models()` round-trips. Cross-backend
+  collisions in declared configs still surface as `ModelConflictError`;
+  runtime-discovered collisions are routed first-wins.
 - Client docs refreshed to cover Gemini/Vertex backends, `LLMRouter`,
   `FallbackClient`, `EmbeddingClient`, and the `LLMCallbacks` hook set;
   corrected drifted `Factory.openai()`/`anthropic()` signatures.
+
+### Removed
+
+- **Breaking**: `FallbackAmbiguityError` (introduced in 0.6.0). No code
+  path raises it after the probe removal above; catch `ModelConflictError`
+  or `ConfigError` instead.
 
 ## [0.6.0] - 2026-08-05
 

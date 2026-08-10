@@ -39,7 +39,7 @@ OpenAI-compatible server (vLLM, Ollama, `llm-infer serve`).
 | Module | Purpose |
 |--------|---------|
 | `types.py` | `ChatRequest`, `ChatResponse`, `ChatStream`/`ChatStreamSync`, `AdapterInfo`, `LLMCallbacks`, `SendContext`, `SendResult`, `Provider` |
-| `errors.py` | `BackendError`, `BackendRequestError`, `BackendTimeoutError`, `BackendUnavailableError`, `ConfigError`, `FallbackAmbiguityError`, `ModelConflictError` |
+| `errors.py` | `BackendError`, `BackendRequestError`, `BackendTimeoutError`, `BackendUnavailableError`, `ConfigError`, `ModelConflictError` |
 | `retry.py` | `RetryBase`, `RetryHelper` — exponential backoff for transient errors |
 | `bound.py` | `BoundChatClient` — wraps a `ChatClient` to inject context (used by `with_callbacks()`) |
 | `embedding.py` | `EmbeddingClient` (see [Embeddings](#embeddings)) |
@@ -195,9 +195,8 @@ Cycles (A->B->A) are detected and retried round-robin until one succeeds.
 
 Keys and values may take the form `model@backend` to pin a fallback step to a
 specific backend. `@` is used rather than `/` to avoid clashing with
-OpenRouter's `provider/model` names. When the same model is served by more
-than one backend, `FallbackClient` raises `FallbackAmbiguityError` at
-construction and requires the caller to disambiguate:
+OpenRouter's `provider/model` names. Use it when the same model is served by
+more than one backend and the fallback map must select one deterministically:
 
 ```python
 # gpt-4o is served by two backends: qualify to pick one
@@ -209,9 +208,13 @@ fallbacks = {
 
 Lookup is qualified-first: at each step `FallbackClient` first tries
 `f"{model}@{resolved_backend}"` before falling back to the bare key, so bare
-and qualified entries mix cleanly within a single map. Ambiguity is checked
-eagerly at `__init__` (backend catalogs are probed once and cached), which
-surfaces misconfiguration at wire-up instead of at 3 AM.
+and qualified entries mix cleanly within a single map. Bare refs are accepted
+without probing backend catalogs — cross-backend collisions in declared
+configs are already caught by `ModelDiscovery` as `ModelConflictError`, and a
+bare ref that no backend declares resolves at request time via the router's
+default. Models discovered at runtime (via `list_models()`) are routed
+first-wins. Qualified `model@backend` refs are validated at construction to
+name a configured backend; unknown backends raise `ConfigError`.
 
 ## Embeddings
 
