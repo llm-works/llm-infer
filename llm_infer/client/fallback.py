@@ -14,9 +14,11 @@ to a specific backend when the same model is served by more than one:
         "claude-sonnet-4-20250514@anthropic": "gemini-2.0-pro",
     }
 
-Bare model refs (no ``@``) are validated eagerly at construction: if a
-bare model is served by two or more backends, ``FallbackAmbiguityError``
-is raised with the candidate ``model@backend`` options.
+Bare model refs (no ``@``) are accepted without cross-backend probing.
+Cross-backend collisions in declared configs are already caught upstream
+by ``ModelDiscovery`` as ``ModelConflictError``; a bare ref that no backend
+declares resolves at request time via the router's default. Pin with
+``model@backend`` when explicit routing is required.
 
 Example:
     from llm_infer.client import Factory, FallbackClient
@@ -43,7 +45,7 @@ from appinfra.log import Logger
 
 from .base import ChatClient
 from .client import LLMClient
-from .errors import BackendError, ConfigError, FallbackAmbiguityError
+from .errors import BackendError, ConfigError
 from .fallback_helper import detect_cycles, parse_fallback_key
 from .log_utils import fmt_error
 from .router import LLMRouter, ResolvedTarget
@@ -100,9 +102,6 @@ class FallbackClient(ChatClient):
                 if not provided.
 
         Raises:
-            FallbackAmbiguityError: If any bare model reference in the map is
-                served by more than one backend. Use ``model@backend`` to
-                disambiguate.
             ConfigError: If a ``model@backend`` reference names an unknown
                 backend.
             ValueError: If a ref is malformed (empty model or backend in
@@ -128,34 +127,23 @@ class FallbackClient(ChatClient):
         return self._fallbacks
 
     def _validate_no_ambiguity(self) -> None:
-        """Fail loud if a bare model in the fallback map resolves to >1 backend.
+        """Validate ``model@backend`` refs and reject malformed refs.
 
-        Also validates that ``model@backend`` refs name a known backend and
-        that no ref is malformed. Skipped when the router does not expose the
-        ``discovery`` and ``clients`` surfaces (e.g., test doubles).
+        Only qualified refs are checked against the configured backends.
+        Bare refs are accepted without probing: cross-backend collisions in
+        declared configs are already surfaced upstream by ``ModelDiscovery``
+        as ``ModelConflictError``, and a bare ref that no backend declares
+        resolves at request time via the router. This keeps wire-up quiet —
+        ``Backend.list_models`` is not called during fallback validation.
 
-        When the map contains bare refs, probes every configured backend's
-        model catalog once via ``ModelDiscovery.get_models_for_backend`` —
-        all backends are checked because any of them may serve a bare model.
-        Results are cached, so subsequent routing lookups benefit. Probe
-        failures are treated as empty catalogs (a backend that can't be
-        reached at wire-up will surface a real error at first use, not here).
+        Skipped when the router does not expose the ``clients`` surface
+        (e.g., test doubles).
         """
-        discovery = getattr(self._router, "discovery", None)
         clients = getattr(self._router, "clients", None)
-        if discovery is None or not isinstance(clients, Mapping):
+        if not isinstance(clients, Mapping):
             return
-
-        bare, qualified = self._collect_refs()
+        _bare, qualified = self._collect_refs()
         self._validate_qualified_backends(qualified, clients)
-
-        if not bare:
-            return
-        catalogs = self._probe_backend_catalogs(clients, discovery)
-        for model in sorted(bare):
-            servers = [b for b, ms in catalogs.items() if model in ms]
-            if len(servers) > 1:
-                raise FallbackAmbiguityError(model, servers)
 
     def _collect_refs(self) -> tuple[set[str], set[tuple[str, str]]]:
         """Split every key and value in the fallback map into bare vs qualified."""
@@ -181,22 +169,6 @@ class FallbackClient(ChatClient):
                     f"Fallback ref {model + '@' + backend!r} names unknown "
                     f"backend {backend!r}; available: {available}"
                 )
-
-    def _probe_backend_catalogs(
-        self, clients: Mapping[str, Any], discovery: Any
-    ) -> dict[str, set[str]]:
-        """Probe every backend's model catalog once (cached inside discovery)."""
-        catalogs: dict[str, set[str]] = {}
-        for name in clients:
-            try:
-                catalogs[name] = set(discovery.get_models_for_backend(name))
-            except Exception as e:
-                self._lg.debug(
-                    "backend probe failed during fallback ambiguity check",
-                    extra={"backend": name, "exception": e},
-                )
-                catalogs[name] = set()
-        return catalogs
 
     def _next_key(self, current_key: str, current_backend: str | None) -> str | None:
         """Look up the next fallback for ``current_key``.

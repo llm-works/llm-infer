@@ -80,7 +80,6 @@ from .errors import (
     BackendTimeoutError,
     BackendUnavailableError,
     ConfigError,
-    FallbackAmbiguityError,
     ModelConflictError,
 )
 from .factory import Factory
@@ -171,7 +170,6 @@ __all__ = [
     "BackendTimeoutError",
     "BackendUnavailableError",
     "ConfigError",
-    "FallbackAmbiguityError",
     "ModelConflictError",
 ]
 
