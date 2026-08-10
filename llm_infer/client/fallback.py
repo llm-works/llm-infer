@@ -141,10 +141,10 @@ class FallbackClient(ChatClient):
         Skipped when the router does not expose the ``clients`` surface
         (e.g., test doubles).
         """
+        _bare, qualified = self._collect_refs()
         clients = getattr(self._router, "clients", None)
         if not isinstance(clients, Mapping):
             return
-        _bare, qualified = self._collect_refs()
         self._validate_qualified_backends(qualified, clients)
 
     def _collect_refs(self) -> tuple[set[str], set[tuple[str, str]]]:

@@ -212,8 +212,9 @@ and qualified entries mix cleanly within a single map. Bare refs are accepted
 without probing backend catalogs — cross-backend collisions in declared
 configs are already caught by `ModelDiscovery` as `ModelConflictError`, and a
 bare ref that no backend declares resolves at request time via the router's
-default. Qualified `model@backend` refs are validated at construction to name
-a configured backend; unknown backends raise `ConfigError`.
+default. Models discovered at runtime (via `list_models()`) are routed
+first-wins. Qualified `model@backend` refs are validated at construction to
+name a configured backend; unknown backends raise `ConfigError`.
 
 ## Embeddings
 

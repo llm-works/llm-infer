@@ -409,7 +409,8 @@ fallbacks = {
 Bare refs are accepted without cross-backend probing: declared-config
 collisions are already caught upstream by `ModelDiscovery` as
 `ModelConflictError`, and a bare ref that no backend declares resolves at
-request time via the router's default. Qualified `model@backend` refs are
+request time via the router's default. Models discovered at runtime (via
+`list_models()`) are routed first-wins. Qualified `model@backend` refs are
 validated at construction to name a configured backend; unknown backends
 raise `ConfigError`. Cycles (`A → B → A`) are detected and retried
 round-robin until one succeeds. A backend configured without `retry` falls
