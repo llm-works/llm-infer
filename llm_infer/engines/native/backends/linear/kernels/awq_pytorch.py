@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Pure PyTorch backend for AWQ linear operations.
 
 This backend performs dequantization using standard PyTorch operations.

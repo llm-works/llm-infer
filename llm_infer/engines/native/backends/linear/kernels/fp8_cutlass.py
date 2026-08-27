@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """CUTLASS backend for FP8 linear operations.
 
 This backend uses vLLM's CUTLASS kernel for native FP8 matmul with

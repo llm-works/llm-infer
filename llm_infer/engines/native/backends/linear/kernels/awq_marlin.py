@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Marlin CUDA kernel backend for AWQ linear operations.
 
 This backend uses optimized CUDA kernels for fused dequantization + matmul,

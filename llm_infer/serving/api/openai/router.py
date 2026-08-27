@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """FastAPI router for OpenAI-compatible endpoints."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Pure PyTorch backend for FP8 linear operations.
 
 This backend performs block-wise dequantization using standard PyTorch operations.

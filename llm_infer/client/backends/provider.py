@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Provider identification for LLM backends.
 
 This module provides the Provider enum and detection logic to identify

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Exception hierarchy for LLM client.
 
 All backend-specific errors and routing errors are translated to these

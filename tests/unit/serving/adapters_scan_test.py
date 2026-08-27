@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Unit tests for AdapterManager scan/load and validate_adapter_key.
 
 These tests focus on coverage gaps in the existing tests/unit/adapters_test.py:

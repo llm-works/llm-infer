@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Concurrent HTTP request handler for HTTP-based engines (vLLM server, Ollama)."""
 
 from collections import deque

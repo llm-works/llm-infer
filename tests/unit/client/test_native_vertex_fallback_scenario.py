@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Fallback scenarios composing ``NativeVertexBackend`` primitives with a
 plain ``ChatClient`` fallback — the pattern llm-xray uses.
 

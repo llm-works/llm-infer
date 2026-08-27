@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Model metadata extraction from HuggingFace config.json.
 
 This module provides utilities to extract quantization and precision metadata

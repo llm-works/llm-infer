@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Multi-backend LLM client with sync/async support.
 
 This package provides a unified client for interacting with different LLM

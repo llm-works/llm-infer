@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Factory for creating LLMClient and LLMRouter instances.
 
 This module provides the Factory class that handles:

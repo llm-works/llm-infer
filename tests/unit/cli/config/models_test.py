@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Unit tests for cli/config/models.py (legacy compat module)."""
 
 from __future__ import annotations

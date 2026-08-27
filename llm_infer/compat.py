@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Engine compatibility specification generator.
 
 This module generates a compatibility spec that declares what the infer engine

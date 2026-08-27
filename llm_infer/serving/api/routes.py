@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Route handlers for the inference API.
 
 Uses appinfra's FastAPI framework with IPC channel for subprocess communication.

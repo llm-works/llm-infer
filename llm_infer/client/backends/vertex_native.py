@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Vertex REST backend for ``cachedContents`` + ``generateContent``.
 
 :class:`~.providers.gemini.GeminiBackend` routes through Vertex's

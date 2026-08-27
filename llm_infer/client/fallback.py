@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Fallback client for cross-provider model resilience.
 
 FallbackClient wraps an LLMRouter and automatically falls back to equivalent

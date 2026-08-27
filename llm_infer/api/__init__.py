@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Public API schemas and client for llm-infer.
 
 This module provides clean public exports of OpenAI-compatible schemas and
