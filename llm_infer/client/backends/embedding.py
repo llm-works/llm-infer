@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Embedding backend implementations.
 
 Provides backend base class and provider implementations for embedding generation.

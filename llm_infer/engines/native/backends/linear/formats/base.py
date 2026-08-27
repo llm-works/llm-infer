@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Base protocol and types for quantized linear backends.
 
 This module defines the format-agnostic abstractions for quantized linear layers:

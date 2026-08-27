@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Helper functions for LLMRouter routing logic.
 
 Extracted from router.py to reduce duplication across the sync/async and

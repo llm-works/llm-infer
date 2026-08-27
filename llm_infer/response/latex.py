@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """LaTeX to Unicode converter for streaming text.
 
 Converts LaTeX math notation to Unicode characters with streaming support.

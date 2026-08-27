@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """PEFT-backed inference engine for non-LoRA adapters.
 
 This module provides an inference engine using HuggingFace Transformers + PEFT

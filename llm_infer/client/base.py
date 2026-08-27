@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Abstract base class for chat clients.
 
 This module provides the ChatClient ABC that defines the common interface

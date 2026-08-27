@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """LaTeX transformer for streaming responses.
 
 Transforms LaTeX math notation to Unicode in text content.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Schema definitions for llm-infer.
 
 This package contains pure data models (Pydantic schemas) that can be imported

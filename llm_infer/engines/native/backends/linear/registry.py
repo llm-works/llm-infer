@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Backend resolution with priority-based auto-selection.
 
 This module provides a BackendRegistry class to resolve quantized linear backends:

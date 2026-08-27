@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Ollama-backed inference engine.
 
 This module provides an inference engine that connects to an Ollama server,

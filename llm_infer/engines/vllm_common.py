@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Common utilities for vLLM-based engines.
 
 Shared functionality between vllm (Python API) and vllm-server (HTTP API) engines.

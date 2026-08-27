@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Routing strategy protocol and types.
 
 Strategies determine which backends to try and in what order. The router

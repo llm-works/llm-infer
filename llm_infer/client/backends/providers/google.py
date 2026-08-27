@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Google Generative AI embedding backend.
 
 Supports Google's gemini-embedding-001 and other embedding models via the

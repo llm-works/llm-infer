@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Additional OpenAI backend tests covering error paths and missing methods.
 
 Existing test_openai_backend.py covers init, chat success/error, async, basic

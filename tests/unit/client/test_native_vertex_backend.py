@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Tests for NativeVertexBackend — Vertex REST substrate for cachedContents.
 
 Verifies that the backend wires yaml (retry / rate_limit / auth / timeout)

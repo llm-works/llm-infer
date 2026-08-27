@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Model package - transformer implementation and configuration."""
 
 from .architecture import ModelArchitecture, get_architecture

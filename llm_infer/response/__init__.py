@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Response processing framework for LLM streams.
 
 Provides abstract interfaces and implementations for parsing and resolving

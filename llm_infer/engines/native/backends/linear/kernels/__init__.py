@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Backend implementations for quantized linear operations."""
 
 from .awq_marlin import MarlinAWQBackend

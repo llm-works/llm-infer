@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """FP8 (8-bit floating point) format definitions.
 
 FP8 uses block-wise scaling for quantization:
