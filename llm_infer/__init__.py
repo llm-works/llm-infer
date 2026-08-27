@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+#
+# Maintained by LLM Works LLC (https://llm-works.ai) and contributors.
+
 """LLM inference server with paged attention and continuous batching."""
 
 from importlib.metadata import PackageNotFoundError, version

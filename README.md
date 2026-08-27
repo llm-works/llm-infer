@@ -229,3 +229,5 @@ pip install llm-infer[runtime]     # With native engine (torch)
 ## License
 
 Apache License 2.0
+
+Maintained by [LLM Works LLC](https://llm-works.ai) and contributors.
