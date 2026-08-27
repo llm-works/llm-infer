@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Unit tests for ThinkTagNormalizer, ThinkStreamSeparator, and extract_thinking.
 
 The existing think_parser_test.py covers ThinkTagParser only. This file

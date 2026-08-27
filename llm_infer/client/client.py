@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Single-backend LLM client.
 
 This module provides the LLMClient class that wraps a single backend.

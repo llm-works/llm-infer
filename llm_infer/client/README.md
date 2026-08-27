@@ -1,6 +1,9 @@
 # llm_infer.client
 
-Multi-backend LLM client with sync/async support, routing strategies, and model discovery.
+Multi-backend LLM client with sync/async support, routing strategies, model
+discovery, and structured lifecycle callbacks. Backends: OpenAI, Anthropic,
+Google (AI Studio + Vertex OpenAI-compat), Vertex AI native REST, and any
+OpenAI-compatible server (vLLM, Ollama, `llm-infer serve`).
 
 ## Core Types
 
@@ -18,7 +21,7 @@ Multi-backend LLM client with sync/async support, routing strategies, and model 
 
 | Module | Class | Purpose |
 |--------|-------|---------|
-| `embedding.py` | `EmbeddingClient` | Embedding client with retry support |
+| `embedding.py` | `EmbeddingClient` | Embedding client with retry and callbacks |
 | `backends/embedding.py` | `Backend` | Abstract base class for embedding backends |
 | `backends/embedding.py` | `EmbeddingResult` | Result with embedding vector, model, token count |
 
@@ -35,12 +38,13 @@ Multi-backend LLM client with sync/async support, routing strategies, and model 
 
 | Module | Purpose |
 |--------|---------|
-| `types.py` | `ChatRequest`, `ChatResponse`, `ChatStream`/`ChatStreamSync`, `AdapterInfo` |
-| `errors.py` | `BackendError`, `BackendRequestError`, `BackendTimeoutError`, `BackendUnavailableError` |
+| `types.py` | `ChatRequest`, `ChatResponse`, `ChatStream`/`ChatStreamSync`, `AdapterInfo`, `LLMCallbacks`, `SendContext`, `SendResult`, `Provider` |
+| `errors.py` | `BackendError`, `BackendRequestError`, `BackendTimeoutError`, `BackendUnavailableError`, `ConfigError`, `ModelConflictError` |
 | `retry.py` | `RetryBase`, `RetryHelper` — exponential backoff for transient errors |
 | `bound.py` | `BoundChatClient` — wraps a `ChatClient` to inject context (used by `with_callbacks()`) |
 | `embedding.py` | `EmbeddingClient` (see [Embeddings](#embeddings)) |
-| `backends/` | Chat backends (OpenAI, Anthropic, Gemini) and embedding backends (OpenAI, Google) |
+| `backends/` | Chat backends (OpenAI, Anthropic, Gemini, native Vertex) and embedding backends (OpenAI, Google) |
+| `backends/auth.py` | `AuthProvider` (bearer/GCP SA) — resolves the `auth:` block on any backend |
 | `saia.py` | SAIA adapter integration (optional) |
 
 ## Configuration
@@ -64,7 +68,13 @@ backends:
     enabled: true                   # Optional, default true
     type: openai_compatible         # or: openai, anthropic
     base_url: http://localhost:8000/v1
-    api_key: sk-...                 # Optional (or use env var via config loader)
+    api_key: sk-...                 # Optional; str or SecretStr
+    # provider: openai              # Optional; overrides URL-based auto-detect.
+                                    # Valid: openai, anthropic, xai, google, local, unknown.
+                                    # Mismatch with URL-detected value logs a WARN.
+    # auth:                         # Optional; alternative to api_key for
+    #   mode: gcp_sa                # non-bearer schemes (e.g., GCP SA for Vertex).
+    #   credentials_path: /path/to/sa.json
     model: llama-3.1-8b             # Optional: default model
     models:                         # Optional: restrict to these models
       - llama-3.1-8b
@@ -82,6 +92,11 @@ backends:
 | `openai_compatible` | Any OpenAI-compatible API (vLLM, Ollama, llm-infer, etc.) |
 | `openai` | OpenAI API (defaults to `https://api.openai.com/v1`) |
 | `anthropic` | Anthropic Claude API |
+| `vertex_native` | Vertex AI native REST (`cachedContents` + `generateContent`). Sibling to `Backend` — built via `Factory.vertex_natives_from_config()`, not routed through `LLMRouter`. |
+
+When `provider: google` (or auto-detected from a `googleapis.com` `base_url`),
+the OpenAI-compatible path returns a specialized `GeminiBackend` that also
+honors an optional `service_tier` field (e.g. `priority`).
 
 ### Single Backend
 
@@ -180,9 +195,8 @@ Cycles (A->B->A) are detected and retried round-robin until one succeeds.
 
 Keys and values may take the form `model@backend` to pin a fallback step to a
 specific backend. `@` is used rather than `/` to avoid clashing with
-OpenRouter's `provider/model` names. When the same model is served by more
-than one backend, `FallbackClient` raises `FallbackAmbiguityError` at
-construction and requires the caller to disambiguate:
+OpenRouter's `provider/model` names. Use it when the same model is served by
+more than one backend and the fallback map must select one deterministically:
 
 ```python
 # gpt-4o is served by two backends: qualify to pick one
@@ -194,9 +208,13 @@ fallbacks = {
 
 Lookup is qualified-first: at each step `FallbackClient` first tries
 `f"{model}@{resolved_backend}"` before falling back to the bare key, so bare
-and qualified entries mix cleanly within a single map. Ambiguity is checked
-eagerly at `__init__` (backend catalogs are probed once and cached), which
-surfaces misconfiguration at wire-up instead of at 3 AM.
+and qualified entries mix cleanly within a single map. Bare refs are accepted
+without probing backend catalogs — cross-backend collisions in declared
+configs are already caught by `ModelDiscovery` as `ModelConflictError`, and a
+bare ref that no backend declares resolves at request time via the router's
+default. Models discovered at runtime (via `list_models()`) are routed
+first-wins. Qualified `model@backend` refs are validated at construction to
+name a configured backend; unknown backends raise `ConfigError`.
 
 ## Embeddings
 
@@ -311,7 +329,52 @@ import logging
 logging.getLogger("my-app").setLevel(logging.DEBUG)
 ```
 
-For structured observability hooks (cost tracking, tracing), use
-`LLMClient.with_callbacks()` or pass `callbacks=` to any `Factory` method.
-Callbacks fire on request (with retry count), response, and error; pass a
-`context` dict (e.g., `{"op": "planning"}`) to thread user data through them.
+For structured observability hooks (cost tracking, tracing, latency
+histograms), use `LLMClient.with_callbacks()` or pass `callbacks=` to any
+`Factory` method. `LLMCallbacks` exposes six hooks split across two levels:
+
+**Retry-loop level** (fires once per retry-loop entry, before backoff):
+
+| Hook | Signature | Purpose |
+|------|-----------|---------|
+| `on_request` | `(request, retry)` | Fires before each attempt; `retry=0` for first |
+| `on_response` | `(request, response)` | Fires after a successful response (after stream completes for streaming) |
+| `on_retry` | `(request, exception, attempt, delay_seconds)` | Fires on a transient error that will be retried, before the backoff sleep |
+| `on_error` | `(request, exception)` | Fires after a terminal failure |
+
+**HTTP level** (fires at actual send, after any backoff delay):
+
+| Hook | Signature | Purpose |
+|------|-----------|---------|
+| `on_before_send` | `(SendContext)` | Immediately before HTTP request; includes `attempt`, `retry_reason`, `delay_seconds` |
+| `on_after_send` | `(SendContext, SendResult)` | After HTTP response/error; includes `status_code`, `error`, `elapsed_ms` |
+
+```python
+from llm_infer.client import Factory, LLMCallbacks
+
+# lg, messages from Quick Start; metrics is your observability client
+
+
+def record_latency(ctx, result):
+    metrics.histogram(
+        "llm.http_ms",
+        result.elapsed_ms,
+        tags={"backend": ctx.backend, "attempt": ctx.attempt},
+    )
+
+
+callbacks = LLMCallbacks(on_after_send=record_latency)
+with Factory(lg).openai(callbacks=callbacks) as client:
+    client.chat(messages)
+```
+
+`EmbeddingClient` mirrors this surface via `EmbeddingCallbacks` and its own
+`with_callbacks()`.
+
+### Configuration Hot-Reload
+
+llm-infer does not ship a control plane. When the backend catalog needs to
+change without restarting the process, wire `appinfra`'s YAML watcher to a
+handler that rebuilds the `LLMRouter` (and any `FallbackClient` wrapper) from
+the new config and atomically swaps it into your request path. Drain in-flight
+requests against the previous router before calling `aclose()` on it.

@@ -33,18 +33,28 @@ llm-infer query "What is the capital of France?"
 ## Client Package
 
 `llm_infer.client` is a Python client library for LLM inference with a unified interface across
-backends. Built for autonomous agents and production use:
+backends. Built for autonomous agents and production use. Combined with `llm-infer serve`, the
+same package covers both self-hosted inference (vLLM, Ollama, native) and multi-provider routing:
+serve one or more local models behind an OpenAI-compatible endpoint, then route across those
+plus cloud providers from a single client.
 
-- **Multiple backends** - OpenAI, Anthropic, and any OpenAI-compatible API
+- **Multiple backends** - OpenAI, Anthropic, Google Gemini, Vertex AI (OpenAI-compat and native
+  REST), and any OpenAI-compatible API (vLLM, Ollama, llm-infer server)
 - **Sync, async, streaming** - All execution modes supported
 - **Rate limiting** - Per-backend request throttling
-- **Retry with backoff** - Configurable exponential backoff on failures
-- **Model routing** - Route requests to backends by model name
+- **Retry with backoff** - Configurable exponential backoff on transient errors
+- **Multi-backend routing** - `LLMRouter` with pluggable `RoutingStrategy` and lazy model discovery
+- **Cross-provider fallback** - `FallbackClient` with chained pairs and `model@backend` pinning;
+  automatic escalation from exhausted 429 retries to a fallback model
+- **Embeddings** - `EmbeddingClient` for OpenAI and Google (AI Studio + Vertex) with the same
+  retry/callback contract
+- **Structured callbacks** - Six lifecycle hooks (`on_request`, `on_response`, `on_retry`,
+  `on_error`, `on_before_send`, `on_after_send`) for cost tracking, tracing, and metrics
 - **Extensible** - Register custom backends via `Factory.register()`
 
 ```python
 from appinfra.log import Logger
-from llm_infer.client import Factory
+from llm_infer.client import Factory, FallbackClient
 
 lg = Logger("my-app")
 factory = Factory(lg)
@@ -66,6 +76,11 @@ with factory.openai(base_url="http://localhost:8000/v1") as client:
 async with factory.openai(base_url="http://localhost:8000/v1") as client:
     messages = [{"role": "user", "content": "Hello!"}]
     response = await client.chat_async(messages)
+
+# Multi-backend router with cross-provider fallback
+router = factory.from_config(load_config())  # -> LLMRouter
+client = FallbackClient(lg, router, fallbacks={"gpt-4o": "claude-sonnet-4-20250514"})
+response = client.chat(messages, model="gpt-4o")
 ```
 
 ### Protocol Extensions
@@ -113,12 +128,24 @@ print(response.content)  # Final answer
 
 ```python
 # Anthropic
-async with factory.anthropic(model="claude-sonnet-4-20250514") as client:
+async with factory.anthropic(default_model="claude-sonnet-4-20250514") as client:
     response = await client.chat_async(messages)
 
 # OpenAI
 with factory.openai(base_url="https://api.openai.com/v1", api_key="sk-...") as client:
     response = client.chat(messages)
+
+# Google Gemini (OpenAI-compatible endpoint; auto-selects GeminiBackend)
+with factory.openai(
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+    api_key="AIza...",
+    default_model="gemini-2.5-flash",
+) as client:
+    response = client.chat(messages)
+
+# Vertex AI native REST (cachedContents + generateContent) via config
+# config = {"backends": {"vertex": {"type": "vertex_native", "project": "...", ...}}}
+vertex_backends = factory.vertex_natives_from_config(config)
 ```
 
 ## Engines
@@ -202,3 +229,5 @@ pip install llm-infer[runtime]     # With native engine (torch)
 ## License
 
 Apache License 2.0
+
+Maintained by [LLM Works LLC](https://llm-works.ai) and contributors.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Protocol definitions for response processing.
 
 Defines the abstract interfaces that parsers and resolvers must implement.

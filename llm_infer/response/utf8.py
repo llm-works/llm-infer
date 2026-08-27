@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """UTF-8 stream buffer for handling incomplete multi-byte sequences.
 
 Handles byte-level tokenizers that may split multi-byte UTF-8 characters

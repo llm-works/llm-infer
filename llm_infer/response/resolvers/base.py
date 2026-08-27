@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Base resolver implementation with hook methods.
 
 Provides a base resolver that dispatches events to typed handler methods.

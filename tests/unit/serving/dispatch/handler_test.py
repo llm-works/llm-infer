@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Unit tests for serving/dispatch/handler.py base RequestHandler.
 
 Uses SequentialHandler as the concrete subclass for testing the base class.

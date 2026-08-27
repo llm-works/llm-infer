@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Additional Anthropic backend tests covering chat methods, streaming, errors.
 
 Existing test_anthropic_backend.py covers _convert_messages, _prepare_request,

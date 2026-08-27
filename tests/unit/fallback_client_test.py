@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Unit tests for FallbackClient and fallback helpers."""
 
 from unittest.mock import MagicMock
@@ -9,7 +12,6 @@ from llm_infer.client.errors import (
     BackendRequestError,
     BackendTimeoutError,
     ConfigError,
-    FallbackAmbiguityError,
 )
 from llm_infer.client.fallback import FallbackClient
 from llm_infer.client.fallback_helper import detect_cycles, parse_fallback_key
@@ -535,8 +537,14 @@ class TestDetectCyclesWithQualifiedKeys:
         lg.warning.assert_called_once()
 
 
-class TestAmbiguityCheck:
-    """Eager @ ambiguity validation at FallbackClient construction."""
+class TestConstructionValidation:
+    """Validation performed at FallbackClient construction.
+
+    Cross-backend ambiguity for bare refs is not checked here — it is
+    caught upstream by ``ModelDiscovery`` as ``ModelConflictError``, so
+    the fallback validator only enforces well-formed refs and known
+    backends for ``model@backend`` pins.
+    """
 
     def _router(
         self,
@@ -558,43 +566,20 @@ class TestAmbiguityCheck:
         router.discovery = discovery
         return router
 
-    def test_bare_model_in_one_backend_ok(self) -> None:
-        """Unambiguous bare model: construction succeeds."""
+    def test_bare_ref_construction_succeeds(self) -> None:
+        """Bare refs are accepted without probing."""
         router = self._router({"openai": ["gpt-4o"], "anthropic": ["claude-sonnet"]})
         FallbackClient(MagicMock(), router, {"gpt-4o": "claude-sonnet"})
 
-    def test_bare_model_in_two_backends_raises(self) -> None:
-        """Two backends serve the same bare model → FallbackAmbiguityError."""
-        router = self._router(
-            {
-                "openai_a": ["gpt-4o"],
-                "openai_b": ["gpt-4o"],
-                "anthropic": ["claude-sonnet"],
-            }
-        )
-        with pytest.raises(FallbackAmbiguityError) as exc:
-            FallbackClient(MagicMock(), router, {"gpt-4o": "claude-sonnet"})
+    def test_bare_undeclared_ref_construction_succeeds(self) -> None:
+        """A bare ref no backend declares is accepted (resolves at request time)."""
+        router = self._router({"openai": ["gpt-4o"]})
+        FallbackClient(MagicMock(), router, {"unknown-model": "gpt-4o"})
 
-        assert exc.value.model == "gpt-4o"
-        assert exc.value.backends == ["openai_a", "openai_b"]
-        # Error message names the qualified options
-        msg = str(exc.value)
-        assert "gpt-4o@openai_a" in msg
-        assert "gpt-4o@openai_b" in msg
-
-    def test_qualified_ref_bypasses_ambiguity(self) -> None:
-        """A qualified key/value pins the backend, so ambiguity doesn't apply."""
+    def test_qualified_ref_construction_succeeds(self) -> None:
+        """Qualified refs are accepted when backends are known."""
         router = self._router({"a": ["gpt-4o"], "b": ["gpt-4o"]})
         FallbackClient(MagicMock(), router, {"gpt-4o@a": "gpt-4o@b"})
-
-    def test_ambiguity_from_value_reference(self) -> None:
-        """A bare model appearing only as a value also triggers the check."""
-        router = self._router(
-            {"one": ["only-here"], "two": ["shared"], "three": ["shared"]}
-        )
-        with pytest.raises(FallbackAmbiguityError) as exc:
-            FallbackClient(MagicMock(), router, {"only-here": "shared"})
-        assert exc.value.model == "shared"
 
     def test_unknown_backend_in_qualified_raises(self) -> None:
         """``model@bogus`` where bogus is not a configured backend → ConfigError."""
@@ -608,23 +593,29 @@ class TestAmbiguityCheck:
         with pytest.raises(ValueError, match="both model and backend"):
             FallbackClient(MagicMock(), router, {"gpt-4o": "@nowhere"})
 
-    def test_probe_failure_treated_as_empty_catalog(self) -> None:
-        """A backend that fails to probe is silently treated as empty (no false-positive)."""
+    def test_construction_does_not_probe_backends(self) -> None:
+        """Validation must not call ``list_models`` on any backend."""
         router = MagicMock()
         client = MagicMock()
         client.backend.ctx.retry = RetryConfig()
-        router.clients = {"flaky": client, "ok": client}
+        router.clients = {"openai": client, "anthropic": client, "gemini": client}
+
+        probe_calls: list[str] = []
 
         def probe(name: str) -> list[str]:
-            if name == "flaky":
-                raise RuntimeError("network down")
-            return ["gpt-4o"]
+            probe_calls.append(name)
+            return []
 
         router.discovery = MagicMock()
         router.discovery.get_models_for_backend = probe
 
-        # No ambiguity (only "ok" reports gpt-4o); construction succeeds.
-        FallbackClient(MagicMock(), router, {"gpt-4o": "gpt-4o@ok"})
+        FallbackClient(
+            MagicMock(),
+            router,
+            {"gemini-2.5-flash": "claude-haiku"},
+        )
+
+        assert probe_calls == []
 
 
 class TestQualifiedRouting:

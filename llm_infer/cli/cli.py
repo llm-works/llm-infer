@@ -1,4 +1,8 @@
 #!/home/ubuntu/.miniconda3/envs/ml/bin/python
+
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """CLI entry point."""
 
 import os

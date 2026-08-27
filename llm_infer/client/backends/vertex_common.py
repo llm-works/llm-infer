@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Shared Vertex AI constants and helpers.
 
 Used by both GeminiBackend (OpenAI-compat surface) and NativeVertexBackend

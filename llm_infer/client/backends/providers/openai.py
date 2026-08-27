@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """OpenAI-compatible backend implementation.
 
 This backend works with any OpenAI-compatible API, including:

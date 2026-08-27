@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-27
+
+### Changed
+
+- `FallbackClient` no longer probes backend model catalogs at construction:
+  bare refs are accepted without `list_models()` round-trips. Cross-backend
+  collisions in declared configs still surface as `ModelConflictError`;
+  runtime-discovered collisions are routed first-wins.
+- Client docs refreshed to cover Gemini/Vertex backends, `LLMRouter`,
+  `FallbackClient`, `EmbeddingClient`, and the `LLMCallbacks` hook set;
+  corrected drifted `Factory.openai()`/`anthropic()` signatures.
+
+### Removed
+
+- **Breaking**: `FallbackAmbiguityError` (introduced in 0.6.0). No code
+  path raises it after the probe removal above; catch `ModelConflictError`
+  or `ConfigError` instead.
+
 ## [0.6.0] - 2026-08-05
 
 ### Added
@@ -383,7 +401,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/llm-works/llm-infer/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/llm-infer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/llm-infer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/llm-works/llm-infer/compare/v0.3.0...v0.4.0

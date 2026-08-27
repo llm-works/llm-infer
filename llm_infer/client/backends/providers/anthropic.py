@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Anthropic Claude backend implementation.
 
 This backend uses the official Anthropic Python SDK to interact with Claude

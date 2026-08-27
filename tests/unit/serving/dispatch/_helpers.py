@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Shared test helpers for serving/dispatch unit tests.
 
 Provides minimal builders and fakes used across handler, processor, loop,

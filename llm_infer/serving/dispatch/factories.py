@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Factory classes for creating engines and handlers.
 
 Uses class-based registry pattern for clean extensibility.

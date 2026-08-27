@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Response processor that wires parser and resolver together.
 
 Provides a high-level interface for processing LLM response streams.

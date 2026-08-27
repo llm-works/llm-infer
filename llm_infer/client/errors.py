@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 """Exception hierarchy for LLM client.
 
 All backend-specific errors and routing errors are translated to these
@@ -40,28 +43,6 @@ class ModelConflictError(ConfigError):
         self.backend2 = backend2
         super().__init__(
             f"Model '{model}' found in multiple backends: '{backend1}' and '{backend2}'"
-        )
-
-
-class FallbackAmbiguityError(ConfigError):
-    """Fallback map references a model served by multiple backends.
-
-    Raised at ``FallbackClient`` construction when a bare model reference
-    (e.g. ``"gpt-4o"``) in the fallback map is served by two or more
-    backends. Callers must disambiguate with the ``model@backend`` syntax.
-
-    Attributes:
-        model: The ambiguous model ID.
-        backends: Backends that serve the model.
-    """
-
-    def __init__(self, model: str, backends: list[str]) -> None:
-        self.model = model
-        self.backends = sorted(backends)
-        options = ", ".join(f"{model}@{b}" for b in self.backends)
-        super().__init__(
-            f"Fallback map references model {model!r} served by multiple "
-            f"backends {self.backends}; use one of: {options}"
         )
 
 

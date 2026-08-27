@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
+
 infra := $(shell appinfra scripts-path)
 
 # Configuration
@@ -8,6 +11,9 @@ INFRA_DEV_INSTALL_EXTRAS := dev,runtime,cuda
 # - true: Fail on any code quality violations (CI mode)
 # - false: Report violations but don't fail (development mode)
 INFRA_DEV_CQ_STRICT := true
+
+# SPDX license header enforcement
+INFRA_DEV_CQ_SPDX := true
 
 # Docstring coverage threshold (percentage)
 INFRA_DEV_DOCSTRING_THRESHOLD := 90
