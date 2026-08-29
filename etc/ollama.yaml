@@ -8,11 +8,11 @@ host: http://localhost:11434  # Ollama server URL
 timeout: 300                   # Request timeout in seconds
 
 # Model storage path (sets OLLAMA_MODELS env var when starting server)
-models_path: !include "../.env.yaml#paths.models.ollama"
+models_path: ~/.ollama/models
 
 # Server management
 auto_start: true              # Automatically start Ollama server if not running
-binary_path: !include "../.env.yaml#paths.ollama_binary"
+binary_path: ollama
 
 # Model lifecycle
 # How long to keep model loaded after request (e.g., "5m", "1h", "0" to unload immediately)

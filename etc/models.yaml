@@ -2,7 +2,7 @@
 # Matched by model name (from selected.yaml or --model)
 
 locations:
-  - !include "../.env.yaml#paths.models.huggingface"
+  - ~/.cache/huggingface/hub
 
 # Model selection
 # Priority: CLI --model-path > CLI --model > selection file > selection default

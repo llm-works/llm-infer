@@ -22,4 +22,4 @@ load_in_4bit: false           # Use bitsandbytes 4-bit quantization
 warmup: false
 
 # Adapter directory
-adapter_base_path: !include "../.env.yaml#paths.adapters"
+adapter_base_path: ~/.cache/llm-infer/adapters
