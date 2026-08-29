@@ -81,7 +81,16 @@ with factory.openai(base_url="http://localhost:8000/v1") as client:
     response = client.chat(messages)
 
 # Multi-backend router with cross-provider fallback
-config = {...}  # backends dict; see llm_infer/client/README.md for schema
+config = {
+    "default": "primary",
+    "backends": {
+        "primary": {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:8000/v1",
+        },
+        "fallback": {"type": "anthropic"},
+    },
+}  # see llm_infer/client/README.md for full schema
 router = factory.from_config(config)
 client = FallbackClient(lg, router, fallbacks={"gpt-4o": "claude-sonnet-4-20250514"})
 response = client.chat(messages, model="gpt-4o")
