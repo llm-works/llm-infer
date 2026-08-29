@@ -141,7 +141,11 @@ llm-infer = "llm_infer.cli.cli:main"
 fallback_version = "0.0.0.dev0"
 
 [tool.setuptools.package-data]
-llm_infer = ["py.typed"]
+llm_infer = [
+    "py.typed",
+    "etc/*.yaml",
+    "etc/README.md",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

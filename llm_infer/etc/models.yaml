@@ -1,0 +1,86 @@
+# Model catalog for `llm-infer serve`.
+#
+# Declares the model names accepted by `--model <name>` and their
+# engine-specific settings (Ollama name mapping, vLLM GPU memory,
+# thinking-mode tags, etc.). See docs/config.md for the full schema.
+#
+# The shipped catalog is intentionally EMPTY — every deployment picks
+# its own models. Add entries below for the models your deployment
+# serves. Two example shapes are commented out at the bottom of this
+# file.
+
+# Where to look for HuggingFace snapshots (used by native, vllm, peft).
+locations:
+  - ~/.cache/huggingface/hub
+
+# Default model when no --model is passed.
+# Point `path` at a per-deployment file (e.g., ops-controlled selection)
+# or leave null and rely on `default`.
+selection:
+  generate:
+    path: null
+    default: null
+  embed:
+    path: null
+    default: null
+
+# =============================================================================
+# Templates (YAML anchors for reuse)
+# =============================================================================
+# Compose engine and model settings via anchors + merge (`<<:`). Uncomment
+# and adapt when adding models below.
+
+# templates:
+#   # Qwen 2.5/3 instruct — support /think and /no_think suffixes.
+#   qwen_think: &qwen_think
+#     system_prompt: null
+#     think:
+#       default: false
+#       enable_suffix: " /think"
+#       disable_suffix: " /no_think"
+#       tags:
+#         open: ["<think>", "<thinking>"]
+#         close: ["</think>", "</thinking>"]
+#
+#   # vLLM sizing for small models — skip CUDA graph capture.
+#   vllm_small: &vllm_small
+#     max_model_len: 4096
+#     vllm:
+#       enforce_eager: true
+#       max_num_seqs: 2
+
+# =============================================================================
+# Models
+# =============================================================================
+
+models: {}
+
+# Example — Ollama-backed model.
+# Maps an llm-infer name to Ollama's own model registry name.
+#
+# models:
+#   qwen2.5-0.5b:
+#     ollama: qwen2.5:0.5b
+#     think:
+#       default: false
+
+# Example — vLLM-backed model with thinking mode + GPU sizing.
+# Requires the qwen_think and vllm_small templates above to be uncommented.
+#
+# models:
+#   qwen2.5-1.5b-instruct:
+#     <<: *qwen_think
+#     <<: !deep *vllm_small
+#     vllm:
+#       gpu_memory_gb: 4.0
+
+# Fallback settings applied to models not explicitly listed above.
+defaults:
+  system_prompt: null
+  think:
+    default: false
+    enable_suffix: null
+    disable_suffix: null
+    tags:
+      open: ["<think>", "<thinking>"]
+      close: ["</think>", "</thinking>"]
