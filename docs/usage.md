@@ -126,9 +126,9 @@ Configuration uses YAML files with the primary config at `etc/llm-infer.yaml`.
 
 Model selection follows this priority:
 1. CLI `--model-path` (absolute path)
-2. CLI `--model` (model name, resolved from `models.locations`)
-3. Selection file (`models.selection.path`)
-4. Default (`models.selection.default`)
+2. CLI `--model` (model name; resolved from `models.locations` for local-file engines, or passed through directly for Ollama)
+3. Selection file (`models.selection.generate.path` or `.embed.path`)
+4. Default (`models.selection.generate.default` or `.embed.default`)
 
 ### Main Configuration File
 

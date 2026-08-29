@@ -326,8 +326,7 @@ class ServeTool(Tool):
         if not model_name:
             example = "nomic-embed-text" if task == "embed" else "qwen2.5:0.5b"
             self.lg.error(
-                f"no model specified — pass --model NAME (e.g. --model {example}) "
-                f"or set the default with -o models.selection.{task}.default={example}"
+                f"no model specified — pass --model NAME (e.g. --model {example})"
             )
             return None
 
