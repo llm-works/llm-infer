@@ -458,7 +458,7 @@ Response:
 GET /metrics
 ```
 
-Returns Prometheus-format metrics.
+Returns structured JSON metrics (not Prometheus text-exposition).
 
 ## Using with OpenAI SDK
 

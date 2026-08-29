@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   covering install extras, engine prerequisites, and the optional model
   catalog. Shipped `models.yaml` reduced to an empty catalog with
   commented examples; add per-deployment entries as needed.
+- `README.md` rewritten to lead with the `llm_infer.client` library and
+  frame `llm-infer serve` as a devops wrapper (not a serving platform).
+  Corrects `/metrics` claim (JSON, not Prometheus) and fixes the client
+  quick example (undefined `messages` and `load_config()`).
 
 ## [0.6.1] - 2026-08-27
 
