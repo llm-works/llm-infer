@@ -11,7 +11,7 @@
 
 # Where to look for HuggingFace snapshots (used by native, vllm, peft).
 locations:
-  - ~/.cache/huggingface/hub
+  - !path ~/.cache/huggingface/hub
 
 # Default model when no --model is passed.
 # Point `path` at a per-deployment file (e.g., ops-controlled selection)

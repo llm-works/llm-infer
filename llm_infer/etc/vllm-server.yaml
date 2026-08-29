@@ -28,7 +28,7 @@ lora:
   enabled: true              # Enable LoRA adapter support
   max_loras: 4               # Maximum concurrent adapters in GPU memory
   max_lora_rank: 128         # Maximum LoRA rank supported
-  base_path: ~/.cache/llm-infer/adapters
+  base_path: !path ~/.cache/llm-infer/adapters
 
 # Tool calling
 tool_call_parser: hermes      # hermes, llama, mistral, etc.
