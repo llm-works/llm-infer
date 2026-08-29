@@ -126,7 +126,7 @@ Configuration uses YAML files with the primary config at `etc/llm-infer.yaml`.
 
 Model selection follows this priority:
 1. CLI `--model-path` (absolute path)
-2. CLI `--model` (model name, resolved from `models.location`)
+2. CLI `--model` (model name, resolved from `models.locations`)
 3. Selection file (`models.selection.path`)
 4. Default (`models.selection.default`)
 
@@ -141,9 +141,10 @@ backends:
   model: native       # native | gptqmodel (only if engine=native)
   linear: marlin      # pytorch | marlin (only if model=native)
 
-# Model location and selection
+# Model locations and selection
 models:
-  location: /path/to/models/directory
+  locations:
+    - /path/to/models/directory
   selection:
     path: ~/ops/models/selected.yaml  # Optional ops-controlled selection
     default: qwen2.5-1.5b              # Fallback model name
@@ -283,7 +284,7 @@ llm-infer serve --engine vllm --model-path /path/to/model
 # With config file
 llm-infer serve --config etc/llm-infer.yaml
 
-# With model name (resolved from models.location)
+# With model name (resolved from models.locations)
 llm-infer serve --model qwen2.5-1.5b
 ```
 

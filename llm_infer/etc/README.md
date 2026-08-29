@@ -3,11 +3,14 @@
 Default configuration files shipped inside the `llm-infer` wheel. Used by
 `llm-infer serve` when no `--etc-dir` is passed on the command line.
 
-The bundled defaults are enough to run any engine out of the box (Ollama,
-vLLM, native, PEFT). Per-deployment customization is done by pointing
-`--etc-dir` at your own copy, or by using `-o key=value` overrides at the
-CLI. See [docs/config.md](../../docs/config.md) for the schema and
-[docs/usage.md](../../docs/usage.md) for engine walkthroughs.
+The bundled defaults provide sensible configuration for each engine. Each
+engine has its own prerequisites — Ollama needs only the binary and a pulled
+model (no GPU required); vLLM/native/peft require CUDA. See
+[docs/usage.md](../../docs/usage.md) for per-engine setup.
+
+Per-deployment customization is done by pointing `--etc-dir` at your own
+copy, or by using `-o key=value` overrides at the CLI. See
+[docs/config.md](../../docs/config.md) for the full schema.
 
 ## Files
 
