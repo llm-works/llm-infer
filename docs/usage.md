@@ -146,8 +146,11 @@ models:
   locations:
     - /path/to/models/directory
   selection:
-    path: !path ~/ops/models/selected.yaml  # Optional ops-controlled selection
-    default: qwen2.5-1.5b              # Fallback model name
+    generate:
+      # path: !path <path-to-selection.yaml>  # Optional: ops-controlled model catalog
+      default: qwen2.5-1.5b              # Fallback generation model
+    embed:
+      default: bge-small-en-v1.5         # Fallback embedding model
 
 # Engine-specific settings
 engines:
