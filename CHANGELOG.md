@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Python 3.13 and 3.14 declared and tested. CI unit-test matrix now covers
+  3.11–3.14 on Linux; `pyproject.toml` classifiers reflect the same range.
+
 ### Fixed
 
 - `pip install llm-infer` now runs `llm-infer serve` out of the box on a
