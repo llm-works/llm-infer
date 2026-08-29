@@ -146,7 +146,7 @@ models:
   locations:
     - /path/to/models/directory
   selection:
-    path: ~/ops/models/selected.yaml  # Optional ops-controlled selection
+    path: !path ~/ops/models/selected.yaml  # Optional ops-controlled selection
     default: qwen2.5-1.5b              # Fallback model name
 
 # Engine-specific settings
@@ -289,8 +289,9 @@ llm-infer serve --model qwen2.5-1.5b
 ```
 
 Options:
-- `--engine`: Inference backend (default: `ollama`): `ollama` | `vllm` | `vllm-server` | `native`
+- `--engine`: Inference backend (default: `ollama`): `ollama` | `vllm` | `vllm-server` | `native` | `peft`
 - `--config, -c`: Config file path (default: `etc/llm-infer.yaml`)
+- `--etc-dir`: Configuration directory to load (default: the bundled `llm_infer/etc/` shipped in the wheel)
 - `--model-path`: Direct path to model directory
 - `--model, -m`: Model name to load
 - `--handler`: Request handler type (`sequential` | `bounded`)
