@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-29
+
 ### Added
 
 - Python 3.13 and 3.14 declared and tested. CI unit-test matrix now covers
@@ -424,7 +426,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/llm-works/llm-infer/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/llm-works/llm-infer/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/llm-infer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/llm-infer/compare/v0.4.0...v0.5.0
