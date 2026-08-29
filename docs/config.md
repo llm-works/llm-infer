@@ -211,11 +211,9 @@ engines:
   vllm: !include './vllm.yaml'
 
 # Include nested value (use # to select path)
-models_path: !include "../.env.yaml#paths.models.ollama"
+logging: !include "./infra.yaml#logging"
 ```
 
-Paths can also be hardcoded directly:
-
-```yaml
-models_path: /data/models/ollama
-```
+Use `!include?` for a soft include that returns `{}` when the file is missing
+instead of raising — useful for optional per-machine overrides that may not
+exist in every deployment.

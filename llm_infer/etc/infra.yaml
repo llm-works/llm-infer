@@ -13,12 +13,5 @@ logging:
       colors: true               # Enable colored output
       micros: false              # Show microseconds (overwrites global setting)
 
-    file:
-      type: file                 # Handler type
-      enabled: true              # Enable file logging
-      level: trace               # More detailed than global - should be restricted to INFO
-      format: text               # Format: text, json (set to json for JSON output)
-      file: !path "../.logs/app.log"       # Output file path (same for both text and JSON)
-      rotation: size             # Rotation: none, size, timed
-      max_size: "50MB"           # Max file size before rotation
-      backup_count: 5            # Number of backup files to keep
+  # Add file / rotating / database handlers per deployment as needed.
+  # See appinfra's logging docs for the available handler types and options.

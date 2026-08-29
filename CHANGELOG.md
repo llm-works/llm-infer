@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `pip install llm-infer` now runs `llm-infer serve` out of the box on a
+  fresh venv. Adds `pydantic` as a base dependency (previously masked by
+  extras) and ships default configs inside the wheel (previously required
+  a local `./etc/`). Override via `--etc-dir /path/to/custom/etc/`.
+
+### Changed
+
+- `docs/usage.md` rewritten with per-engine step-by-step walkthroughs
+  covering install extras, engine prerequisites, and the optional model
+  catalog. Shipped `models.yaml` reduced to an empty catalog with
+  commented examples; add per-deployment entries as needed.
+
 ## [0.6.1] - 2026-08-27
 
 ### Changed

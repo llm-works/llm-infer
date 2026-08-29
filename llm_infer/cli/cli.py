@@ -6,6 +6,7 @@
 """CLI entry point."""
 
 import os
+from pathlib import Path
 
 # Disable vLLM's dictConfig call BEFORE any vLLM imports
 # vLLM's envs module caches env vars at import time, so this must be set early
@@ -17,6 +18,10 @@ from appinfra.app import AppBuilder  # noqa: E402
 
 from .tools import CompatTool, MetricsTool, QueryTool, ServeTool  # noqa: E402
 
+# Bundled etc/ ships inside the wheel. Used as the default --etc-dir so
+# `pip install llm-infer && llm-infer serve` works without local setup.
+_BUNDLED_ETC_DIR = str(Path(__file__).parent.parent / "etc")
+
 
 def main() -> int:
     """Main entry point for the CLI."""
@@ -24,6 +29,7 @@ def main() -> int:
         AppBuilder("inference")
         .with_description("LLM inference server with paged attention")
         .with_config_file("llm-infer.yaml")
+        .with_standard_arg("etc_dir", default=_BUNDLED_ETC_DIR)
         .tools.with_tool(CompatTool())
         .with_tool(MetricsTool())
         .with_tool(QueryTool())

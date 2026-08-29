@@ -91,9 +91,8 @@ def get_spec_header(template_path: Path | None = None) -> str:
 
 
 def _get_default_template_path() -> Path:
-    """Get default template path (etc/compat_template.yaml relative to package)."""
-    project_root = Path(__file__).parent.parent
-    return project_root / "etc" / "compat_template.yaml"
+    """Get default template path (etc/compat_template.yaml bundled with package)."""
+    return Path(__file__).parent / "etc" / "compat_template.yaml"
 
 
 def load_template(template_path: Path | None = None) -> dict[str, Any]:

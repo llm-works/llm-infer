@@ -19,16 +19,27 @@ behind a single interface.
 
 ## Quick Start
 
-```bash
-pip install llm-infer
+Serve a model locally on Ollama (the simplest path — CPU or GPU, no local
+model weights to manage):
 
-# With Ollama (https://ollama.com)
+```bash
+# 1. Install the Ollama binary (once per machine)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Pull the model
 ollama pull qwen2.5:0.5b
+
+# 3. Install llm-infer and serve — llm-infer manages the ollama daemon
+pip install 'llm-infer[runtime]'
 llm-infer serve --model qwen2.5:0.5b
 
-# Query
+# 4. Query from another terminal
 llm-infer query "What is the capital of France?"
 ```
+
+See [docs/usage.md](docs/usage.md) for the per-engine walkthroughs (Ollama,
+vLLM, native, PEFT) and [llm_infer/etc/README.md](llm_infer/etc/README.md)
+for the bundled configuration and customization patterns.
 
 ## Client Package
 
@@ -194,7 +205,10 @@ api:
   port: 8000
 ```
 
-Per-model overrides in `etc/models.yaml`:
+Per-model overrides in `etc/models.yaml` — optional; the shipped catalog is
+empty and unlisted models still serve (Ollama passes through, vLLM/native
+resolve via `--model-path` or `locations:`). Add entries when you want
+per-model tuning:
 
 ```yaml
 models:
@@ -206,6 +220,10 @@ models:
   qwen2.5:7b:
     ollama: qwen2.5:7b  # Ollama model name mapping
 ```
+
+The bundled `etc/` ships inside the wheel; override individual settings
+with `--etc-dir /path/to/custom/etc/` or `-o key=value`. See
+[llm_infer/etc/README.md](llm_infer/etc/README.md).
 
 ## API Endpoints
 
