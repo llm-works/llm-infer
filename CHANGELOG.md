@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-29
+
+### Added
+
+- Python 3.13 and 3.14 declared and tested. CI unit-test matrix now covers
+  3.11–3.14 on Linux; `pyproject.toml` classifiers reflect the same range.
+
+### Fixed
+
+- `pip install llm-infer` now runs `llm-infer serve` out of the box on a
+  fresh venv. Adds `pydantic` as a base dependency (previously masked by
+  extras) and ships default configs inside the wheel (previously required
+  a local `./etc/`). Override via `--etc-dir /path/to/custom/etc/`.
+
+### Changed
+
+- `docs/usage.md` rewritten with per-engine step-by-step walkthroughs
+  covering install extras, engine prerequisites, and the optional model
+  catalog. Shipped `models.yaml` reduced to an empty catalog with
+  commented examples; add per-deployment entries as needed.
+- `README.md` rewritten to lead with the `llm_infer.client` library and
+  frame `llm-infer serve` as a devops wrapper (not a serving platform).
+  Corrects `/metrics` claim (JSON, not Prometheus) and fixes the client
+  quick example (undefined `messages` and `load_config()`).
+
 ## [0.6.1] - 2026-08-27
 
 ### Changed
@@ -401,7 +426,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/llm-works/llm-infer/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/llm-works/llm-infer/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/llm-infer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/llm-works/llm-infer/compare/v0.4.0...v0.5.0

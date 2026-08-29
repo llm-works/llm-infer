@@ -316,16 +316,18 @@ class ServeTool(Tool):
         For Ollama, we return a synthetic Path from the model name.
         The OllamaEngineFactory will look up the 'ollama' field in models.yaml.
         """
+        task = "embed" if self.args.embed else "generate"
         model_name = self.args.model
         if not model_name:
-            # Try selection file/default
-            task = "embed" if self.args.embed else "generate"
             selection = config.models.get_selection(task)
             if selection.default:
                 model_name = selection.default
 
         if not model_name:
-            self.lg.error("no model specified for Ollama engine")
+            example = "nomic-embed-text" if task == "embed" else "qwen2.5:0.5b"
+            self.lg.error(
+                f"no model specified — pass --model NAME (e.g. --model {example})"
+            )
             return None
 
         # Return synthetic path - just the model name

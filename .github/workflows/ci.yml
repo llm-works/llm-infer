@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     steps:
       - name: Checkout code
@@ -109,13 +109,26 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install llm-infer
+      - name: Build wheel
         run: |
-          python -m pip install --upgrade pip
-          # Install appinfra from GitHub (need unreleased FastAPI subprocess logger injection)
-          python -m pip install "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Install wheel + appinfra
+        run: |
+          # Install the built wheel (not editable) so bundled package-data
+          # (etc/) is exercised the same way a `pip install llm-infer` user
+          # would hit it. Ollama engine talks HTTP — no torch needed.
+          python -m pip install ./dist/*.whl \
+            "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
           # python -m pip install "appinfra>=0.4.0,<0.5.0"  # switch back after next appinfra release
-          python -m pip install -e .
+
+      - name: Verify client-library imports on base install
+        # cd out of the source tree so `import llm_infer` resolves to the
+        # installed wheel, not the local llm_infer/ directory.
+        working-directory: /tmp
+        run: |
+          python -c "from llm_infer.client import Factory, FallbackClient, LLMRouter, EmbeddingClient; import llm_infer; print('llm_infer', llm_infer.__version__)"
 
       - name: Pull Ollama model
         run: |
@@ -124,8 +137,11 @@ jobs:
           curl http://localhost:11434/api/tags | jq .
 
       - name: Start llm-infer server
+        # No --etc-dir: exercises the bundled etc/ default shipped in the
+        # wheel — the same path a first-time `pip install llm-infer` user
+        # hits (regression coverage for the FileNotFoundError class of bug).
         run: |
-          llm-infer --etc-dir .github/ci/ollama-e2e serve --model qwen2.5:0.5b &
+          llm-infer serve --model qwen2.5:0.5b &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           for i in {1..60}; do
@@ -142,15 +158,13 @@ jobs:
             exit 1
           fi
 
-      - name: Run smoke test
-        run: |
-          RESPONSE=$(llm-infer --etc-dir .github/ci/ollama-e2e query "Say hello in exactly 3 words" --max-tokens 20)
-          echo "Response: $RESPONSE"
-          if [ -z "$RESPONSE" ]; then
-            echo "ERROR: Empty response from server"
-            exit 1
-          fi
-          echo "Smoke test passed!"
+      - name: Run client quickstart against live serve
+        env:
+          LLM_INFER_BASE_URL: http://localhost:8000/v1
+          LLM_INFER_MODEL: qwen2.5:0.5b
+          LLM_INFER_PROMPT: Say hello in exactly 3 words
+          LLM_INFER_MAX_TOKENS: '20'
+        run: python examples/quickstart.py
 
       - name: Cleanup
         if: always()

@@ -8,49 +8,64 @@
 [![PyPI](https://img.shields.io/pypi/v/llm-infer.svg)](https://pypi.org/project/llm-infer/)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 
-Unified CLI and client library for local LLM inference. Wraps Ollama, vLLM, and a native engine
-behind a single interface.
+`llm-infer` is a Python package for LLM inference: a production-grade
+multi-backend client library, plus a thin wrapper for serving local models
+behind an OpenAI-compatible endpoint.
 
-**Components:**
+Two components:
 
-- **CLI & Server** - Single command to serve models via Ollama, vLLM, or native torch engine
-- **Client Package** - Standard interface to multiple LLM backends (OpenAI, Anthropic, local servers)
-- **Native Engine** - Custom torch implementation for learning and experimentation
+1. **`llm_infer.client`** — a production-grade multi-backend client library.
+   Speaks OpenAI, Anthropic, Google (AI Studio + Vertex OpenAI-compat), Vertex
+   AI native REST, and any OpenAI-compatible server through one interface, with
+   routing, cross-provider fallback, retries, rate limiting, structured
+   callbacks, and embeddings. **This is the main event.**
+2. **`llm-infer serve`** — a thin devops wrapper around Ollama, vLLM, native
+   torch, and PEFT that exposes them all behind one OpenAI-compatible HTTP
+   endpoint. Useful when a team runs several models across mixed engines and
+   wants a single operator contract. Not a replacement for real inference
+   platforms (KServe, Ray Serve, NVIDIA Triton, vLLM's production stack) at
+   GPU-farm scale.
 
-## Quick Start
+The two are independent — the client works against any endpoint (cloud or
+self-hosted), and the server can be consumed by any OpenAI-compatible client.
 
-```bash
-pip install llm-infer
+---
 
-# With Ollama (https://ollama.com)
-ollama pull qwen2.5:0.5b
-llm-infer serve --model qwen2.5:0.5b
+## `llm_infer.client` — Multi-Backend Client Library
 
-# Query
-llm-infer query "What is the capital of France?"
-```
+Unified interface across cloud providers and self-hosted servers, with the
+primitives production agent code actually needs: fallback across providers,
+per-backend rate limits, exponential backoff, structured callbacks for cost
+and tracing, embeddings, and async everywhere.
 
-## Client Package
+### Backends
 
-`llm_infer.client` is a Python client library for LLM inference with a unified interface across
-backends. Built for autonomous agents and production use. Combined with `llm-infer serve`, the
-same package covers both self-hosted inference (vLLM, Ollama, native) and multi-provider routing:
-serve one or more local models behind an OpenAI-compatible endpoint, then route across those
-plus cloud providers from a single client.
+| Backend | Notes |
+|---------|-------|
+| `openai` | OpenAI API |
+| `openai_compatible` | Any OpenAI-compatible endpoint (vLLM, Ollama, `llm-infer serve`, ...) |
+| `anthropic` | Anthropic Claude |
+| Google | Gemini via AI Studio, Vertex OpenAI-compat, and native Vertex REST (`generateContent` + `cachedContents`) |
 
-- **Multiple backends** - OpenAI, Anthropic, Google Gemini, Vertex AI (OpenAI-compat and native
-  REST), and any OpenAI-compatible API (vLLM, Ollama, llm-infer server)
-- **Sync, async, streaming** - All execution modes supported
-- **Rate limiting** - Per-backend request throttling
-- **Retry with backoff** - Configurable exponential backoff on transient errors
-- **Multi-backend routing** - `LLMRouter` with pluggable `RoutingStrategy` and lazy model discovery
-- **Cross-provider fallback** - `FallbackClient` with chained pairs and `model@backend` pinning;
-  automatic escalation from exhausted 429 retries to a fallback model
-- **Embeddings** - `EmbeddingClient` for OpenAI and Google (AI Studio + Vertex) with the same
-  retry/callback contract
-- **Structured callbacks** - Six lifecycle hooks (`on_request`, `on_response`, `on_retry`,
-  `on_error`, `on_before_send`, `on_after_send`) for cost tracking, tracing, and metrics
-- **Extensible** - Register custom backends via `Factory.register()`
+### Highlights
+
+- **Multi-backend routing** — `LLMRouter` with pluggable `RoutingStrategy` and
+  lazy model discovery.
+- **Cross-provider fallback** — `FallbackClient` with chained pairs and
+  `model@backend` pinning; 429s exhaust their retry budget on the primary
+  before failing over.
+- **Structured callbacks** — six lifecycle hooks split across retry-loop level
+  (`on_request`, `on_response`, `on_retry`, `on_error`) and HTTP level
+  (`on_before_send`, `on_after_send`) for cost tracking, tracing, and latency
+  histograms.
+- **Embeddings** — `EmbeddingClient` for OpenAI and Google (AI Studio +
+  Vertex) with the same retry/callback contract.
+- **Sync, async, streaming** — every execution mode.
+- **Auth** — bearer tokens or GCP service accounts, resolved from the `auth:`
+  block on any backend.
+- **Extensible** — register custom backends via `Factory.register()`.
+
+### Quick example
 
 ```python
 from appinfra.log import Logger
@@ -59,175 +74,159 @@ from llm_infer.client import Factory, FallbackClient
 lg = Logger("my-app")
 factory = Factory(lg)
 
-with factory.openai(base_url="http://localhost:8000/v1") as client:
-    response = client.chat(
-        messages=[{"role": "user", "content": "Hello!"}],
-        system="You are a helpful assistant.",
-    )
-    print(response.content)
+messages = [{"role": "user", "content": "Hello!"}]
 
-# Streaming
+# Single backend
 with factory.openai(base_url="http://localhost:8000/v1") as client:
-    messages = [{"role": "user", "content": "Hello!"}]
-    for token in client.chat_stream(messages):
-        print(token, end="", flush=True)
-
-# Async
-async with factory.openai(base_url="http://localhost:8000/v1") as client:
-    messages = [{"role": "user", "content": "Hello!"}]
-    response = await client.chat_async(messages)
+    response = client.chat(messages)
 
 # Multi-backend router with cross-provider fallback
-router = factory.from_config(load_config())  # -> LLMRouter
+config = {
+    "default": "primary",
+    "backends": {
+        "primary": {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:8000/v1",
+        },
+        "fallback": {"type": "anthropic"},
+    },
+}  # see llm_infer/client/README.md for full schema
+router = factory.from_config(config)
 client = FallbackClient(lg, router, fallbacks={"gpt-4o": "claude-sonnet-4-20250514"})
 response = client.chat(messages, model="gpt-4o")
 ```
 
-### Protocol Extensions
+**Full API, configuration schema, routing and fallback semantics, embeddings,
+and observability hooks:** see
+[`llm_infer/client/README.md`](llm_infer/client/README.md).
 
-The server extends the OpenAI chat completions API:
+---
 
-**Request** - adds `think` and `adapter` fields:
-```json
-{
-  "model": "default",
-  "messages": [{"role": "user", "content": "What is 15 * 23?"}],
-  "think": true,
-  "adapter": "my-lora-adapter"
-}
+## `llm-infer serve` — Local Inference Wrapper
+
+A single OpenAI-compatible HTTP server that dispatches to Ollama, vLLM,
+native torch, or PEFT — selected by one yaml key. This is a
+**devops wrapper**, not a serving platform: it unifies the *operator surface*
+(CLI, health, shutdown, model catalog, OpenAI API, `think`/`adapter` protocol
+extensions) across engines. Each engine keeps its own tuning knobs under a
+shared outer envelope. Serves **one model per process**.
+
+### Good fit
+
+- **Several models with different settings** — one `models.yaml` entry per
+  model, one CLI flag to switch which model the server hosts.
+- **Mixed engines behind one contract** — Ollama for small models, vLLM for
+  production serving (hot LoRA swap in-process, or pinned adapters as an HTTP
+  subprocess), native for experimentation, PEFT for PROMPT_TUNING adapters
+  that vLLM doesn't support.
+- **Client code doesn't change when the backend changes** — same OpenAI
+  surface, same `think`/`adapter` extensions across engines.
+- **Dev↔prod parity** — the yaml (with `-o key=value` overrides) is the same
+  shape everywhere.
+
+### Not a fit
+
+- **One model, laptop, casual use** — `ollama run` is simpler.
+- **One model, single engine, production** — `vllm serve` or `ollama serve`
+  alone gives every knob directly, no abstraction cost.
+- **Multi-model in one process, dynamic KV cache sharing, engine-crash
+  auto-restart** — this wrapper doesn't do those. Use a supervisor with one
+  process per model, or a real inference platform (KServe, Ray Serve, NVIDIA
+  Triton, vLLM's production stack) — see **Scale ceiling** below.
+
+### Scale ceiling
+
+At GPU-farm scale — autoscaling, disaggregated prefill/decode, cross-replica
+batching, hot-swap under traffic — reach for a real inference platform:
+**KServe, Ray Serve, NVIDIA Triton, or vLLM's production stack**. Not raw
+engine CLIs. Because `llm-infer serve` preserves the OpenAI contract,
+downstream client code doesn't have to change when migrating; the model
+catalog does.
+
+### Production deployment assumes
+
+- **A reverse proxy in front** for auth, TLS, rate limiting, and per-model
+  routing — the server has no built-in auth.
+- **A supervisor** (systemd, k8s) for restart and multi-model fan-out — the
+  server won't auto-restart a crashed engine subprocess.
+- **Scrape-side handling of `/metrics`**, which returns structured JSON, not
+  Prometheus text-exposition.
+
+### Quick start
+
+Serve on Ollama (the simplest path — CPU or GPU, no local weights to manage):
+
+```bash
+# 1. Install the Ollama binary (once per machine)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Pull the model
+ollama pull qwen2.5:0.5b
+
+# 3. Install llm-infer and serve — llm-infer manages the ollama daemon
+pip install 'llm-infer[runtime]'
+llm-infer serve --model qwen2.5:0.5b
+
+# 4. Query from another terminal
+llm-infer query "What is the capital of France?"
 ```
 
-**Response** - adds `thinking` in message and `adapter` metadata:
-```json
-{
-  "id": "chatcmpl-123",
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": "345",
-      "thinking": "Let me calculate step by step..."
-    }
-  }],
-  "adapter": {
-    "requested": "my-lora-adapter",
-    "actual": "my-lora-adapter",
-    "fallback": false
-  }
-}
-```
+See [docs/usage.md](docs/usage.md) for per-engine walkthroughs and
+[`llm_infer/etc/README.md`](llm_infer/etc/README.md) for the bundled
+configuration and override patterns.
 
-The client library exposes these as keyword arguments:
-
-```python
-response = client.chat(messages, think=True, adapter="my-adapter")
-print(response.thinking)  # Reasoning content
-print(response.content)  # Final answer
-```
-
-### Multiple Backends
-
-```python
-# Anthropic
-async with factory.anthropic(default_model="claude-sonnet-4-20250514") as client:
-    response = await client.chat_async(messages)
-
-# OpenAI
-with factory.openai(base_url="https://api.openai.com/v1", api_key="sk-...") as client:
-    response = client.chat(messages)
-
-# Google Gemini (OpenAI-compatible endpoint; auto-selects GeminiBackend)
-with factory.openai(
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-    api_key="AIza...",
-    default_model="gemini-2.5-flash",
-) as client:
-    response = client.chat(messages)
-
-# Vertex AI native REST (cachedContents + generateContent) via config
-# config = {"backends": {"vertex": {"type": "vertex_native", "project": "...", ...}}}
-vertex_backends = factory.vertex_natives_from_config(config)
-```
-
-## Engines
+### Engines
 
 | Engine | Description | Install |
 |--------|-------------|---------|
-| `ollama` (default) | Wraps Ollama server | [ollama.com](https://ollama.com) |
-| `vllm` | vLLM Python API | `pip install vllm` |
-| `vllm-server` | vLLM HTTP subprocess | `pip install vllm` |
-| `native` | Custom torch implementation | `pip install llm-infer[runtime]` |
+| `ollama` (default) | Wraps the Ollama server | [ollama.com](https://ollama.com) |
+| `vllm` / `vllm-server` | vLLM — in-process (LoRA hot-swap) or as HTTP subprocess (LoRA pinned at boot) | `pip install vllm` |
+| `native` | From-scratch torch implementation (PagedAttention + FlashInfer) | `pip install llm-infer[runtime]` |
+| `peft` | HuggingFace PEFT, incl. PROMPT_TUNING adapters | `pip install llm-infer[runtime]` |
 
 ```bash
 llm-infer serve --model qwen2.5:7b                          # Ollama
-llm-infer serve --engine vllm --model-path /path/to/model   # vLLM
+llm-infer serve --engine vllm --model-path /path/to/model   # vLLM (in-process)
 llm-infer serve --engine native --model-path /path/to/model # Native
 ```
 
-### Native Engine
+### Protocol extensions
 
-The native engine is a from-scratch torch implementation with PagedAttention and FlashInfer. Useful
-for learning how LLM inference works or experimenting with custom modifications.
+The server extends OpenAI chat completions with `think` (reasoning content)
+and `adapter` (LoRA selection) request fields, mirrored back as `thinking` in
+the message and an `adapter` metadata block on the response. The client
+library passes these through as keyword arguments on `client.chat()`.
 
-```bash
-pip install llm-infer[runtime]
-llm-infer serve --engine native --model-path /path/to/model
-```
-
-## Configuration
-
-```yaml
-# etc/llm-infer.yaml
-backends:
-  engine: ollama
-
-models:
-  locations:
-    - /path/to/models
-  selection:
-    generate:
-      default: qwen2.5-7b
-    embed:
-      default: bge-small-en-v1.5
-
-api:
-  host: 0.0.0.0
-  port: 8000
-```
-
-Per-model overrides in `etc/models.yaml`:
-
-```yaml
-models:
-  qwen2.5-7b:
-    max_model_len: 8192
-    vllm:
-      enforce_eager: true
-
-  qwen2.5:7b:
-    ollama: qwen2.5:7b  # Ollama model name mapping
-```
-
-## API Endpoints
+### API endpoints
 
 | Endpoint | Description |
 |----------|-------------|
 | `POST /v1/chat/completions` | Chat completion (OpenAI-compatible) |
 | `POST /v1/completions` | Text completion (OpenAI-compatible) |
+| `POST /v1/embeddings` | Embeddings (OpenAI-compatible) |
 | `GET /v1/models` | List available models |
-| `GET /health` | Health check |
-| `GET /metrics` | Prometheus metrics |
+| `GET /health` | Readiness gate — reports `initializing` until warmup completes |
+| `GET /metrics` | Structured JSON metrics (not Prometheus text-exposition) |
+
+---
 
 ## Installation
 
 ```bash
-pip install llm-infer              # Client only
-pip install llm-infer[anthropic]   # With Anthropic support
-pip install llm-infer[saia]        # With llm-saia integration
-pip install llm-infer[runtime]     # With native engine (torch)
+pip install llm-infer              # Client library only
+pip install llm-infer[anthropic]   # + Anthropic support
+pip install llm-infer[saia]        # + llm-saia integration
+pip install llm-infer[runtime]     # + native engine and serve (torch)
 ```
+
+## Supported Python versions
+
+CI runs against Python 3.11, 3.12, 3.13, and 3.14 on Linux. Other platforms
+and Python versions are not tested and not claimed. `requires-python = ">=3.11"`
+is enforced at install time.
 
 ## License
 
-Apache License 2.0
+Apache License 2.0 - see [LICENSE](LICENSE) for details.
 
 Maintained by [LLM Works LLC](https://llm-works.ai) and contributors.

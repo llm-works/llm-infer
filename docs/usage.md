@@ -1,28 +1,122 @@
 # Usage Guide
 
-This document covers configuration, CLI commands, and API usage.
+This document covers running `llm-infer` as a local inference server: install path per engine,
+configuration, CLI commands, and the OpenAI-compatible HTTP API.
 
-## Quick Start
+For using `llm-infer` as a Python client library against remote LLM endpoints (OpenAI, Anthropic,
+Vertex, or a running `llm-infer` server), see [client.md](client.md).
 
-The default engine is Ollama (easiest, works on CPU or GPU).
+## Getting Started
+
+`llm-infer serve` runs a local inference server that exposes an OpenAI-compatible HTTP API on
+port 8000. Five engines are available; each has different prerequisites.
+
+| Engine        | Extras      | External prereqs                                | Best for                     |
+|---------------|-------------|-------------------------------------------------|------------------------------|
+| `ollama`      | `[runtime]` | Ollama binary; model pulled                     | Getting started; CPU or GPU  |
+| `vllm-server` | `[cuda]`    | CUDA-capable GPU + drivers                      | Production (recommended)     |
+| `vllm`        | `[cuda]`    | CUDA-capable GPU + drivers                      | Dynamic LoRA adapters        |
+| `native`      | `[runtime]` | CUDA GPU + drivers; local HF weights            | Learning; experimentation    |
+| `peft`        | `[runtime]` | CUDA GPU + drivers; local HF weights            | PROMPT/PREFIX/P_TUNING       |
+
+See [engines.md](engines.md) for the trade-offs between engines and how each one works.
+
+### Serving with Ollama
+
+Ollama is the simplest path and works on CPU or GPU. `llm-infer` starts and stops the Ollama
+daemon itself — no need to run `ollama serve` separately.
 
 ```bash
-# Ollama (default)
+# 1. Install the Ollama binary (one-time per machine)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Pull the model
 ollama pull qwen2.5:0.5b
-llm-infer serve --model qwen2.5:0.5b
 
-# vLLM (production - best performance, requires GPU)
-llm-infer serve --engine vllm --model-path /path/to/model
+# 3. Install llm-infer with the runtime extras
+pip install 'llm-infer[runtime]'
 
-# vLLM server (production - HTTP API to vllm serve subprocess)
-llm-infer serve --engine vllm-server --model-path /path/to/model
+# 4. Serve — llm-infer spawns `ollama serve` in the background
+llm-infer serve --engine ollama --model qwen2.5:0.5b
 
-# Native (research - custom implementation for learning)
-llm-infer serve --engine native --model-path /path/to/model
-
-# Query in another terminal
-llm-infer query "What is the capital of France?"
+# 5. Verify from another terminal
+curl http://localhost:8000/v1/models
+llm-infer query "What is 2 + 2?"
 ```
+
+To connect to an already-running Ollama server instead of managing one, set
+`engines.ollama.auto_start: false` in `etc/ollama.yaml` and point `engines.ollama.host` at it.
+
+### Serving with vLLM Server (production)
+
+`vllm-server` runs `vllm serve` as a subprocess and connects to it over its OpenAI-compatible HTTP
+API. This is the recommended production path — all vLLM optimizations (continuous batching,
+chunked prefill, prefix caching, speculative decoding, server-side tool-call parsing) are
+available.
+
+```bash
+# 1. Install with GPU extras (requires CUDA-capable GPU + drivers)
+pip install 'llm-infer[cuda]'
+
+# 2. Serve — weights are pulled from HuggingFace on first run
+llm-infer serve --engine vllm-server --model-path Qwen/Qwen2.5-7B-Instruct
+
+# 3. Verify
+curl http://localhost:8000/v1/models
+```
+
+Local model weights work too — pass the directory instead of the HuggingFace id:
+
+```bash
+llm-infer serve --engine vllm-server --model-path /path/to/model-dir
+```
+
+### Serving with vLLM (Python API)
+
+Same install as `vllm-server`. Runs vLLM's `LLM` class in-process — simpler deployment (single
+process) and supports dynamic LoRA adapter loading at request time, but lacks some optimizations
+available in `vllm-server` (full continuous batching, chunked prefill, server-side tool-call
+parsing). See [engines.md](engines.md#vllm-engine-python-api) for the comparison.
+
+```bash
+pip install 'llm-infer[cuda]'
+llm-infer serve --engine vllm --model-path Qwen/Qwen2.5-7B-Instruct
+```
+
+### Serving with the native engine
+
+The native engine is a custom PyTorch implementation with PagedAttention and FlashInfer, intended
+for learning and experimentation. Full visibility into the inference pipeline (scheduler, KV
+cache, attention backend, sampler).
+
+```bash
+# 1. Install with runtime extras (CUDA GPU + drivers required)
+pip install 'llm-infer[runtime]'
+
+# 2. Download model weights to a local directory
+huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct --local-dir ./models/qwen2.5-1.5b
+
+# 3. Serve
+llm-infer serve --engine native --model-path ./models/qwen2.5-1.5b
+```
+
+### Serving with the PEFT engine
+
+The PEFT engine handles PROMPT_TUNING, PREFIX_TUNING, and P_TUNING adapters that vLLM's
+`--enable-lora` doesn't support. Uses HuggingFace Transformers directly.
+
+```bash
+pip install 'llm-infer[runtime]'
+llm-infer serve --engine peft --model-path /path/to/base-model
+```
+
+For LoRA adapters, use `vllm` or `vllm-server` instead — better performance.
+
+### Customizing configuration
+
+`llm-infer` ships a default `etc/` inside the package with sensible defaults for each engine. To
+override — change ports, model locations, engine tuning, or add per-model entries — see
+[Configuration](#configuration) below and [config.md](config.md).
 
 ## Configuration
 
@@ -32,9 +126,9 @@ Configuration uses YAML files with the primary config at `etc/llm-infer.yaml`.
 
 Model selection follows this priority:
 1. CLI `--model-path` (absolute path)
-2. CLI `--model` (model name, resolved from `models.location`)
-3. Selection file (`models.selection.path`)
-4. Default (`models.selection.default`)
+2. CLI `--model` (model name; resolved from `models.locations` for local-file engines, or passed through directly for Ollama)
+3. Selection file (`models.selection.generate.path` or `.embed.path`)
+4. Default (`models.selection.generate.default` or `.embed.default`)
 
 ### Main Configuration File
 
@@ -47,12 +141,16 @@ backends:
   model: native       # native | gptqmodel (only if engine=native)
   linear: marlin      # pytorch | marlin (only if model=native)
 
-# Model location and selection
+# Model locations and selection
 models:
-  location: /path/to/models/directory
+  locations:
+    - /path/to/models/directory
   selection:
-    path: ~/ops/models/selected.yaml  # Optional ops-controlled selection
-    default: qwen2.5-1.5b              # Fallback model name
+    generate:
+      # path: !path <path-to-selection.yaml>  # Optional: ops-controlled model catalog
+      default: qwen2.5-1.5b              # Fallback generation model
+    embed:
+      default: bge-small-en-v1.5         # Fallback embedding model
 
 # Engine-specific settings
 engines:
@@ -189,13 +287,14 @@ llm-infer serve --engine vllm --model-path /path/to/model
 # With config file
 llm-infer serve --config etc/llm-infer.yaml
 
-# With model name (resolved from models.location)
+# With model name (resolved from models.locations)
 llm-infer serve --model qwen2.5-1.5b
 ```
 
 Options:
-- `--engine`: Inference backend (default: `ollama`): `ollama` | `vllm` | `vllm-server` | `native`
+- `--engine`: Inference backend (default: `ollama`): `ollama` | `vllm` | `vllm-server` | `native` | `peft`
 - `--config, -c`: Config file path (default: `etc/llm-infer.yaml`)
+- `--etc-dir`: Configuration directory to load (default: the bundled `llm_infer/etc/` shipped in the wheel)
 - `--model-path`: Direct path to model directory
 - `--model, -m`: Model name to load
 - `--handler`: Request handler type (`sequential` | `bounded`)
@@ -359,7 +458,7 @@ Response:
 GET /metrics
 ```
 
-Returns Prometheus-format metrics.
+Returns structured JSON metrics (not Prometheus text-exposition).
 
 ## Using with OpenAI SDK
 
