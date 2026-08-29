@@ -219,6 +219,12 @@ pip install llm-infer[saia]        # + llm-saia integration
 pip install llm-infer[runtime]     # + native engine and serve (torch)
 ```
 
+## Supported Python versions
+
+CI runs against Python 3.11, 3.12, 3.13, and 3.14 on Linux. Other platforms
+and Python versions are not tested and not claimed. `requires-python = ">=3.11"`
+is enforced at install time.
+
 ## License
 
 Apache License 2.0 - see [LICENSE](LICENSE) for details.
