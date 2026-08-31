@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `llm-infer serve` now starts under Python 3.14 (POSIX default
+  `multiprocessing` start method switched from `fork` to `forkserver`).
+  Requires `appinfra>=0.10.3`.
+
 ### Changed
 
 - Default model search path in shipped `etc/models.yaml` is now

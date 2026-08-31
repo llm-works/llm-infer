@@ -21,7 +21,7 @@ from .mappers import (
     completion_request_to_internal,
     determine_finish_reason,
 )
-from .router import create_openai_router
+from .router import OpenAIRouterConfig, create_openai_router
 
 __all__ = [
     # Chat types
@@ -39,6 +39,7 @@ __all__ = [
     "ModelInfo",
     "ModelList",
     # Router
+    "OpenAIRouterConfig",
     "create_openai_router",
     # Mappers
     "chat_request_to_internal",
