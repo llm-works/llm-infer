@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-31
+
+### Fixed
+
+- `llm-infer serve` now starts under Python 3.14 (POSIX default
+  `multiprocessing` start method switched from `fork` to `forkserver`).
+  Requires `appinfra>=0.10.3`.
+- `examples/` now ships in the wheel as `llm_infer.examples`. Run the
+  quickstart with `python -m llm_infer.examples.quickstart` and the
+  interactive client / retry demo under
+  `python -m llm_infer.examples.client.<module>`. CI wheel-smoke now
+  drives the packaged path.
+
+### Changed
+
+- Default model search path in shipped `etc/models.yaml` is now
+  `~/.local/share/llm-infer/models` (was `~/.cache/huggingface/hub`).
+  Symlink the directory, override `locations:`, or pass `--models-dir`
+  to reuse an existing snapshot layout.
+- Package `description` (PyPI) and the top-level module docstring
+  refreshed to describe the client library, native PagedAttention
+  engine, and OpenAI-compatible serve wrapper (were server-only).
+
 ## [0.6.2] - 2026-08-29
 
 ### Added
@@ -426,7 +449,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/llm-works/llm-infer/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/llm-works/llm-infer/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/llm-works/llm-infer/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/llm-works/llm-infer/compare/v0.5.0...v0.6.0

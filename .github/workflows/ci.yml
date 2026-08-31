@@ -82,6 +82,12 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/ -m unit -v --tb=short
 
+      - name: Run integration tests
+        # In-process integration coverage — real mp.Process spawn and
+        # cross-process IPC (no external services). Guards the Py3.14
+        # forkserver pickle boundary in serve subprocess startup.
+        run: python -m pytest tests/ -m integration -v --tb=short
+
   ollama-smoke-test:
     name: Ollama E2E
     runs-on: ubuntu-latest
@@ -159,12 +165,16 @@ jobs:
           fi
 
       - name: Run client quickstart against live serve
+        # cd out of the source tree so `llm_infer.examples.quickstart`
+        # resolves to the installed wheel, not the local llm_infer/
+        # directory — same as the client-library import verify step.
+        working-directory: /tmp
         env:
           LLM_INFER_BASE_URL: http://localhost:8000/v1
           LLM_INFER_MODEL: qwen2.5:0.5b
           LLM_INFER_PROMPT: Say hello in exactly 3 words
           LLM_INFER_MAX_TOKENS: '20'
-        run: python examples/quickstart.py
+        run: python -m llm_infer.examples.quickstart
 
       - name: Cleanup
         if: always()

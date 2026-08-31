@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from llm_infer.serving.api.openai.router import (
+    OpenAIRouterConfig,
     _build_adapter_fallback_headers,
     _build_adapter_info,
     _build_chat_response,
@@ -67,7 +68,9 @@ def _make_app(ipc: _StubIPC, model_name: str = "test-model") -> FastAPI:
     app = FastAPI()
     app.state.ipc_channel = ipc
     app.add_middleware(_LgInjector)
-    app.include_router(create_openai_router(model_name), prefix="/v1")
+    app.include_router(
+        create_openai_router(OpenAIRouterConfig(model_name=model_name)), prefix="/v1"
+    )
     return app
 
 
