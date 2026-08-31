@@ -6,10 +6,10 @@
 """Mock server that returns transient errors to test retry logic.
 
 Run the server:
-    python test_retry_server.py
+    python -m llm_infer.examples.client.test_retry_server
 
 Then in another terminal:
-    python test_retry_client.py
+    python -m llm_infer.examples.client.test_retry_client
 """
 
 from fastapi import FastAPI, Response

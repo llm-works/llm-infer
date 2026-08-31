@@ -111,6 +111,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
+exclude = ["llm_infer/examples/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -153,6 +154,7 @@ llm_infer = [
     "py.typed",
     "etc/*.yaml",
     "etc/README.md",
+    "examples/**/*.yaml",
 ]
 
 [tool.setuptools.packages.find]
