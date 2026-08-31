@@ -52,4 +52,7 @@ def test_lazy_bundle_survives_forkserver_spawn() -> None:
     proc = ctx.Process(target=_resolve_all, args=(payload,))
     proc.start()
     proc.join(timeout=30)
+    if proc.exitcode is None:
+        proc.terminate()
+        proc.join(timeout=5)
     assert proc.exitcode == 0, f"forkserver child exited {proc.exitcode}"
