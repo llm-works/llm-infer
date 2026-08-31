@@ -10,8 +10,11 @@
 # file.
 
 # Where to look for HuggingFace snapshots (used by native, vllm, peft).
+# XDG-style default — symlink this to wherever your snapshots actually
+# live (e.g. `ln -s ~/.cache/huggingface/hub ~/.local/share/llm-infer/models`
+# to reuse HF's own cache).
 locations:
-  - !path ~/.cache/huggingface/hub
+  - !path ~/.local/share/llm-infer/models
 
 # Default model when no --model is passed.
 # Point `path` at a per-deployment file (e.g., ops-controlled selection)
