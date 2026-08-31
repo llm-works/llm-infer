@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Default model search path in shipped `etc/models.yaml` is now
+  `~/.local/share/llm-infer/models` (was `~/.cache/huggingface/hub`).
+  Symlink the directory, override `locations:`, or pass `--models-dir`
+  to reuse an existing snapshot layout.
+- Package `description` (PyPI) and the top-level module docstring
+  refreshed to describe the client library, native PagedAttention
+  engine, and OpenAI-compatible serve wrapper (were server-only).
+
 ## [0.6.2] - 2026-08-29
 
 ### Added

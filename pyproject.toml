@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "llm-infer"
 dynamic = ["version"]
-description = "A readable LLM inference server implementing paged attention and continuous batching"
+description = "Multi-backend LLM client library, a from-scratch PagedAttention inference engine, and an OpenAI-compatible serve wrapper."
 license = "Apache-2.0"
 authors = [{name = "LLM Works LLC", email = "info@llm-works.ai"}]
 readme = "README.md"
