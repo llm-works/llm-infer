@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
@@ -449,19 +450,23 @@ def _register_embedding_routes(router: APIRouter, model_name: str) -> None:
         return await _handle_embedding_request(lg, body, ipc, model_name)
 
 
-def create_openai_router(
-    model_name: str, model_config: ModelConfig | None = None
-) -> APIRouter:
-    """Create OpenAI-compatible API router.
+@dataclass
+class OpenAIRouterConfig:
+    """Pickle-safe config for building the OpenAI-compatible router.
 
-    Args:
-        model_name: Name of the loaded model.
-        model_config: Optional model config for server-side handling of system
-            prompts and think mode.
+    Bundled into a single argument so the factory can cross the
+    ``appinfra.subprocess.Lazy`` boundary (Py3.14 forkserver).
     """
+
+    model_name: str
+    model_config: ModelConfig | None = None
+
+
+def create_openai_router(cfg: OpenAIRouterConfig) -> APIRouter:
+    """Create OpenAI-compatible API router."""
     router = APIRouter(tags=["OpenAI"])
-    _register_model_routes(router, model_name)
-    _register_chat_completion_routes(router, model_name, model_config)
-    _register_legacy_completion_routes(router, model_name)
-    _register_embedding_routes(router, model_name)
+    _register_model_routes(router, cfg.model_name)
+    _register_chat_completion_routes(router, cfg.model_name, cfg.model_config)
+    _register_legacy_completion_routes(router, cfg.model_name)
+    _register_embedding_routes(router, cfg.model_name)
     return router

@@ -13,12 +13,11 @@ from appinfra.app.fastapi import ServerBuilder
 from appinfra.app.fastapi.runtime.server import Server
 from appinfra.log import Logger
 from appinfra.size import size_str
+from appinfra.subprocess import Lazy
 from appinfra.time import Ticker, since, start
 
 from ..adapters import AdapterManager
-from ..api.adapters import create_adapter_router
-from ..api.openai.router import create_openai_router
-from ..api.routes import create_health_handler, create_routes
+from ..api.openai.router import OpenAIRouterConfig
 from .config import InferenceConfig
 from .errors import ExceptionHandler
 from .factories import get_engine_factory, get_handler_factory
@@ -295,7 +294,10 @@ class BootSequence:
         """Add LoRA adapter routes if enabled (call in routes mode)."""
         lora_cfg = self._config.engines.vllm.lora
         if lora_cfg.enabled and lora_cfg.base_path:
-            builder = builder.with_router(create_adapter_router(), prefix="/v1")
+            builder = builder.with_router(
+                Lazy("llm_infer.serving.api.adapters:create_adapter_router"),
+                prefix="/v1",
+            )
         return builder
 
     def _build_server_builder(self) -> Any:
@@ -311,17 +313,37 @@ class BootSequence:
         )
 
     def _build_routes(self, model_name: str) -> Any:
-        """Build routes configuration."""
+        """Build routes configuration.
+
+        Handlers/routers cross the appinfra subprocess pickle boundary via
+        ``Lazy(factory_qualname, config)`` — the child imports the factory
+        and constructs the handler locally, so nested closures inside the
+        factories never get pickled. Required under Py3.14 forkserver.
+        """
         from ..api.trace import TraceMiddleware
 
-        health_handler = create_health_handler(self._ready)
-        model_config = self._config.models.get(model_name)
+        openai_cfg = OpenAIRouterConfig(
+            model_name=model_name,
+            model_config=self._config.models.get(model_name),
+        )
         routes = (
             self._build_server_builder()
             .routes.with_middleware(TraceMiddleware)
-            .with_route("/health", health_handler)
-            .with_router(create_routes(model_name))
-            .with_router(create_openai_router(model_name, model_config), prefix="/v1")
+            .with_route(
+                "/health",
+                Lazy(
+                    "llm_infer.serving.api.routes:create_health_handler",
+                    self._ready,
+                ),
+            )
+            .with_router(Lazy("llm_infer.serving.api.routes:create_routes", model_name))
+            .with_router(
+                Lazy(
+                    "llm_infer.serving.api.openai.router:create_openai_router",
+                    openai_cfg,
+                ),
+                prefix="/v1",
+            )
             .with_exception_handler(Exception, ExceptionHandler(self._lg))
         )
         return self._add_lora_routes(routes)
