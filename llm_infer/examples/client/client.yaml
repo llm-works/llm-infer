@@ -1,10 +1,10 @@
 # Multi-backend LLM client configuration
 #
 # Usage:
-#   python client.py                           # Interactive chat with default backend
-#   python client.py --backend openai          # Use specific backend
-#   python client.py --model gpt-4o            # Route by model name
-#   python client.py "What is Python?"         # Single question mode
+#   python -m llm_infer.examples.client.client                        # Interactive chat, default backend
+#   python -m llm_infer.examples.client.client --backend openai       # Specific backend
+#   python -m llm_infer.examples.client.client --model gpt-4o         # Route by model name
+#   python -m llm_infer.examples.client.client "What is Python?"      # Single question mode
 
 default: local
 

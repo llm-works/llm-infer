@@ -5,13 +5,13 @@
 
 """Interactive LLM chat client with multi-backend routing.
 
-Usage:
-    python client.py chat                              # Interactive chat
-    python client.py chat "What is Python?"            # Single question
-    python client.py chat --stream "Explain Python"   # Stream response
-    python client.py chat --backend openai "Hello"     # Use specific backend
-    python client.py chat --model gpt-4o "Hello"       # Route by model
-    python client.py models                            # List available models
+Usage (from a `pip install llm-infer`):
+    python -m llm_infer.examples.client.client chat                            # Interactive chat
+    python -m llm_infer.examples.client.client chat "What is Python?"          # Single question
+    python -m llm_infer.examples.client.client chat --stream "Explain Python"  # Stream response
+    python -m llm_infer.examples.client.client chat --backend openai "Hello"   # Specific backend
+    python -m llm_infer.examples.client.client chat --model gpt-4o "Hello"     # Route by model
+    python -m llm_infer.examples.client.client models                          # List models
 """
 
 from __future__ import annotations

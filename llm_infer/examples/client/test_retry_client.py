@@ -6,10 +6,10 @@
 """Test client that demonstrates retry with backoff.
 
 First, start the mock server:
-    python test_retry_server.py
+    python -m llm_infer.examples.client.test_retry_server
 
 Then run this client:
-    python test_retry_client.py
+    python -m llm_infer.examples.client.test_retry_client
 """
 
 import httpx

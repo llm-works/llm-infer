@@ -153,6 +153,7 @@ llm_infer = [
     "py.typed",
     "etc/*.yaml",
     "etc/README.md",
+    "examples/**/*.yaml",
 ]
 
 [tool.setuptools.packages.find]

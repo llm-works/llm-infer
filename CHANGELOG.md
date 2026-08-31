@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `llm-infer serve` now starts under Python 3.14 (POSIX default
   `multiprocessing` start method switched from `fork` to `forkserver`).
   Requires `appinfra>=0.10.3`.
+- `examples/` now ships in the wheel as `llm_infer.examples`. Run the
+  quickstart with `python -m llm_infer.examples.quickstart` and the
+  interactive client / retry demo under
+  `python -m llm_infer.examples.client.<module>`. CI wheel-smoke now
+  drives the packaged path.
 
 ### Changed
 
