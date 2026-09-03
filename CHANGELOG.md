@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Model selection simplified to a single `models.default` field.
+  The `--embed` flag, task-specific `selection.generate`/`selection.embed`
+  blocks, and selection-file support (`selection.*.path`) are removed. Pass
+  `--model <name>` explicitly for embedding models.
+- Config loading now uses appinfra config-protocol v1: XDG overlay at
+  `~/.config/llm-works/llm-infer.yaml` is merged over the bundled defaults.
+
+### Removed
+
+- `llm_infer.cli.config` module (deprecated re-exports).
+- `SelectionConfig` class and `ModelsConfig.get_selection()` method.
+
 ## [0.6.3] - 2026-08-31
 
 ### Fixed
