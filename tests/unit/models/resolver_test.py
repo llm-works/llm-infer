@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from appinfra.log import Logger
 
-from llm_infer.models.config import ModelsConfig, SelectionConfig
+from llm_infer.models.config import ModelsConfig
 from llm_infer.models.resolver import ModelResolver, create_resolver
 
 pytestmark = pytest.mark.unit
@@ -73,54 +73,6 @@ class TestFindByName:
 
 
 # ---------------------------------------------------------------------------
-# load_selection_file
-# ---------------------------------------------------------------------------
-
-
-class TestLoadSelectionFile:
-    def test_load_with_name(self, lg: Logger, tmp_path: Path) -> None:
-        sel = tmp_path / "sel.yaml"
-        sel.write_text("name: qwen-7b\n")
-        r = ModelResolver(lg, [])
-        name, path = r.load_selection_file(sel)
-        assert name == "qwen-7b"
-        assert path is None
-
-    def test_load_with_path(self, lg: Logger, tmp_path: Path) -> None:
-        sel = tmp_path / "sel.yaml"
-        sel.write_text("path: /opt/models/qwen-7b\n")
-        r = ModelResolver(lg, [])
-        name, path = r.load_selection_file(sel)
-        assert name is None
-        assert path == Path("/opt/models/qwen-7b")
-
-    def test_load_empty_file(self, lg: Logger, tmp_path: Path) -> None:
-        sel = tmp_path / "sel.yaml"
-        sel.write_text("")
-        r = ModelResolver(lg, [])
-        name, path = r.load_selection_file(sel)
-        assert name is None
-        assert path is None
-
-    def test_missing_file_returns_none(self, lg: Logger, tmp_path: Path) -> None:
-        r = ModelResolver(lg, [])
-        name, path = r.load_selection_file(tmp_path / "missing.yaml")
-        assert name is None
-        assert path is None
-        # debug logged for missing file
-        assert lg.debug.called  # type: ignore[attr-defined]
-
-    def test_malformed_yaml_logs_warning(self, lg: Logger, tmp_path: Path) -> None:
-        sel = tmp_path / "sel.yaml"
-        sel.write_text("not: valid: yaml: [")
-        r = ModelResolver(lg, [])
-        name, path = r.load_selection_file(sel)
-        assert name is None
-        assert path is None
-        assert lg.warning.called  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
 # resolve - direct path
 # ---------------------------------------------------------------------------
 
@@ -156,95 +108,6 @@ class TestResolveByName:
         r = ModelResolver(lg, [loc])
         assert r.resolve(model_name="missing") is None
         assert lg.error.called  # type: ignore[attr-defined]
-
-
-# ---------------------------------------------------------------------------
-# resolve - selection
-# ---------------------------------------------------------------------------
-
-
-class TestResolveSelection:
-    def test_selection_file_with_path(self, lg: Logger, tmp_path: Path) -> None:
-        d = _make_model_dir(tmp_path, "selected-model")
-        sel_file = tmp_path / "sel.yaml"
-        sel_file.write_text(f"path: {d}\n")
-        r = ModelResolver(lg, [])
-        result = r.resolve(selection=SelectionConfig(path=str(sel_file)))
-        assert result == d
-
-    def test_selection_file_with_name_resolves_in_locations(
-        self, lg: Logger, tmp_path: Path
-    ) -> None:
-        loc = tmp_path / "loc"
-        loc.mkdir()
-        _make_model_dir(loc, "selected-model")
-        sel_file = tmp_path / "sel.yaml"
-        sel_file.write_text("name: selected-model\n")
-        r = ModelResolver(lg, [loc])
-        result = r.resolve(selection=SelectionConfig(path=str(sel_file)))
-        assert result is not None
-        assert result.name == "selected-model"
-
-    def test_selection_file_with_name_not_found(
-        self, lg: Logger, tmp_path: Path
-    ) -> None:
-        loc = tmp_path / "loc"
-        loc.mkdir()
-        sel_file = tmp_path / "sel.yaml"
-        sel_file.write_text("name: missing-model\n")
-        r = ModelResolver(lg, [loc])
-        result = r.resolve(selection=SelectionConfig(path=str(sel_file)))
-        assert result is None
-        assert lg.error.called  # type: ignore[attr-defined]
-
-    def test_selection_path_does_not_exist(self, lg: Logger, tmp_path: Path) -> None:
-        sel_file = tmp_path / "sel.yaml"
-        sel_file.write_text(f"path: {tmp_path}/missing-dir\n")
-        r = ModelResolver(lg, [])
-        result = r.resolve(selection=SelectionConfig(path=str(sel_file)))
-        assert result is None
-        assert lg.error.called  # type: ignore[attr-defined]
-
-    def test_falls_back_to_default(self, lg: Logger, tmp_path: Path) -> None:
-        loc = tmp_path / "loc"
-        loc.mkdir()
-        _make_model_dir(loc, "default-model")
-        # No selection file, only default
-        r = ModelResolver(lg, [loc])
-        result = r.resolve(
-            selection=SelectionConfig(path=None, default="default-model")
-        )
-        assert result is not None
-
-    def test_default_not_found(self, lg: Logger, tmp_path: Path) -> None:
-        loc = tmp_path / "loc"
-        loc.mkdir()
-        r = ModelResolver(lg, [loc])
-        result = r.resolve(
-            selection=SelectionConfig(path=None, default="missing-default")
-        )
-        assert result is None
-        assert lg.error.called  # type: ignore[attr-defined]
-
-    def test_selection_file_missing_falls_back_to_default(
-        self, lg: Logger, tmp_path: Path
-    ) -> None:
-        loc = tmp_path / "loc"
-        loc.mkdir()
-        _make_model_dir(loc, "default-model")
-        r = ModelResolver(lg, [loc])
-        result = r.resolve(
-            selection=SelectionConfig(
-                path=str(tmp_path / "missing-sel.yaml"),
-                default="default-model",
-            )
-        )
-        assert result is not None
-
-    def test_no_path_no_default_returns_none(self, lg: Logger, tmp_path: Path) -> None:
-        r = ModelResolver(lg, [])
-        result = r.resolve(selection=SelectionConfig(path=None, default=None))
-        assert result is None
 
 
 # ---------------------------------------------------------------------------

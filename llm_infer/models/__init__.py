@@ -12,7 +12,6 @@ This module provides:
 from .config import (
     ModelConfig,
     ModelsConfig,
-    SelectionConfig,
     ThinkConfig,
     load_models_config,
 )
@@ -23,7 +22,6 @@ __all__ = [
     # Config classes
     "ModelsConfig",
     "ModelConfig",
-    "SelectionConfig",
     "ThinkConfig",
     "load_models_config",
     # Metadata

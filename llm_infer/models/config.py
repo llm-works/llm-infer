@@ -72,27 +72,9 @@ class ModelConfig:
 
 
 @dataclass
-class SelectionConfig:
-    """Selection config for a task type (generate or embed)."""
-
-    path: str | None = None  # Path to selection file
-    default: str | None = None  # Fallback model name
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "SelectionConfig":
-        """Create SelectionConfig from dict."""
-        raw_path = data.get("path")
-        return cls(
-            path=str(raw_path) if raw_path else None,
-            default=data.get("default"),
-        )
-
-
-@dataclass
 class ModelsConfig:
     """Container for all model configurations.
 
-    Unified config for model locations, selection, and per-model settings.
     Parsed from the models section of llm-infer.yaml (via !include models.yaml).
     """
 
@@ -103,9 +85,9 @@ class ModelsConfig:
     # Model locations - directories to search for models
     locations: list[Path] = field(default_factory=list)
 
-    # Model selection by task type
-    selection_generate: SelectionConfig = field(default_factory=SelectionConfig)
-    selection_embed: SelectionConfig = field(default_factory=SelectionConfig)
+    # Default model when --model / --model-path is omitted on the CLI.
+    # Override at runtime via `INFRA_MODELS_DEFAULT=<name>`.
+    default: str | None = None
 
     # Resolved model path - set after model resolution
     path: Path | None = None
@@ -114,12 +96,6 @@ class ModelsConfig:
         """Get config for a model, falling back to defaults."""
         return self.models.get(name, self.defaults)
 
-    def get_selection(self, task: str = "generate") -> SelectionConfig:
-        """Get selection config for a task type."""
-        if task == "embed":
-            return self.selection_embed
-        return self.selection_generate
-
     @classmethod
     def from_dict(cls, data: dict) -> "ModelsConfig":
         """Create ModelsConfig from dict (full YAML).
@@ -127,13 +103,7 @@ class ModelsConfig:
         Expected structure:
             locations:
               - /path/to/models
-            selection:
-              generate:
-                path: ~/.selected.yaml
-                default: qwen2.5-1.5b
-              embed:
-                path: ~/.selected.embed.yaml
-                default: bge-small-en-v1.5
+            default: qwen2.5-1.5b
             models:
               model-name:
                 task: embed
@@ -155,17 +125,11 @@ class ModelsConfig:
         locations_raw = data.get("locations") or []
         locations = [Path(loc) for loc in locations_raw]
 
-        # Parse selection config (by task type, guard against None values)
-        selection = data.get("selection", {}) or {}
-
         return cls(
             models=models,
             defaults=defaults,
             locations=locations,
-            selection_generate=SelectionConfig.from_dict(
-                selection.get("generate") or {}
-            ),
-            selection_embed=SelectionConfig.from_dict(selection.get("embed") or {}),
+            default=data.get("default"),
         )
 
     @classmethod

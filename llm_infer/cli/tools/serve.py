@@ -44,11 +44,6 @@ class ServeTool(Tool):
             "--model-template",
             help="Use another model's config as template (for models not in config)",
         )
-        parser.add_argument(
-            "--embed",
-            action="store_true",
-            help="Use default embedding model (from selection.embed)",
-        )
 
     def _add_server_args(self, parser: argparse.ArgumentParser) -> None:
         """Add server-related arguments."""
@@ -102,32 +97,13 @@ class ServeTool(Tool):
         )
 
     def _get_model_name_early(self, raw_config: dict) -> str | None:
-        """Get model name from CLI args, selection file, or config default.
-
-        Uses lightweight resolver for selection file parsing.
-        """
+        """Get model name from CLI args or config default."""
         if self.args.model:
             return str(self.args.model)
         if self.args.model_path:
             return str(self.args.model_path.name)
-
-        # Get task-specific selection config
-        task = "embed" if self.args.embed else "generate"
-        selection_all: dict = raw_config.get("models", {}).get("selection", {})
-        selection: dict = selection_all.get(task, {})
-
-        # Use resolver for selection file parsing (lightweight, no heavy imports)
-        if selection.get("path"):
-            resolver = ModelResolver(
-                lg=self.lg, locations=[]
-            )  # Locations not needed for selection file
-            sel_name, sel_path = resolver.load_selection_file(selection["path"])
-            if sel_path:
-                return sel_path.name
-            if sel_name:
-                return sel_name
-
-        return selection.get("default")
+        default = raw_config.get("models", {}).get("default")
+        return str(default) if default else None
 
     def _get_server_config(self, raw_config: dict) -> tuple[str, int, str]:
         """Get host, port, handler from config with CLI overrides."""
@@ -235,10 +211,9 @@ class ServeTool(Tool):
                 generate_models.append(name)
 
         print("Configured models:\n")
-        gen_default = models_cfg.get_selection("generate").default
-        embed_default = models_cfg.get_selection("embed").default
-        self._print_model_group("Generation", generate_models, gen_default)
-        self._print_model_group("Embedding", embed_models, embed_default)
+        default = models_cfg.default
+        self._print_model_group("Generation", generate_models, default)
+        self._print_model_group("Embedding", embed_models, default)
         return 0
 
     def _apply_cli_overrides(self, config: Any, model_path: Path) -> None:
@@ -285,7 +260,7 @@ class ServeTool(Tool):
         return parse_override_args(self.args.overrides)
 
     def _resolve_model_path(self, config: Any) -> Path | None:
-        """Resolve model path from CLI, selection file, or config default.
+        """Resolve model path from CLI or config default.
 
         Uses ModelResolver for unified resolution logic.
         For Ollama engine, returns synthetic path from model name (no local validation).
@@ -300,14 +275,10 @@ class ServeTool(Tool):
         locations = self._get_model_locations()
         resolver = ModelResolver(lg=self.lg, locations=locations)
 
-        # Get selection config based on task type (--embed flag)
-        task = "embed" if self.args.embed else "generate"
-        selection = config.models.get_selection(task)
-
+        model_name = self.args.model or config.models.default
         return resolver.resolve(
             model_path=self.args.model_path,
-            model_name=self.args.model,
-            selection=selection,
+            model_name=model_name,
         )
 
     def _resolve_ollama_model_name(self, config: Any) -> Path | None:
@@ -316,17 +287,12 @@ class ServeTool(Tool):
         For Ollama, we return a synthetic Path from the model name.
         The OllamaEngineFactory will look up the 'ollama' field in models.yaml.
         """
-        task = "embed" if self.args.embed else "generate"
-        model_name = self.args.model
+        model_name = self.args.model or (
+            self.args.model_path.name if self.args.model_path else config.models.default
+        )
         if not model_name:
-            selection = config.models.get_selection(task)
-            if selection.default:
-                model_name = selection.default
-
-        if not model_name:
-            example = "nomic-embed-text" if task == "embed" else "qwen2.5:0.5b"
             self.lg.error(
-                f"no model specified — pass --model NAME (e.g. --model {example})"
+                "no model specified — pass --model NAME (e.g. --model qwen2.5:0.5b)"
             )
             return None
 
