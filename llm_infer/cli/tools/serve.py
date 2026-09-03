@@ -287,7 +287,9 @@ class ServeTool(Tool):
         For Ollama, we return a synthetic Path from the model name.
         The OllamaEngineFactory will look up the 'ollama' field in models.yaml.
         """
-        model_name = self.args.model or config.models.default
+        model_name = self.args.model or (
+            self.args.model_path.name if self.args.model_path else config.models.default
+        )
         if not model_name:
             self.lg.error(
                 "no model specified — pass --model NAME (e.g. --model qwen2.5:0.5b)"
