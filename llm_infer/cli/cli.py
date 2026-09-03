@@ -18,18 +18,21 @@ from appinfra.app import AppBuilder  # noqa: E402
 
 from .tools import CompatTool, MetricsTool, QueryTool, ServeTool  # noqa: E402
 
-# Bundled etc/ ships inside the wheel. Used as the default --etc-dir so
-# `pip install llm-infer && llm-infer serve` works without local setup.
-_BUNDLED_ETC_DIR = str(Path(__file__).parent.parent / "etc")
+# Bundled base config; ships in the wheel. Anchor for XDG overlays and
+# fallback when neither --etc-dir nor an XDG overlay is present.
+_BUNDLED_CONFIG = Path(__file__).parent.parent / "etc" / "llm-infer.yaml"
 
 
 def main() -> int:
     """Main entry point for the CLI."""
+    # v1 config-protocol precedence handled by with_config_spec:
+    # --etc-dir (if passed) > XDG overlay > packaged base. See
+    # `appinfra docs show config-protocol`.
     app = (
         AppBuilder("inference")
         .with_description("LLM inference server with paged attention")
-        .with_config_file("llm-infer.yaml")
-        .with_standard_arg("etc_dir", default=_BUNDLED_ETC_DIR)
+        .with_config_spec("llm-works", "llm-infer", _BUNDLED_CONFIG)
+        .with_standard_args(etc_dir=True)
         .tools.with_tool(CompatTool())
         .with_tool(MetricsTool())
         .with_tool(QueryTool())

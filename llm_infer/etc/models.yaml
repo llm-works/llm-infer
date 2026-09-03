@@ -16,16 +16,9 @@
 locations:
   - !path ~/.local/share/llm-infer/models
 
-# Default model when no --model is passed.
-# Point `path` at a per-deployment file (e.g., ops-controlled selection)
-# or leave null and rely on `default`.
-selection:
-  generate:
-    path: null
-    default: null
-  embed:
-    path: null
-    default: null
+# Default model name used when `--model` / `--model-path` is not passed.
+# Override at runtime with `INFRA_MODELS_DEFAULT=<name>`.
+default: null
 
 # =============================================================================
 # Templates (YAML anchors for reuse)
