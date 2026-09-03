@@ -3,7 +3,7 @@
 
 """Model resolution logic.
 
-Resolves model paths from names, selection files, and configured locations.
+Resolves model paths from names or direct paths within configured locations.
 """
 
 from __future__ import annotations
@@ -11,21 +11,18 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
 from appinfra.log import Logger
 
 if TYPE_CHECKING:
-    from .config import ModelsConfig, SelectionConfig
+    from .config import ModelsConfig
 
 
 class ModelResolver:
-    """Resolves model paths from names, selection files, and locations.
+    """Resolves model paths from names and direct paths.
 
     Resolution priority:
     1. Direct path (if provided)
     2. Model name lookup in locations
-    3. Selection file (ops-controlled selected.yaml)
-    4. Default model name from config
     """
 
     def __init__(self, lg: Logger, locations: list[Path]) -> None:
@@ -56,59 +53,21 @@ class ModelResolver:
                 return model_path
         return None
 
-    def load_selection_file(self, path: str | Path) -> tuple[str | None, Path | None]:
-        """Load model selection from YAML file.
-
-        Selection files contain either:
-        - name: model name to look up in locations
-        - path: direct path to model directory
-
-        Args:
-            path: Path to selection YAML file.
-
-        Returns:
-            Tuple of (model_name, model_path). One or both may be None.
-        """
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            if data is None:
-                return None, None
-            model_name = data.get("name")
-            model_path = data.get("path")
-            return model_name, Path(model_path) if model_path else None
-        except FileNotFoundError:
-            self._lg.debug("selection file not found", extra={"path": str(path)})
-            return None, None
-        except Exception as e:
-            self._lg.warning(
-                "failed to load selection file",
-                extra={"path": str(path), "exception": e},
-            )
-            return None, None
-
     def resolve(
         self,
         model_path: Path | None = None,
         model_name: str | None = None,
-        selection: SelectionConfig | None = None,
     ) -> Path | None:
         """Resolve model path using priority chain.
 
         Resolution order:
         1. Direct model_path if provided
         2. model_name lookup in locations
-        3. Selection file path/name
-        4. Selection default name
         """
         if model_path:
             return self._resolve_direct_path(model_path)
         if model_name:
             return self._resolve_by_name(model_name)
-        if selection:
-            path = self._resolve_from_selection(selection)
-            if path:
-                return path
         self._lg.error("no model specified")
         return None
 
@@ -128,67 +87,6 @@ class ModelResolver:
             "model not found",
             extra={
                 "model": model_name,
-                "locations": [str(p) for p in self.locations],
-            },
-        )
-        return None
-
-    def _resolve_from_selection(self, selection: SelectionConfig) -> Path | None:
-        """Resolve model from selection config."""
-        # Try selection file first
-        if selection.path:
-            sel_name, sel_path = self.load_selection_file(selection.path)
-            if sel_path:
-                return self._try_selection_path(sel_path, selection.path)
-            if sel_name:
-                return self._try_selection_name(sel_name, selection.path)
-
-        # Fall back to default
-        if selection.default:
-            return self._try_default_model(selection.default)
-
-        return None
-
-    def _try_selection_path(self, sel_path: Path, selection_file: str) -> Path | None:
-        """Try to use direct path from selection file."""
-        self._lg.debug(
-            "using selection file path",
-            extra={"path": str(sel_path), "file": selection_file},
-        )
-        if not sel_path.exists():
-            self._lg.error(
-                "selection model_path does not exist", extra={"path": str(sel_path)}
-            )
-            return None
-        return sel_path
-
-    def _try_selection_name(self, sel_name: str, selection_file: str) -> Path | None:
-        """Try to find model by name from selection file."""
-        self._lg.debug(
-            "using selection file name",
-            extra={"name": sel_name, "file": selection_file},
-        )
-        path = self.find_by_name(sel_name)
-        if path:
-            return path
-        self._lg.error(
-            "selection model not found",
-            extra={
-                "model": sel_name,
-                "locations": [str(p) for p in self.locations],
-            },
-        )
-        return None
-
-    def _try_default_model(self, default_name: str) -> Path | None:
-        """Try to find the default model by name."""
-        path = self.find_by_name(default_name)
-        if path:
-            return path
-        self._lg.error(
-            "default model not found",
-            extra={
-                "model": default_name,
                 "locations": [str(p) for p in self.locations],
             },
         )

@@ -15,22 +15,23 @@ os.environ.setdefault("VLLM_CONFIGURE_LOGGING", "0")
 
 # Imports below must follow VLLM_CONFIGURE_LOGGING setup above.
 from appinfra.app import AppBuilder  # noqa: E402
+from appinfra.config import Config, xdg_candidates  # noqa: E402
 
 from .tools import CompatTool, MetricsTool, QueryTool, ServeTool  # noqa: E402
 
 # Bundled etc/ ships inside the wheel. Used as the default --etc-dir so
 # `pip install llm-infer && llm-infer serve` works without local setup.
-_BUNDLED_ETC_DIR = str(Path(__file__).parent.parent / "etc")
+_BUNDLED_ETC_DIR = Path(__file__).parent.parent / "etc"
 
 
 def main() -> int:
     """Main entry point for the CLI."""
+    builder = AppBuilder("inference").with_description(
+        "LLM inference server with paged attention"
+    )
+    builder = _configure_source(builder)
     app = (
-        AppBuilder("inference")
-        .with_description("LLM inference server with paged attention")
-        .with_config_file("llm-infer.yaml")
-        .with_standard_arg("etc_dir", default=_BUNDLED_ETC_DIR)
-        .tools.with_tool(CompatTool())
+        builder.tools.with_tool(CompatTool())
         .with_tool(MetricsTool())
         .with_tool(QueryTool())
         .with_tool(ServeTool())
@@ -39,6 +40,33 @@ def main() -> int:
     )
     result: int = app.main()
     return result
+
+
+def _configure_source(builder: AppBuilder) -> AppBuilder:
+    """Wire config-protocol v1 loading onto the builder.
+
+    If an XDG overlay exists, load it directly with `project_root` pinned to
+    the bundled etc dir — the tightest ancestor containing both the base and
+    its `!include` siblings, so absolute-include-of-base plus relative sibling
+    includes both resolve within the security boundary. Otherwise load the
+    packaged base from --etc-dir.
+
+    See `appinfra docs show config-protocol` (v1: one file per package load).
+    """
+    overlay = _find_xdg_overlay()
+    if overlay is not None:
+        return builder.with_config(Config(str(overlay), project_root=_BUNDLED_ETC_DIR))
+    return builder.with_config_file("llm-infer.yaml").with_standard_arg(
+        "etc_dir", default=str(_BUNDLED_ETC_DIR)
+    )
+
+
+def _find_xdg_overlay() -> Path | None:
+    """Return the first existing XDG config candidate for llm-infer, or None."""
+    for candidate in xdg_candidates("llm-works", "llm-infer"):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 if __name__ == "__main__":
