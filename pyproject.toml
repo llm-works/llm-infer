@@ -21,7 +21,7 @@ classifiers = [
 dependencies = [
     # Minimal base for LLMClient with OpenAI-compatible backends
     # Use [client] for all backends, [runtime]/[cuda] for serving
-    "appinfra>=0.10.3",
+    "appinfra>=0.10.5",
     "httpx>=0.27.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
     # Security: explicitly pin transitive dependencies for CVE fixes
@@ -57,7 +57,7 @@ client = [
 ]
 # Runtime: CPU serving (includes FastAPI)
 runtime = [
-    "appinfra[fastapi]>=0.10.3",
+    "appinfra[fastapi]>=0.10.5",
     "torch>=2.0.0,<3.0.0",
     "transformers>=4.30.0,<5.0.0",
     "safetensors>=0.4.0,<1.0.0",
