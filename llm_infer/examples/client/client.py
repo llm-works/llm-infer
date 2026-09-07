@@ -18,15 +18,11 @@ Usage (from a `pip install llm-infer`):
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, cast
 
 from appinfra.app.builder import AppBuilder
 
 from llm_infer.client import Factory, LLMRouter
-
-# Config file path (same directory as this script)
-CONFIG_FILE = Path(__file__).parent / "client.yaml"
 
 app = (
     AppBuilder("llm-chat")

@@ -39,13 +39,7 @@ def main() -> int:
         .done()
         .config.with_spec("llm-works", "llm-infer")
         .done()
-        .cli.with_flags(
-            etc_dir=True,
-            config_file=True,
-            log=True,
-            version=True,
-            quiet=True,
-        )
+        .cli.with_all_flags()
         .done()
         .tools.with_tool(CompatTool())
         .with_tool(MetricsTool())
