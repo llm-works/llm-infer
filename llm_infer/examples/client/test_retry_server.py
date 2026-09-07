@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
+# ci-skip: paired demo — run manually alongside test_retry_client
+
 """Mock server that returns transient errors to test retry logic.
 
 Run the server:

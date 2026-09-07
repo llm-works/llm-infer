@@ -24,6 +24,9 @@ INFRA_PYTEST_COVERAGE_THRESHOLD := 70
 # Custom pip config for flashinfer index
 export PIP_CONFIG_FILE := etc/pip.conf
 
+# Run example scripts as part of `make check` (per-file ci-* tags apply)
+INFRA_DEV_CHECK_EXAMPLES := true
+
 # Include framework (config first)
 include $(infra)/make/Makefile.config
 include $(infra)/make/Makefile.env

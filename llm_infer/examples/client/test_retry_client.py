@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
+# ci-skip: requires companion test_retry_server running
+
 """Test client that demonstrates retry with backoff.
 
 First, start the mock server:
