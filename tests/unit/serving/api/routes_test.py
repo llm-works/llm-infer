@@ -216,11 +216,23 @@ def test_metrics_timeout_returns_504() -> None:
     assert resp.status_code == 504
 
 
-def test_metrics_failed_status_returns_500() -> None:
+def test_metrics_failed_status_logs_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    from llm_infer.serving.api import routes as routes_mod
+
+    seen: list[tuple[Any, Any]] = []
+    monkeypatch.setattr(
+        routes_mod,
+        "log_for_error_status",
+        lambda lg, response: seen.append((lg, response)),
+    )
+
     failed = MagicMock()
     failed.status = RequestStatus.FAILED
     failed.error = "boom"
     ipc = _StubIPC(failed)
     client = TestClient(_make_app(ipc), raise_server_exceptions=False)
-    resp = client.get("/metrics")
-    assert resp.status_code == 500
+    client.get("/metrics")
+    assert len(seen) == 1
+    _, observed = seen[0]
+    assert observed.status is RequestStatus.FAILED
+    assert observed.error == "boom"

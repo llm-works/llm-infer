@@ -35,15 +35,24 @@ def _make_tool(**args_overrides: Any) -> MetricsTool:
 def _metrics_response() -> dict:
     return {
         "gpu": {
-            "allocated_mb": 1024.5,
-            "reserved_mb": 2048.0,
-            "peak_mb": 3072.0,
+            "torch": {
+                "allocated_mb": 1024.5,
+                "reserved_mb": 2048.0,
+                "peak_mb": 3072.0,
+            },
+            "device": {
+                "used_mb": 80000.0,
+                "total_mb": 96000.0,
+                "free_mb": 16000.0,
+            },
+            "model_memory_mb": 3200.0,
         },
         "kv_cache": {
-            "mb": 512.0,
+            "allocated_mb": 512.0,
             "blocks_used": 10,
             "blocks_total": 100,
             "capacity_tokens": 1600,
+            "usage_perc": 0.05,
         },
         "sequences": {"active": 2, "total_tokens": 200},
         "pending_requests": 3,
