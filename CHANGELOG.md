@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-08
+
+### Changed
+
+- CLI and examples now use appinfra 0.11 faceted builder API. Requires
+  `appinfra>=0.11.0`.
+
+### Fixed
+
+- `/metrics` endpoint no longer returns 500 when queried (regression
+  introduced in 0.7.0).
+- CLI error messages now reference correct entry point (`llm-infer serve`
+  instead of `inference serve`).
+
 ## [0.7.0] - 2026-09-03
 
 ### Changed
@@ -466,7 +480,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/llm-works/llm-infer/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/llm-works/llm-infer/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/llm-works/llm-infer/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/llm-works/llm-infer/compare/v0.6.1...v0.6.2
