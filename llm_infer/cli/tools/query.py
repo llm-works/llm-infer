@@ -282,7 +282,7 @@ class QueryTool(Tool):
             self.lg.error(
                 f"cannot connect to server at {self.args.host}:{self.args.port}"
             )
-            self.lg.info("is the server running? start with: inference serve")
+            self.lg.info("is the server running? start with: llm-infer serve")
         except TimeoutError:
             self.lg.error("connection timed out")
         except BrokenPipeError:
