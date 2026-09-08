@@ -61,26 +61,31 @@ class MetricsTool(Tool):
             self._print_formatted(data)
         return 0
 
-    def _print_formatted(self, data: dict) -> None:
+    def _print_formatted(self, data: dict) -> None:  # cq: max-lines=33
         """Print metrics in human-readable format."""
         gpu = data["gpu"]
         kv = data["kv_cache"]
         seq = data["sequences"]
 
+        torch = gpu["torch"]
+        device = gpu["device"]
         self.lg.info(
             "GPU memory",
             extra={
-                "allocated_mb": f"{gpu['allocated_mb']:.1f}",
-                "reserved_mb": f"{gpu['reserved_mb']:.1f}",
-                "peak_mb": f"{gpu['peak_mb']:.1f}",
+                "allocated_mb": f"{torch['allocated_mb']:.1f}",
+                "reserved_mb": f"{torch['reserved_mb']:.1f}",
+                "peak_mb": f"{torch['peak_mb']:.1f}",
+                "device_used_mb": f"{device['used_mb']:.1f}",
+                "device_free_mb": f"{device['free_mb']:.1f}",
             },
         )
         self.lg.info(
             "KV cache",
             extra={
-                "mb": f"{kv['mb']:.1f}",
+                "allocated_mb": f"{kv['allocated_mb']:.1f}",
                 "blocks": f"{kv['blocks_used']}/{kv['blocks_total']}",
                 "capacity_tokens": kv["capacity_tokens"],
+                "usage": f"{kv['usage_perc'] * 100:.1f}%",
             },
         )
         self.lg.info(

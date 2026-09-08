@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from ..dispatch.metrics import format_metrics_for_api
 from ..dispatch.types import MetricsRequest
 from ..dispatch.types import Request as InternalRequest
-from .errors import raise_for_error_status, submit_or_timeout
+from .errors import log_for_error_status, raise_for_error_status, submit_or_timeout
 from .schemas import GenerateRequest, GenerateResponse, HealthResponse
 
 
@@ -82,7 +82,7 @@ async def _handle_metrics(
     response = await submit_or_timeout(lg, ipc, metrics_request)
     if isinstance(response, JSONResponse):
         return response
-    raise_for_error_status(response)
+    log_for_error_status(lg, response)
     return format_metrics_for_api(response)
 
 

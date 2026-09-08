@@ -38,6 +38,25 @@ def raise_for_error_status(response: Any) -> None:
     raise HTTPException(status_code=status_code, detail=detail)
 
 
+def log_for_error_status(lg: Logger, response: Any) -> None:
+    """Log a warning when a response carries an error status.
+
+    Companion to raise_for_error_status for response types whose success
+    payload does not carry a status field (e.g. MetricsResponse). A future
+    variant that surfaces a failed status here is logged for observability
+    rather than raised, keeping the success path intact.
+    """
+    status = getattr(response, "status", None)
+    if status not in _ERROR_MAPPINGS:
+        return
+    _, default_message = _ERROR_MAPPINGS[status]
+    error = getattr(response, "error", None) or default_message
+    lg.warning(
+        "response reports error status",
+        extra={"status": str(status), "error": error},
+    )
+
+
 def get_http_status_for_request_status(status: RequestStatus) -> tuple[int, str] | None:
     """Get HTTP status code and default message for a RequestStatus.
 
