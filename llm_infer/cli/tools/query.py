@@ -133,7 +133,7 @@ class QueryTool(Tool):
                 self.lg.error(
                     f"cannot connect to server at {self.args.host}:{self.args.port}"
                 )
-                self.lg.info("is the server running? start with: inference serve")
+                self.lg.info("is the server running? start with: llm-infer serve")
             else:
                 self.lg.error(f"request failed: {e}")
         except urllib.error.HTTPError as e:

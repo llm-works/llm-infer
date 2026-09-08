@@ -231,7 +231,8 @@ def test_metrics_failed_status_logs_warning(monkeypatch: pytest.MonkeyPatch) -> 
     failed.error = "boom"
     ipc = _StubIPC(failed)
     client = TestClient(_make_app(ipc), raise_server_exceptions=False)
-    client.get("/metrics")
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
     assert len(seen) == 1
     _, observed = seen[0]
     assert observed.status is RequestStatus.FAILED
