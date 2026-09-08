@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
+# ci-skip: tested by the ollama-smoke-test CI job (requires a live server)
+
 """Client-library quickstart against an OpenAI-compatible endpoint.
 
 Mirrors the leading example in README.md: constructs a Factory, opens a

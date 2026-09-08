@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
+# ci-run: --help
+
 """Interactive LLM chat client with multi-backend routing.
 
 Usage (from a `pip install llm-infer`):
@@ -16,20 +18,17 @@ Usage (from a `pip install llm-infer`):
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, cast
 
 from appinfra.app.builder import AppBuilder
 
 from llm_infer.client import Factory, LLMRouter
 
-# Config file path (same directory as this script)
-CONFIG_FILE = Path(__file__).parent / "client.yaml"
-
 app = (
     AppBuilder("llm-chat")
     .with_description("Interactive LLM chat client")
-    .with_config_file(str(CONFIG_FILE), from_etc_dir=False)
+    .config.with_spec("llm-works", "client", etc_dir="")
+    .done()
     .build()
 )
 

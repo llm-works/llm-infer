@@ -6,7 +6,8 @@
 """CLI entry point."""
 
 import os
-from pathlib import Path
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 # Disable vLLM's dictConfig call BEFORE any vLLM imports
 # vLLM's envs module caches env vars at import time, so this must be set early
@@ -18,21 +19,28 @@ from appinfra.app import AppBuilder  # noqa: E402
 
 from .tools import CompatTool, MetricsTool, QueryTool, ServeTool  # noqa: E402
 
-# Bundled base config; ships in the wheel. Anchor for XDG overlays and
-# fallback when neither --etc-dir nor an XDG overlay is present.
-_BUNDLED_CONFIG = Path(__file__).parent.parent / "etc" / "llm-infer.yaml"
+
+def _version() -> str:
+    try:
+        return _pkg_version("llm-infer")
+    except PackageNotFoundError:
+        return "0.0.0.dev0"
 
 
 def main() -> int:
     """Main entry point for the CLI."""
-    # v1 config-protocol precedence handled by with_config_spec:
-    # --etc-dir (if passed) > XDG overlay > packaged base. See
-    # `appinfra docs show config-protocol`.
+    # ConfigSpec resolves the base file via AUTO origin (llm_infer package
+    # dir + etc/llm-infer.yaml). Precedence: --etc-dir > XDG overlay >
+    # packaged base. See `appinfra docs show config-protocol`.
     app = (
-        AppBuilder("inference")
+        AppBuilder("llm-infer")
         .with_description("LLM inference server with paged attention")
-        .with_config_spec("llm-works", "llm-infer", _BUNDLED_CONFIG)
-        .with_standard_args(etc_dir=True)
+        .version.with_semver(_version())
+        .done()
+        .config.with_spec("llm-works", "llm-infer")
+        .done()
+        .cli.with_all_flags()
+        .done()
         .tools.with_tool(CompatTool())
         .with_tool(MetricsTool())
         .with_tool(QueryTool())
