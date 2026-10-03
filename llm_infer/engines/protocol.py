@@ -12,6 +12,8 @@ These protocols define the contracts for inference engines, enabling:
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from ..schemas.openai import FinishReason
+
 if TYPE_CHECKING:
     from ..context import RequestContext
     from .native.scheduler import Request
@@ -40,8 +42,8 @@ class StreamingResultProtocol(Protocol):
         ...
 
     @property
-    def finish_reason(self) -> str:
-        """Reason generation stopped ('stop' or 'length')."""
+    def finish_reason(self) -> FinishReason | None:
+        """Reason generation stopped; None until generation finishes."""
         ...
 
     def __iter__(self) -> Iterator[str]:
@@ -142,6 +144,18 @@ class InferenceEngineProtocol(Protocol):
         """
         ...
 
+    def resolve_max_tokens(self, max_tokens: int | None, prompt_len: int) -> int:
+        """Return the generation budget for a batched request.
+
+        Args:
+            max_tokens: Requested cap, or None for the remaining context window.
+            prompt_len: Prompt length in tokens.
+
+        Returns:
+            Concrete max_tokens for the engine request.
+        """
+        ...
+
     def prefill_request(self, request: "Request") -> None:
         """Run prefill phase for a request.
 
@@ -174,7 +188,7 @@ class InferenceEngineProtocol(Protocol):
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -184,12 +198,13 @@ class InferenceEngineProtocol(Protocol):
         context: "RequestContext | None" = None,
         messages: list[dict[str, str]] | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> str | dict[str, Any]:
         """Generate text from a prompt (blocking).
 
         Args:
             prompt: Input text prompt.
-            max_tokens: Maximum tokens to generate.
+            max_tokens: Maximum tokens to generate; defaults to 100. Pass None
+                to generate up to the remaining context window.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
             top_k: Top-k sampling.
@@ -200,14 +215,15 @@ class InferenceEngineProtocol(Protocol):
             messages: Optional list of chat messages (for multi-turn/system).
 
         Returns:
-            Generated text.
+            Generated text, or a dict with "content" plus any of "tool_calls",
+            "usage", "adapter" and "finish_reason" (a FinishReason).
         """
         ...
 
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -222,7 +238,8 @@ class InferenceEngineProtocol(Protocol):
 
         Args:
             prompt: Input text prompt.
-            max_tokens: Maximum tokens to generate.
+            max_tokens: Maximum tokens to generate; defaults to 100. Pass None
+                to generate up to the remaining context window.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
             top_k: Top-k sampling.

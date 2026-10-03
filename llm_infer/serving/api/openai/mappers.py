@@ -264,6 +264,18 @@ def _get_chat_template_kwargs(
     return dict(base_kwargs)
 
 
+def effective_max_tokens(body: ChatCompletionRequest) -> int | None:
+    """Return the request's token cap, or None when the client set none.
+
+    ``max_tokens`` wins over ``max_completion_tokens`` (the reasoning-model
+    alias). None means no cap: the engine generates up to the remaining
+    context window, matching OpenAI and vLLM.
+    """
+    if body.max_tokens is not None:
+        return body.max_tokens
+    return body.max_completion_tokens
+
+
 def chat_request_to_internal(
     body: ChatCompletionRequest,
     request_id: str,
@@ -279,7 +291,7 @@ def chat_request_to_internal(
     return InternalRequest(
         id=request_id,
         prompt=prompt,
-        max_tokens=body.max_tokens or body.max_completion_tokens or 256,
+        max_tokens=effective_max_tokens(body),
         temperature=body.temperature,
         top_p=body.top_p,
         top_k=0,  # OpenAI doesn't expose top_k
@@ -322,16 +334,17 @@ def completion_request_to_internal(
 
 
 def determine_finish_reason(
-    is_eos: bool,
     max_tokens_reached: bool,
-    guard_triggered: bool = False,
     has_tool_calls: bool = False,
 ) -> FinishReason:
-    """Determine OpenAI finish_reason from internal state."""
-    if guard_triggered:
-        return FinishReason.CONTENT_FILTER
-    if has_tool_calls:
-        return FinishReason.TOOL_CALLS
+    """Determine OpenAI finish_reason from internal state.
+
+    Length wins over tool_calls: a reply cut off at max_tokens can still carry
+    parsed tool calls whose arguments are truncated, and reporting tool_calls
+    would make it indistinguishable from a complete call.
+    """
     if max_tokens_reached:
         return FinishReason.LENGTH
+    if has_tool_calls:
+        return FinishReason.TOOL_CALLS
     return FinishReason.STOP

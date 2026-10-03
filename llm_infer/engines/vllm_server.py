@@ -35,6 +35,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from appinfra.log import Logger
 
+from ..schemas.openai import FinishReason
+from .finish import parse_finish_reason
 from .vllm_common import resolve_gpu_memory_utilization
 
 if TYPE_CHECKING:
@@ -69,6 +71,29 @@ def _build_adapter_info(
     return info
 
 
+def _hit_token_limit(
+    prompt_tokens: int,
+    completion_tokens: int,
+    max_tokens: int | None,
+    max_model_len: int | None,
+) -> bool:
+    """Return True when generation stopped at the token cap or context window.
+
+    vLLM (verified on 0.20.2) reports finish_reason="tool_calls" whenever tool
+    calls were parsed or streamed, even when output was cut off at the limit:
+    see the finish_reason selection in chat_completion_stream_generator and
+    chat_completion_full_generator (vllm/entrypoints/openai/chat_completion/
+    serving.py). Truncation is therefore detected from the token counts. If a
+    later vLLM reports "length" for truncated tool calls, this check becomes
+    redundant but stays correct.
+    """
+    if max_tokens is not None and completion_tokens >= max_tokens:
+        return True
+    return (
+        max_model_len is not None and prompt_tokens + completion_tokens >= max_model_len
+    )
+
+
 class VLLMServerStreamingIterator:
     """Streaming iterator for vLLM server's OpenAI-compatible SSE stream.
 
@@ -82,6 +107,7 @@ class VLLMServerStreamingIterator:
         client: httpx.Client,
         url: str,
         payload: dict[str, Any],
+        max_model_len: int | None,
         lora_request: Any | None = None,
         adapter_metadata: dict[str, str] | None = None,
     ) -> None:
@@ -89,6 +115,7 @@ class VLLMServerStreamingIterator:
         self._client = client
         self._url = url
         self._payload = payload
+        self._max_model_len = max_model_len
         self._lora_request = lora_request
         self._adapter_metadata = adapter_metadata or {}
         self._init_state()
@@ -104,7 +131,7 @@ class VLLMServerStreamingIterator:
         # Final stats (populated when generation completes)
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
-        self.finish_reason: str | None = None
+        self.finish_reason: FinishReason | None = None
         self._tool_call_chunks: dict[int, dict[str, Any]] = {}
         self.tool_calls: list[dict[str, Any]] | None = None
 
@@ -180,10 +207,15 @@ class VLLMServerStreamingIterator:
                 self._tool_call_chunks[idx]
                 for idx in sorted(self._tool_call_chunks.keys())
             ]
-            self.finish_reason = "tool_calls"
+            if self.finish_reason != FinishReason.LENGTH:
+                self.finish_reason = FinishReason.TOOL_CALLS
 
     def _handle_completion(self, data: dict[str, Any]) -> str | None:
-        """Handle stream completion from the final SSE chunk."""
+        """Handle stream completion from the final SSE chunk.
+
+        Called for the finish chunk and again for the trailing usage-only
+        chunk, so truncation is re-checked once token counts arrive.
+        """
         self._finished = True
 
         # Extract usage stats if present
@@ -191,17 +223,21 @@ class VLLMServerStreamingIterator:
         self.prompt_tokens = usage.get("prompt_tokens", self.prompt_tokens)
         self.completion_tokens = usage.get("completion_tokens", self.completion_tokens)
 
-        # Finalize tool calls
         self._finalize_tool_calls()
 
         # Set finish reason from choices if not already set by tool calls
         if not self.finish_reason:
             choices = data.get("choices", [])
-            if choices:
-                self.finish_reason = choices[0].get("finish_reason", "stop")
-            else:
-                self.finish_reason = "stop"
+            raw = choices[0].get("finish_reason") if choices else None
+            self.finish_reason = parse_finish_reason(raw) or FinishReason.STOP
 
+        if _hit_token_limit(
+            self.prompt_tokens,
+            self.completion_tokens,
+            self._payload.get("max_tokens"),
+            self._max_model_len,
+        ):
+            self.finish_reason = FinishReason.LENGTH
         return None
 
     def _verify_adapter(self) -> None:
@@ -227,7 +263,7 @@ class VLLMServerStreamingIterator:
             self._finished = True
             self._finalize_tool_calls()
             if not self.finish_reason:
-                self.finish_reason = "stop"
+                self.finish_reason = FinishReason.STOP
 
     def _bridge_reasoning_content(self, delta: dict[str, Any]) -> str:
         """Bridge vLLM reasoning_content into <think> tags for ThinkTagParser."""
@@ -740,7 +776,7 @@ class VLLMServerEngine:
         self,
         messages: list[dict[str, Any]] | None,
         prompt: str,
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         stop_sequences: list[str] | None,
@@ -758,11 +794,13 @@ class VLLMServerEngine:
         payload: dict[str, Any] = {
             "model": self._resolve_model_name(lora_request),
             "messages": api_messages,
-            "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
             "stream": stream,
         }
+        # Omitted max_tokens: vLLM generates up to max_model_len - prompt_len
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         self._add_optional_params(
             payload,
             stop_sequences,
@@ -820,10 +858,24 @@ class VLLMServerEngine:
             None if fallback else self._adapter_metadata.get(requested),
         )
 
+    def _completion_finish_reason(
+        self, choice: dict[str, Any], usage: dict[str, Any], max_tokens: int | None
+    ) -> FinishReason | None:
+        """Return vLLM's finish_reason, overridden to LENGTH on truncation."""
+        if _hit_token_limit(
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+            max_tokens,
+            self._max_model_len,
+        ):
+            return FinishReason.LENGTH
+        return parse_finish_reason(choice.get("finish_reason"))
+
     def _parse_completion_response(
         self,
         data: dict[str, Any],
-        lora_request: Any | None = None,
+        lora_request: Any | None,
+        max_tokens: int | None,
     ) -> str | dict[str, Any]:
         """Extract content, tool_calls, usage, and verify adapter from response."""
         choices = data.get("choices") or [{}]
@@ -835,14 +887,15 @@ class VLLMServerEngine:
             content = f"<think>{reasoning}</think>{content}"
         tool_calls = message.get("tool_calls")
         usage = data.get("usage", {})
-        finish_reason = choice.get("finish_reason")
+        finish_reason = self._completion_finish_reason(choice, usage, max_tokens)
 
         # Verify adapter was actually used
         response_model = data.get("model", "")
         adapter_info = self._verify_adapter_response(response_model, lora_request)
 
-        # Build response dict if we have extra info (includes finish_reason for warmup checks)
-        if tool_calls or usage or adapter_info or lora_request:
+        # Build response dict if we have extra info (finish_reason feeds warmup
+        # checks and the serving layer's truncation detection)
+        if tool_calls or usage or adapter_info or lora_request or finish_reason:
             result: dict[str, Any] = {"content": content}
             if finish_reason:
                 result["finish_reason"] = finish_reason
@@ -858,7 +911,7 @@ class VLLMServerEngine:
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -903,12 +956,12 @@ class VLLMServerEngine:
             payload["top_k"] = top_k
 
         data = self._post_chat_completions(payload)
-        return self._parse_completion_response(data, lora_request)
+        return self._parse_completion_response(data, lora_request, max_tokens)
 
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -948,6 +1001,7 @@ class VLLMServerEngine:
             self._client,
             "/v1/chat/completions",
             payload,
+            self._max_model_len,
             lora_request,
             self._get_adapter_metadata(lora_request),
         )

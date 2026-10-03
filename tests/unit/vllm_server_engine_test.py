@@ -204,6 +204,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
 
         engine = object.__new__(VLLMServerEngine)
         engine._lg = MagicMock()
+        engine._max_model_len = None
 
         lora_request = MagicMock()
         lora_request.lora_name = "my-adapter"
@@ -214,7 +215,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
             "usage": {"prompt_tokens": 10, "completion_tokens": 5},
         }
 
-        result = engine._parse_completion_response(data, lora_request)
+        result = engine._parse_completion_response(data, lora_request, 100)
 
         assert isinstance(result, dict)
         assert result["content"] == "Hello"
@@ -228,6 +229,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
 
         engine = object.__new__(VLLMServerEngine)
         engine._lg = MagicMock()
+        engine._max_model_len = None
         engine._adapter_metadata = {
             "my-adapter": {"mtime": "2026-01-01T00:00:00Z", "md5": "abc123def456"}
         }
@@ -240,7 +242,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
             "choices": [{"message": {"content": "Hello"}}],
         }
 
-        result = engine._parse_completion_response(data, lora_request)
+        result = engine._parse_completion_response(data, lora_request, 100)
 
         # Returns dict with adapter info on success
         assert isinstance(result, dict)
@@ -250,3 +252,108 @@ class TestVLLMServerEngineAdapterResponseVerification:
         assert result["adapter"]["actual"] == "my-adapter"
         assert result["adapter"]["mtime"] == "2026-01-01T00:00:00Z"
         assert result["adapter"]["md5"] == "abc123def456"
+
+
+class TestHitTokenLimit:
+    """vLLM reports tool_calls for truncated output, so counts decide length."""
+
+    def test_cap_reached(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert _hit_token_limit(10, 100, 100, None)
+
+    def test_context_window_reached_without_cap(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert _hit_token_limit(3000, 1096, None, 4096)
+
+    def test_under_both_limits(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert not _hit_token_limit(10, 50, 100, 4096)
+
+    def test_no_limits_known(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert not _hit_token_limit(10, 50_000, None, None)
+
+
+def _engine_for_payload() -> object:
+    from llm_infer.engines.vllm_server import VLLMServerEngine
+
+    engine = object.__new__(VLLMServerEngine)
+    engine._lg = MagicMock()
+    engine._model_name = "m"
+    engine._config = MagicMock(chat_template_kwargs=None)
+    engine._max_model_len = 4096
+    engine._adapter_metadata = {}
+    return engine
+
+
+class TestVLLMServerMaxTokens:
+    def test_payload_omits_max_tokens_when_uncapped(self) -> None:
+        engine = _engine_for_payload()
+        payload = engine._build_payload(None, "hi", None, 1.0, 1.0, None, False)
+        assert "max_tokens" not in payload
+
+    def test_payload_keeps_explicit_max_tokens(self) -> None:
+        engine = _engine_for_payload()
+        payload = engine._build_payload(None, "hi", 50, 1.0, 1.0, None, False)
+        assert payload["max_tokens"] == 50
+
+    def test_truncated_tool_call_reports_length(self) -> None:
+        """vLLM says tool_calls; the context window says the output was cut off."""
+        engine = _engine_for_payload()
+        data = {
+            "model": "m",
+            "choices": [
+                {
+                    "message": {"content": "", "tool_calls": [{"id": "t"}]},
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 4000, "completion_tokens": 96},
+        }
+        result = engine._parse_completion_response(data, None, None)
+        assert result["finish_reason"] == "length"
+
+
+class TestVLLMServerStreamingFinishReason:
+    def _iterator(self, max_tokens: int | None, max_model_len: int | None) -> object:
+        from llm_infer.engines.vllm_server import VLLMServerStreamingIterator
+
+        payload = {} if max_tokens is None else {"max_tokens": max_tokens}
+        return VLLMServerStreamingIterator(
+            MagicMock(), MagicMock(), "/v1/chat/completions", payload, max_model_len
+        )
+
+    def _tool_call_finish(self) -> dict:
+        tc = {"index": 0, "id": "t", "function": {"name": "f", "arguments": '{"a'}}
+        return {
+            "choices": [{"delta": {"tool_calls": [tc]}, "finish_reason": "tool_calls"}]
+        }
+
+    def test_tool_call_at_cap_reports_length(self) -> None:
+        it = self._iterator(max_tokens=100, max_model_len=None)
+        it._process_choice_delta(self._tool_call_finish())
+        it._process_choice_delta(
+            {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 100}}
+        )
+        assert it.finish_reason == "length"
+        assert it.tool_calls is not None
+
+    def test_tool_call_at_context_window_reports_length(self) -> None:
+        it = self._iterator(max_tokens=None, max_model_len=4096)
+        it._process_choice_delta(self._tool_call_finish())
+        it._process_choice_delta(
+            {"choices": [], "usage": {"prompt_tokens": 4000, "completion_tokens": 96}}
+        )
+        assert it.finish_reason == "length"
+
+    def test_complete_tool_call_reports_tool_calls(self) -> None:
+        it = self._iterator(max_tokens=None, max_model_len=4096)
+        it._process_choice_delta(self._tool_call_finish())
+        it._process_choice_delta(
+            {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 20}}
+        )
+        assert it.finish_reason == "tool_calls"

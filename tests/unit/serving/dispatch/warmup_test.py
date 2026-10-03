@@ -92,10 +92,10 @@ class TestHelpers:
         assert _extract_finish_reason({"finish_reason": "length"}) == "length"
 
     def test_extract_finish_reason_dict_missing(self) -> None:
-        assert _extract_finish_reason({}) == "unknown"
+        assert _extract_finish_reason({}) is None
 
     def test_extract_finish_reason_string(self) -> None:
-        assert _extract_finish_reason("just a string") == "unknown"
+        assert _extract_finish_reason("just a string") is None
 
     def test_check_adapter_fallback_true(self) -> None:
         assert _check_adapter_fallback({"adapter_info": {"fallback": True}}) is True

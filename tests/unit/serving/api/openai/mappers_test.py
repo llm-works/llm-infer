@@ -392,7 +392,7 @@ class TestChatRequestToInternal:
         result = chat_request_to_internal(body, "r1")
         assert result.id == "r1"
         assert result.prompt == "hi"
-        assert result.max_tokens == 256
+        assert result.max_tokens is None
 
     def test_with_max_completion_tokens(self) -> None:
         body = ChatCompletionRequest(
@@ -433,30 +433,20 @@ class TestCompletionRequestToInternal:
 
 
 class TestDetermineFinishReason:
-    def test_eos(self) -> None:
-        assert (
-            determine_finish_reason(is_eos=True, max_tokens_reached=False)
-            == FinishReason.STOP
-        )
+    def test_stop(self) -> None:
+        assert determine_finish_reason(max_tokens_reached=False) == FinishReason.STOP
 
     def test_max_tokens(self) -> None:
-        assert (
-            determine_finish_reason(is_eos=False, max_tokens_reached=True)
-            == FinishReason.LENGTH
-        )
+        assert determine_finish_reason(max_tokens_reached=True) == FinishReason.LENGTH
 
-    def test_tool_calls_takes_precedence(self) -> None:
+    def test_tool_calls(self) -> None:
         assert (
-            determine_finish_reason(
-                is_eos=False, max_tokens_reached=True, has_tool_calls=True
-            )
+            determine_finish_reason(max_tokens_reached=False, has_tool_calls=True)
             == FinishReason.TOOL_CALLS
         )
 
-    def test_guard_triggered(self) -> None:
+    def test_max_tokens_takes_precedence_over_tool_calls(self) -> None:
         assert (
-            determine_finish_reason(
-                is_eos=True, max_tokens_reached=False, guard_triggered=True
-            )
-            == FinishReason.CONTENT_FILTER
+            determine_finish_reason(max_tokens_reached=True, has_tool_calls=True)
+            == FinishReason.LENGTH
         )

@@ -117,14 +117,14 @@ class TestMaxCompletionTokens:
         internal = chat_request_to_internal(request, "test-id")
         assert internal.max_tokens == 100
 
-    def test_default_max_tokens_when_neither_set(self) -> None:
-        """Default 256 used when neither max_tokens nor max_completion_tokens set."""
+    def test_no_cap_when_neither_set(self) -> None:
+        """No cap (None) when neither max_tokens nor max_completion_tokens set."""
         request = ChatCompletionRequest(
             model="default",
             messages=[ChatMessage(role=Role.USER, content="Hello")],
         )
         internal = chat_request_to_internal(request, "test-id")
-        assert internal.max_tokens == 256
+        assert internal.max_tokens is None
 
 
 class TestReasoningModelParams:

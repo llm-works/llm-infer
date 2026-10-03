@@ -41,6 +41,7 @@ from .mappers import (
     chat_request_to_internal,
     completion_request_to_internal,
     determine_finish_reason,
+    effective_max_tokens,
     generate_tool_call_id,
     normalize_arguments,
     resolve_think_mode,
@@ -181,15 +182,19 @@ def _build_chat_response(
 def _determine_chat_finish_reason(
     response: Any, body: ChatCompletionRequest, has_tool_calls: bool
 ) -> FinishReason:
-    """Determine finish reason for chat completion."""
-    effective_max_tokens = body.max_tokens or body.max_completion_tokens or 256
-    max_tokens_reached = (
+    """Determine finish reason for chat completion.
+
+    The engine's own "length" report is authoritative; it is the only signal
+    when the request set no cap and generation hit the context window. The
+    token-count comparison covers engines that don't report a reason.
+    """
+    max_tokens = effective_max_tokens(body)
+    max_tokens_reached = response.finish_reason == FinishReason.LENGTH or (
         response.completion_tokens is not None
-        and effective_max_tokens is not None
-        and response.completion_tokens >= effective_max_tokens
+        and max_tokens is not None
+        and response.completion_tokens >= max_tokens
     )
     return determine_finish_reason(
-        is_eos=not max_tokens_reached,
         max_tokens_reached=max_tokens_reached,
         has_tool_calls=has_tool_calls,
     )
@@ -277,9 +282,7 @@ def _build_completion_response_obj(
         response.completion_tokens is not None
         and response.completion_tokens >= body.max_tokens
     )
-    finish_reason = determine_finish_reason(
-        is_eos=not max_tokens_reached, max_tokens_reached=max_tokens_reached
-    )
+    finish_reason = determine_finish_reason(max_tokens_reached=max_tokens_reached)
     result_text = response.result or ""
     if body.echo:
         prompt = body.prompt if isinstance(body.prompt, str) else body.prompt[0]
@@ -349,10 +352,8 @@ def _handle_chat_streaming(
     """Handle streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
     normalizer = _create_normalizer(body.think, model_config)
-    # Use same effective_max_tokens logic as non-streaming path
-    effective_max_tokens = body.max_tokens or body.max_completion_tokens or 256
     generator = ChatStreamingGenerator(
-        lg, request_id, model_name, ipc, normalizer, effective_max_tokens
+        lg, request_id, model_name, ipc, normalizer, effective_max_tokens(body)
     )
     return StreamingResponse(
         generator.stream(internal_request),

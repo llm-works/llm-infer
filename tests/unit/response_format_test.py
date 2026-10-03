@@ -215,7 +215,7 @@ class TestDispatchTypesResponseFormat:
 
     def test_request_default_none(self) -> None:
         """Test Request has response_format=None by default."""
-        req = Request(id="req-1", prompt="test")
+        req = Request(id="req-1", prompt="test", max_tokens=100)
         assert req.response_format is None
 
     def test_request_with_json_object(self) -> None:
@@ -223,6 +223,7 @@ class TestDispatchTypesResponseFormat:
         req = Request(
             id="req-1",
             prompt="test",
+            max_tokens=100,
             response_format={"type": "json_object"},
         )
         assert req.response_format == {"type": "json_object"}
@@ -232,6 +233,7 @@ class TestDispatchTypesResponseFormat:
         req = Request(
             id="req-1",
             prompt="test",
+            max_tokens=100,
             response_format={
                 "type": "json_schema",
                 "json_schema": {

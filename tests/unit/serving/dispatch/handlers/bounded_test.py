@@ -353,18 +353,18 @@ class TestStreaming:
 
 
 # ---------------------------------------------------------------------------
-# _get_stream_finish_reason
+# _get_finish_reason
 # ---------------------------------------------------------------------------
 
 
-class TestGetStreamFinishReason:
+class TestGetFinishReason:
     def test_stop_token_returns_stop(self) -> None:
         h, _ = _make_batched_handler()
         eng = MagicMock()
         eng.finish_reason = None
         eng.output_tokens = [1, 2, 99]
         eng.stop_token_ids = {99}
-        assert h._get_stream_finish_reason(eng) == "stop"
+        assert h._get_finish_reason(eng) == "stop"
 
     def test_no_stop_token_returns_finish_reason(self) -> None:
         h, _ = _make_batched_handler()
@@ -372,7 +372,7 @@ class TestGetStreamFinishReason:
         eng.finish_reason = "length"
         eng.output_tokens = [1, 2, 3]
         eng.stop_token_ids = {99}
-        assert h._get_stream_finish_reason(eng) == "length"
+        assert h._get_finish_reason(eng) == "length"
 
     def test_no_finish_reason_defaults_to_length(self) -> None:
         h, _ = _make_batched_handler()
@@ -380,7 +380,7 @@ class TestGetStreamFinishReason:
         eng.finish_reason = None
         eng.output_tokens = [1, 2]
         eng.stop_token_ids = set()
-        assert h._get_stream_finish_reason(eng) == "length"
+        assert h._get_finish_reason(eng) == "length"
 
 
 # ---------------------------------------------------------------------------
