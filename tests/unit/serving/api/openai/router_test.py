@@ -263,6 +263,17 @@ class TestDetermineChatFinishReason:
         result = _determine_chat_finish_reason(response, self._body(100), True)
         assert result == "length"
 
+    def test_uncapped_engine_length_reports_length(self) -> None:
+        """No request cap: the engine's report is the only truncation signal."""
+        response = MagicMock(completion_tokens=4000, finish_reason="length")
+        result = _determine_chat_finish_reason(response, self._body(None), True)
+        assert result == "length"
+
+    def test_uncapped_engine_stop_reports_stop(self) -> None:
+        response = MagicMock(completion_tokens=4000, finish_reason="stop")
+        result = _determine_chat_finish_reason(response, self._body(None), False)
+        assert result == "stop"
+
 
 # ---------------------------------------------------------------------------
 # _build_adapter_info / _build_adapter_fallback_headers / _with_fallback_headers

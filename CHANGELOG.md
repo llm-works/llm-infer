@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Serving: a chat request without `max_tokens` now generates up to the remaining context window
+  instead of 256 tokens, matching OpenAI and vLLM. Ollama uses its own default when unset.
+
 ### Fixed
 
 - Serving: a chat reply that hits `max_tokens` now reports `finish_reason: "length"` even when it

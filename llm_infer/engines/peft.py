@@ -42,10 +42,12 @@ class PEFTStreamingIterator:
         self,
         streamer: Any,  # TextIteratorStreamer
         prompt_tokens: int,
+        max_new_tokens: int,
         tokenizer: Any,
         error_holder: _GenerationErrorHolder | None = None,
     ) -> None:
         self._streamer = streamer
+        self._max_new_tokens = max_new_tokens
         self._tokenizer = tokenizer
         self._iter: Iterator[str] | None = None
         self._finished = False
@@ -79,6 +81,10 @@ class PEFTStreamingIterator:
                     self._accumulated_text, add_special_tokens=False
                 )
                 self.completion_tokens = len(tokens)
+            # Re-encoded count approximates the generated count; skipped special
+            # tokens can only make it smaller, so a hit is a real budget hit
+            if self.completion_tokens >= self._max_new_tokens:
+                self.finish_reason = "length"
             # Check if generation thread had an error
             if self._error_holder and self._error_holder.error:
                 raise RuntimeError(
@@ -601,8 +607,30 @@ class PEFTEngine:
         )
         return outputs
 
+    def _resolve_max_new_tokens(
+        self, model: Any, max_tokens: int | None, prompt_tokens: int
+    ) -> int:
+        """Return the generation budget; None means the remaining context window."""
+        if max_tokens is not None:
+            return max_tokens
+        context_len = getattr(model.config, "max_position_embeddings", None)
+        if context_len is None:
+            raise ValueError(
+                "max_tokens is required: model config has no max_position_embeddings"
+            )
+        if prompt_tokens >= context_len:
+            raise ValueError(
+                f"prompt ({prompt_tokens} tokens) fills the context window "
+                f"({context_len} tokens)"
+            )
+        return int(context_len) - prompt_tokens
+
     def _decode_and_build_result(
-        self, outputs: Any, prompt_tokens: int, adapter_path: str | None
+        self,
+        outputs: Any,
+        prompt_tokens: int,
+        max_new_tokens: int,
+        adapter_path: str | None,
     ) -> dict[str, Any]:
         """Decode generated tokens and build result dict."""
         generated_tokens = outputs[0][prompt_tokens:]
@@ -624,6 +652,9 @@ class PEFTEngine:
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
             },
+            "finish_reason": "length"
+            if completion_tokens >= max_new_tokens
+            else "stop",
         }
         if adapter_path:
             result["adapter"] = self._build_adapter_info(adapter_path)
@@ -632,7 +663,7 @@ class PEFTEngine:
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -673,19 +704,22 @@ class PEFTEngine:
         input_ids, attention_mask, prompt_tokens = self._tokenize_input(
             prompt, model.device
         )
+        max_new = self._resolve_max_new_tokens(model, max_tokens, prompt_tokens)
         gen_kwargs = self._build_generation_kwargs(
-            max_tokens, temperature, top_p, top_k, repetition_penalty, stop_sequences
+            max_new, temperature, top_p, top_k, repetition_penalty, stop_sequences
         )
         outputs = self._run_generation(
-            model, input_ids, attention_mask, gen_kwargs, max_tokens
+            model, input_ids, attention_mask, gen_kwargs, max_new
         )
 
-        return self._decode_and_build_result(outputs, prompt_tokens, adapter_path)
+        return self._decode_and_build_result(
+            outputs, prompt_tokens, max_new, adapter_path
+        )
 
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -724,8 +758,9 @@ class PEFTEngine:
         input_ids, attention_mask, prompt_tokens = self._tokenize_input(
             prompt, model.device
         )
+        max_new = self._resolve_max_new_tokens(model, max_tokens, prompt_tokens)
         gen_kwargs = self._build_generation_kwargs(
-            max_tokens, temperature, top_p, top_k, repetition_penalty, stop_sequences
+            max_new, temperature, top_p, top_k, repetition_penalty, stop_sequences
         )
         streamer = TextIteratorStreamer(
             self._tokenizer, skip_prompt=True, skip_special_tokens=True
@@ -736,7 +771,7 @@ class PEFTEngine:
             model, input_ids, attention_mask, gen_kwargs, error_holder
         )
         return PEFTStreamingIterator(
-            streamer, prompt_tokens, self._tokenizer, error_holder
+            streamer, prompt_tokens, max_new, self._tokenizer, error_holder
         )
 
     def _start_generation_thread(

@@ -52,6 +52,17 @@ def _check_vllm_available() -> None:
         )
 
 
+def _build_generate_result(outputs: Any) -> dict[str, Any]:
+    """Build the generate() result dict from vLLM RequestOutputs."""
+    if outputs and outputs[0].outputs:
+        output = outputs[0].outputs[0]
+        return {
+            "content": str(output.text),
+            "finish_reason": output.finish_reason or "stop",
+        }
+    return {"content": "", "finish_reason": "stop"}
+
+
 @dataclass
 class VLLMStreamingResult:
     """Streaming result wrapper for pre-generated vLLM output.
@@ -598,7 +609,7 @@ class VLLMEngine:
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -612,12 +623,12 @@ class VLLMEngine:
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Generate text completion (blocking).
 
         Args:
             prompt: Input prompt text
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate (None: up to max_model_len)
             temperature: Sampling temperature
             top_p: Nucleus sampling parameter
             top_k: Top-k sampling parameter
@@ -632,7 +643,7 @@ class VLLMEngine:
             response_format: Structured output format (json_object or json_schema)
 
         Returns:
-            Generated text
+            Dict with "content" and "finish_reason"
         """
         # Note: tools/tool_choice are accepted but not used - vLLM doesn't support
         # native tool calling. The model may still generate tool-call-like output
@@ -660,10 +671,7 @@ class VLLMEngine:
             use_tqdm=False,
         )
 
-        # Extract text from output
-        if outputs and outputs[0].outputs:
-            return str(outputs[0].outputs[0].text)
-        return ""
+        return _build_generate_result(outputs)
 
     def _build_streaming_result(self, outputs: Any, prompt: str) -> VLLMStreamingResult:
         """Build VLLMStreamingResult from generation outputs."""
@@ -683,7 +691,7 @@ class VLLMEngine:
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -785,7 +793,7 @@ class VLLMEngine:
 
     def _create_sampling_params(
         self,
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,

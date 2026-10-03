@@ -249,7 +249,7 @@ def test_embedding_engine_raises() -> None:
 
 def test_inference_processor_can_process() -> None:
     p = InferenceProcessor()
-    assert p.can_process(Request(id="x", prompt="hi"))
+    assert p.can_process(Request(id="x", prompt="hi", max_tokens=100))
     assert not p.can_process(MetricsRequest(id="x"))
 
 
@@ -259,7 +259,9 @@ def test_inference_submit_accepted() -> None:
     handler.submit.return_value = True
     q = ResponseQueueFake()
 
-    InferenceProcessor().handle(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
+    InferenceProcessor().handle(
+        Request(id="r1", prompt="hi", max_tokens=100), handler, q
+    )  # type: ignore[arg-type]
 
     handler.submit.assert_called_once()
     assert q.items == []
@@ -271,7 +273,9 @@ def test_inference_submit_rejected() -> None:
     handler.submit.return_value = False
     q = ResponseQueueFake()
 
-    InferenceProcessor().handle(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
+    InferenceProcessor().handle(
+        Request(id="r1", prompt="hi", max_tokens=100), handler, q
+    )  # type: ignore[arg-type]
 
     assert len(q.items) == 1
     resp = q.items[0]
@@ -317,7 +321,7 @@ def test_chain_dispatches_inference_request() -> None:
     handler.submit.return_value = True
     q = ResponseQueueFake()
 
-    chain.process(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
+    chain.process(Request(id="r1", prompt="hi", max_tokens=100), handler, q)  # type: ignore[arg-type]
 
     handler.submit.assert_called_once()
 

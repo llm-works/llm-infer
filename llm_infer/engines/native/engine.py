@@ -171,7 +171,7 @@ class InferenceEngine:
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -184,7 +184,7 @@ class InferenceEngine:
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Generate text from a prompt (blocking).
 
         Args:
@@ -215,11 +215,19 @@ class InferenceEngine:
 
         try:
             self._run_generation_loop(request)
-            return self.tokenizer.decode(
-                request.output_tokens, skip_special_tokens=True
-            )
+            return self._build_generate_result(request)
         finally:
             request.kv_cache.free_all(self.block_pool)
+
+    def _build_generate_result(self, request: Request) -> dict[str, Any]:
+        """Build the generate() result dict from a finished request."""
+        hit_limit = len(request.output_tokens) >= request.max_tokens
+        return {
+            "content": self.tokenizer.decode(
+                request.output_tokens, skip_special_tokens=True
+            ),
+            "finish_reason": "length" if hit_limit else "stop",
+        }
 
     def _decode_last_token(self, request: Request) -> str:
         """Decode the last generated token."""
@@ -230,7 +238,7 @@ class InferenceEngine:
     async def generate_stream(  # cq: max-lines=36
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -279,7 +287,7 @@ class InferenceEngine:
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -355,10 +363,26 @@ class InferenceEngine:
                     stop_token_ids.add(seq_tokens[0])
         return stop_token_ids
 
+    def resolve_max_tokens(self, max_tokens: int | None, prompt_len: int) -> int:
+        """Return the generation budget; None means the remaining context window.
+
+        Uses the model's context length (max_position_embeddings). The shared
+        KV block pool may still run out first under load.
+        """
+        if max_tokens is not None:
+            return max_tokens
+        context_len = self.config.model.max_seq_len
+        if prompt_len >= context_len:
+            raise ValueError(
+                f"prompt ({prompt_len} tokens) fills the context window "
+                f"({context_len} tokens)"
+            )
+        return context_len - prompt_len
+
     def _create_request(
         self,
         prompt: str,
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,
@@ -382,7 +406,7 @@ class InferenceEngine:
         return Request.create(
             prompt_tokens=tokens,
             context=context,
-            max_tokens=max_tokens,
+            max_tokens=self.resolve_max_tokens(max_tokens, len(tokens)),
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,

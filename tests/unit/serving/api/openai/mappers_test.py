@@ -392,7 +392,7 @@ class TestChatRequestToInternal:
         result = chat_request_to_internal(body, "r1")
         assert result.id == "r1"
         assert result.prompt == "hi"
-        assert result.max_tokens == 256
+        assert result.max_tokens is None
 
     def test_with_max_completion_tokens(self) -> None:
         body = ChatCompletionRequest(

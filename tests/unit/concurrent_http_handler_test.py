@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 def _create_request(req_id: str = "req-1") -> Request:
     """Create a minimal test request."""
-    return Request(id=req_id, prompt="test prompt")
+    return Request(id=req_id, prompt="test prompt", max_tokens=100)
 
 
 def _create_mock_engine() -> MagicMock:

@@ -108,7 +108,7 @@ class _StubIPC:
 
 
 def _request() -> InternalRequest:
-    return InternalRequest(id="r1", prompt="hi")
+    return InternalRequest(id="r1", prompt="hi", max_tokens=100)
 
 
 async def _collect(generator: Any) -> list[str]:

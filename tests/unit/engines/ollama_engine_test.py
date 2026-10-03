@@ -24,6 +24,7 @@ from llm_infer.engines.ollama import (
     _convert_messages_to_ollama_format,
     _convert_single_message,
     _convert_tool_call_to_ollama,
+    _ollama_finish_reason,
 )
 from llm_infer.serving.dispatch.config import OllamaConfig
 
@@ -33,6 +34,17 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+class TestOllamaFinishReason:
+    def test_length_wins_over_tool_calls(self) -> None:
+        assert _ollama_finish_reason({"done_reason": "length"}, True) == "length"
+
+    def test_tool_calls(self) -> None:
+        assert _ollama_finish_reason({"done_reason": "stop"}, True) == "tool_calls"
+
+    def test_stop(self) -> None:
+        assert _ollama_finish_reason({"done_reason": "stop"}, False) == "stop"
 
 
 class TestConvertToolCallToOllama:
@@ -356,6 +368,11 @@ class TestBuildOptions:
         assert opts["top_k"] == 40
         assert opts["repeat_penalty"] == 1.1
 
+    def test_no_cap_omits_num_predict(self) -> None:
+        engine = _make_engine()
+        opts = engine._build_options(None, 0.7, 0.9, 40, 1.1)
+        assert "num_predict" not in opts
+
     def test_with_num_ctx(self) -> None:
         engine = _make_engine()
         engine._config.num_ctx = 8192
@@ -508,7 +525,7 @@ class TestGenerate:
         engine = _make_engine()
         self._setup_post(engine, {"response": "generated text"})
         result = engine.generate("hello", max_tokens=50)
-        assert result == "generated text"
+        assert result == {"content": "generated text", "finish_reason": "stop"}
 
     def test_generate_with_messages(self) -> None:
         engine = _make_engine()
@@ -516,7 +533,24 @@ class TestGenerate:
         result = engine.generate(
             "ignored", messages=[{"role": "user", "content": "hi"}]
         )
-        assert result == "chat reply"
+        assert result == {"content": "chat reply", "finish_reason": "stop"}
+
+    def test_generate_chat_truncated_tool_call_reports_length(self) -> None:
+        engine = _make_engine()
+        self._setup_post(
+            engine,
+            {
+                "done_reason": "length",
+                "message": {
+                    "content": "",
+                    "tool_calls": [{"function": {"name": "f", "arguments": {}}}],
+                },
+            },
+        )
+        result = engine.generate(
+            "ignored", messages=[{"role": "user", "content": "hi"}]
+        )
+        assert result["finish_reason"] == "length"
 
     def test_generate_chat_with_tool_calls(self) -> None:
         engine = _make_engine()

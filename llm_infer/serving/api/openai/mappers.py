@@ -264,6 +264,18 @@ def _get_chat_template_kwargs(
     return dict(base_kwargs)
 
 
+def effective_max_tokens(body: ChatCompletionRequest) -> int | None:
+    """Return the request's token cap, or None when the client set none.
+
+    ``max_tokens`` wins over ``max_completion_tokens`` (the reasoning-model
+    alias). None means no cap: the engine generates up to the remaining
+    context window, matching OpenAI and vLLM.
+    """
+    if body.max_tokens is not None:
+        return body.max_tokens
+    return body.max_completion_tokens
+
+
 def chat_request_to_internal(
     body: ChatCompletionRequest,
     request_id: str,
@@ -279,7 +291,7 @@ def chat_request_to_internal(
     return InternalRequest(
         id=request_id,
         prompt=prompt,
-        max_tokens=body.max_tokens or body.max_completion_tokens or 256,
+        max_tokens=effective_max_tokens(body),
         temperature=body.temperature,
         top_p=body.top_p,
         top_k=0,  # OpenAI doesn't expose top_k

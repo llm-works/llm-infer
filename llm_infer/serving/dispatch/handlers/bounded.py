@@ -234,7 +234,7 @@ class BoundedQueueHandler(RequestHandler):
         return EngineRequest.create(
             prompt_tokens=tokens,
             context=ctx,
-            max_tokens=request.max_tokens,
+            max_tokens=self.engine.resolve_max_tokens(request.max_tokens, len(tokens)),
             temperature=request.temperature,
             top_p=request.top_p,
             top_k=request.top_k,
@@ -316,10 +316,11 @@ class BoundedQueueHandler(RequestHandler):
             result=output_text,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            finish_reason=self._get_finish_reason(running.engine_request),
         )
 
-    def _get_stream_finish_reason(self, engine_req: Any) -> str:
-        """Determine finish reason for streaming request."""
+    def _get_finish_reason(self, engine_req: Any) -> str:
+        """Determine finish reason for a completed engine request."""
         finish_reason = engine_req.finish_reason or "length"
         if (
             engine_req.output_tokens
@@ -341,7 +342,7 @@ class BoundedQueueHandler(RequestHandler):
             id=running.request.id,
             token="",
             is_final=True,
-            finish_reason=self._get_stream_finish_reason(running.engine_request),
+            finish_reason=self._get_finish_reason(running.engine_request),
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
         )

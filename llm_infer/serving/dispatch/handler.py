@@ -471,6 +471,7 @@ class RequestHandler(ABC):
         request: Request,
         result_text: str,
         tool_calls: list[dict[str, Any]] | None,
+        finish_reason: str | None,
         usage: dict[str, Any] | None = None,
         adapter_info: ResponseAdapterInfo | None = None,
     ) -> Response:
@@ -498,6 +499,7 @@ class RequestHandler(ABC):
             completion_tokens=completion_tokens,
             tool_calls=tool_calls,
             adapter=adapter_info,
+            finish_reason=finish_reason,
         )
 
     def _process_blocking_request(self, request: Request) -> Response:
@@ -514,8 +516,11 @@ class RequestHandler(ABC):
             adapter_info = self._build_adapter_info_from_result(
                 adapter_dict, fallback_adapter
             )
+            finish_reason = (
+                result.get("finish_reason") if isinstance(result, dict) else None
+            )
             return self._build_success_response(
-                request, result_text, tool_calls, usage, adapter_info
+                request, result_text, tool_calls, finish_reason, usage, adapter_info
             )
         except AdapterError as e:
             if self._lg:

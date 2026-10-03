@@ -50,8 +50,9 @@ class Request:
 
     id: str
     prompt: str
+    # None = no cap: the engine generates up to the remaining context window
+    max_tokens: int | None
     context: RequestContext | None = None  # Shared context for logging/timing
-    max_tokens: int = 100
     temperature: float = 1.0
     top_p: float = 1.0
     top_k: int = 0
@@ -87,6 +88,8 @@ class Response:
     tool_calls: list[dict[str, Any]] | None = None
     # LoRA adapter info (when adapter was requested)
     adapter: ResponseAdapterInfo | None = None
+    # Engine-reported "stop" / "length" / "tool_calls"; None if the engine didn't say
+    finish_reason: str | None = None
 
 
 @dataclass

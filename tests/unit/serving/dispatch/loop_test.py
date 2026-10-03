@@ -81,7 +81,7 @@ class TestRunEngineLoop:
         response_q: Queue = Queue()
         shutdown = threading.Event()
 
-        request = Request(id="r1", prompt="hi")
+        request = Request(id="r1", prompt="hi", max_tokens=100)
         request_q.put(request)
 
         # Set up handler.step() to also signal shutdown after first call

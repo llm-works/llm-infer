@@ -75,6 +75,17 @@ def _build_tool_call_id_mapping(messages: list[dict[str, Any]]) -> dict[str, str
     return id_to_name
 
 
+def _ollama_finish_reason(data: dict[str, Any], has_tool_calls: bool) -> str:
+    """Map an Ollama final response to an OpenAI finish_reason.
+
+    Length wins over tool_calls: arguments cut off at the token limit must not
+    look like a complete call.
+    """
+    if data.get("done_reason") == "length":
+        return "length"
+    return "tool_calls" if has_tool_calls else "stop"
+
+
 def _convert_single_message(
     msg: dict[str, Any], id_to_name: dict[str, str]
 ) -> dict[str, Any]:
@@ -190,14 +201,10 @@ class OllamaStreamingIterator:
         if not response and isinstance(message, dict):
             response = message.get("content", "")
 
-        # Check for tool calls in the final message
-        if isinstance(message, dict) and message.get("tool_calls"):
+        has_tool_calls = isinstance(message, dict) and bool(message.get("tool_calls"))
+        if has_tool_calls:
             self.tool_calls = message["tool_calls"]
-            self.finish_reason = "tool_calls"
-        elif data.get("done_reason") == "length":
-            self.finish_reason = "length"
-        else:
-            self.finish_reason = "stop"
+        self.finish_reason = _ollama_finish_reason(data, has_tool_calls)
 
         return response if response else None
 
@@ -557,7 +564,7 @@ class OllamaEngine:
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -570,7 +577,7 @@ class OllamaEngine:
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> str | dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate text completion (blocking).
 
         Args:
@@ -589,8 +596,8 @@ class OllamaEngine:
             response_format: Structured output format (json_object or json_schema).
 
         Returns:
-            Generated text string, or dict with "content" and "tool_calls" when
-            tools are provided and model returns tool calls.
+            Dict with "content" and "finish_reason", plus "tool_calls" when the
+            model returns tool calls.
         """
         if messages:
             return self._generate_chat(
@@ -618,13 +625,15 @@ class OllamaEngine:
             response_format=response_format,
         )
         data = self._post_json("/api/generate", payload, "generate")
-        result: str = data.get("response", "")
-        return result
+        return {
+            "content": data.get("response", ""),
+            "finish_reason": _ollama_finish_reason(data, has_tool_calls=False),
+        }
 
     def _build_chat_payload(
         self,
         messages: list[dict[str, Any]],
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,
@@ -662,7 +671,7 @@ class OllamaEngine:
     def _generate_chat(
         self,
         messages: list[dict[str, Any]],
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,
@@ -671,12 +680,12 @@ class OllamaEngine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
-    ) -> str | dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate using chat API.
 
         Returns:
-            Content string if no tool calls, or dict with "content" and "tool_calls"
-            when the model returns tool calls.
+            Dict with "content" and "finish_reason", plus "tool_calls" when the
+            model returns tool calls.
         """
         payload = self._build_chat_payload(
             messages,
@@ -693,16 +702,19 @@ class OllamaEngine:
         )
         data = self._post_json("/api/chat", payload, "chat")
         message = data.get("message", {})
-        content: str = message.get("content", "")
         tool_calls = message.get("tool_calls")
+        result: dict[str, Any] = {
+            "content": message.get("content", ""),
+            "finish_reason": _ollama_finish_reason(data, bool(tool_calls)),
+        }
         if tool_calls:
-            return {"content": content, "tool_calls": tool_calls}
-        return content
+            result["tool_calls"] = tool_calls
+        return result
 
     def _build_generate_payload(
         self,
         prompt: str,
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,
@@ -738,7 +750,7 @@ class OllamaEngine:
 
     def _build_options(
         self,
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,
@@ -746,11 +758,13 @@ class OllamaEngine:
     ) -> dict[str, Any]:
         """Build Ollama options dict."""
         options: dict[str, Any] = {
-            "num_predict": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
             "repeat_penalty": repetition_penalty,
         }
+        # Omitted num_predict: Ollama's default (-1), as its own OpenAI endpoint does
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
 
         # Ollama uses 0 to disable top_k, which matches our convention
         if top_k > 0:
@@ -799,7 +813,7 @@ class OllamaEngine:
     def _build_chat_stream_payload(
         self,
         messages: list[dict[str, Any]],
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,
@@ -827,7 +841,7 @@ class OllamaEngine:
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,

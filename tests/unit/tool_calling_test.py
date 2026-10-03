@@ -517,6 +517,7 @@ class TestDispatchTypesToolCalling:
         req = Request(
             id="req-1",
             prompt="test prompt",
+            max_tokens=100,
             tools=[{"type": "function", "function": {"name": "test"}}],
             tool_choice="auto",
         )
@@ -529,6 +530,7 @@ class TestDispatchTypesToolCalling:
         req = Request(
             id="req-1",
             prompt="test",
+            max_tokens=100,
             tool_choice={"type": "function", "function": {"name": "specific"}},
         )
         assert req.tool_choice["function"]["name"] == "specific"

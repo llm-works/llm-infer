@@ -45,6 +45,7 @@ def make_request(
     return Request(
         id=req_id,
         prompt=prompt,
+        max_tokens=100,
         stream=stream,
         adapter=adapter,
         model=model,
