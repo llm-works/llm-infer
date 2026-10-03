@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
+from appinfra.service.errors import ChannelError
 
 from ....schemas.openai import AdapterInfoResponse, FinishReason, Role
 from .streaming import (
@@ -27,10 +28,10 @@ if TYPE_CHECKING:
 
 
 def _map_finish_reason(reason: FinishReason | None) -> FinishReason:
-    """Map the final chunk's finish reason to the reported one.
+    """Map the final chunk's finish reason to the reported one (None -> STOP).
 
-    A missing reason (including failed generations, which carry ``error``
-    instead) reports STOP, since OpenAI's FinishReason has no error value.
+    Failed generations never reach this: their chunk's ``error`` field makes
+    the channel raise ChannelError, reported as an SSE error event.
     """
     return reason or FinishReason.STOP
 
@@ -90,12 +91,19 @@ class StreamingGenerator(ABC):
         """Create SSE event for the final chunk with finish reason."""
         pass
 
-    def _handle_timeout(self, e: TimeoutError) -> tuple[str, str]:
-        """Handle IPC timeout: log and return error SSE events."""
+    def _handle_ipc_error(self, e: Exception) -> tuple[str, str]:
+        """Handle an IPC failure: log and return error SSE events.
+
+        Covers timeouts and ChannelError, which appinfra's channel raises when
+        the engine side reports a failed request via the chunk's ``error`` field.
+        """
+        is_timeout = isinstance(e, TimeoutError)
         self._lg.warning(
-            "IPC timeout", extra={"request_id": self.request_id, "error": str(e)}
+            "IPC timeout" if is_timeout else "stream failed",
+            extra={"request_id": self.request_id, "exception": e},
         )
-        return format_sse_error(str(e), code="timeout"), format_sse_done()
+        code = "timeout" if is_timeout else "error"
+        return format_sse_error(str(e), code=code), format_sse_done()
 
     def _adjust_finish_reason(
         self, finish_reason: FinishReason, completion_tokens: int | None
@@ -124,8 +132,8 @@ class StreamingGenerator(ABC):
                     break
                 if chunk.token and (content := self.create_content_chunk(chunk.token)):
                     yield content
-        except TimeoutError as e:
-            for event in self._handle_timeout(e):
+        except (TimeoutError, ChannelError) as e:
+            for event in self._handle_ipc_error(e):
                 yield event
             return
 

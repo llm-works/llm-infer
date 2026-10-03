@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from appinfra.log import Logger
+from appinfra.service.errors import ChannelError, ChannelTimeoutError
 
 from llm_infer.response.parsers.think import ThinkTagNormalizer
 from llm_infer.schemas.openai import FinishReason
@@ -43,14 +44,7 @@ class TestMapFinishReason:
         assert _map_finish_reason(FinishReason.TOOL_CALLS) == FinishReason.TOOL_CALLS
 
     def test_none_reports_stop(self) -> None:
-        """Missing reason (e.g. a failed generation) reports STOP."""
         assert _map_finish_reason(None) == FinishReason.STOP
-
-    def test_error_chunk_reports_stop(self) -> None:
-        chunks = [StreamChunk(id="r1", token="", is_final=True, error="boom")]
-        gen = TestChatStreamingGenerator()._make(chunks=chunks)
-        result = asyncio.run(_collect(gen.stream(_request())))
-        assert _final_finish_reason(result) == "stop"
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +172,22 @@ class TestChatStreamingGenerator:
         result = asyncio.run(_collect(gen.stream(_request())))
         # Header chunk + error event + [DONE]
         assert "timeout" in result[-2]
+        assert "[DONE]" in result[-1]
+
+    def test_channel_timeout_emits_timeout_event(self) -> None:
+        gen = self._make(raise_exc=ChannelTimeoutError("no chunk in 30s"))
+        result = asyncio.run(_collect(gen.stream(_request())))
+        error = json.loads(result[-2].removeprefix("data: ").strip())["error"]
+        assert error["code"] == "timeout"
+        assert "[DONE]" in result[-1]
+
+    def test_failed_generation_emits_error_event(self) -> None:
+        """A chunk with ``error`` set makes the channel raise ChannelError."""
+        gen = self._make(raise_exc=ChannelError("Request failed: bad adapter"))
+        result = asyncio.run(_collect(gen.stream(_request())))
+        error = json.loads(result[-2].removeprefix("data: ").strip())["error"]
+        assert error["code"] == "error"
+        assert "bad adapter" in error["message"]
         assert "[DONE]" in result[-1]
 
     def test_max_tokens_overrides_finish_reason(self) -> None:
