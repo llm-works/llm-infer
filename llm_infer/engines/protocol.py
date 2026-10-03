@@ -203,8 +203,8 @@ class InferenceEngineProtocol(Protocol):
 
         Args:
             prompt: Input text prompt.
-            max_tokens: Maximum tokens to generate. None generates up to the
-                remaining context window.
+            max_tokens: Maximum tokens to generate; defaults to 100. Pass None
+                to generate up to the remaining context window.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
             top_k: Top-k sampling.
@@ -238,8 +238,8 @@ class InferenceEngineProtocol(Protocol):
 
         Args:
             prompt: Input text prompt.
-            max_tokens: Maximum tokens to generate. None generates up to the
-                remaining context window.
+            max_tokens: Maximum tokens to generate; defaults to 100. Pass None
+                to generate up to the remaining context window.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
             top_k: Top-k sampling.
