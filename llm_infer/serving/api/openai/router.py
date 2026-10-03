@@ -195,7 +195,6 @@ def _determine_chat_finish_reason(
         and response.completion_tokens >= max_tokens
     )
     return determine_finish_reason(
-        is_eos=not max_tokens_reached,
         max_tokens_reached=max_tokens_reached,
         has_tool_calls=has_tool_calls,
     )
@@ -283,9 +282,7 @@ def _build_completion_response_obj(
         response.completion_tokens is not None
         and response.completion_tokens >= body.max_tokens
     )
-    finish_reason = determine_finish_reason(
-        is_eos=not max_tokens_reached, max_tokens_reached=max_tokens_reached
-    )
+    finish_reason = determine_finish_reason(max_tokens_reached=max_tokens_reached)
     result_text = response.result or ""
     if body.echo:
         prompt = body.prompt if isinstance(body.prompt, str) else body.prompt[0]

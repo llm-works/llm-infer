@@ -284,28 +284,20 @@ class TestDetermineFinishReason:
 
     def test_tool_calls_takes_precedence(self) -> None:
         """Test has_tool_calls=True returns TOOL_CALLS."""
-        result = determine_finish_reason(
-            is_eos=True, max_tokens_reached=False, has_tool_calls=True
-        )
+        result = determine_finish_reason(max_tokens_reached=False, has_tool_calls=True)
         assert result == FinishReason.TOOL_CALLS
 
     def test_max_tokens_over_tool_calls(self) -> None:
         """Test max_tokens takes precedence over tool_calls (truncated arguments)."""
-        result = determine_finish_reason(
-            is_eos=False, max_tokens_reached=True, has_tool_calls=True
-        )
+        result = determine_finish_reason(max_tokens_reached=True, has_tool_calls=True)
         assert result == FinishReason.LENGTH
 
     def test_no_tool_calls_normal_behavior(self) -> None:
         """Test normal finish reason when no tool calls."""
-        result = determine_finish_reason(
-            is_eos=True, max_tokens_reached=False, has_tool_calls=False
-        )
+        result = determine_finish_reason(max_tokens_reached=False, has_tool_calls=False)
         assert result == FinishReason.STOP
 
-        result = determine_finish_reason(
-            is_eos=False, max_tokens_reached=True, has_tool_calls=False
-        )
+        result = determine_finish_reason(max_tokens_reached=True, has_tool_calls=False)
         assert result == FinishReason.LENGTH
 
 

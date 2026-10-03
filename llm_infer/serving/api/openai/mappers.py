@@ -334,7 +334,6 @@ def completion_request_to_internal(
 
 
 def determine_finish_reason(
-    is_eos: bool,
     max_tokens_reached: bool,
     has_tool_calls: bool = False,
 ) -> FinishReason:
