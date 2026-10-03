@@ -22,7 +22,9 @@ from typing import TYPE_CHECKING, Any, Self
 from appinfra.log import Logger
 from appinfra.size import size_str
 
+from ..schemas.openai import FinishReason
 from ..serving.dispatch.config import VLLMConfig
+from .finish import parse_finish_reason
 from .vllm_common import resolve_gpu_memory_utilization
 
 # Check for vLLM availability
@@ -58,9 +60,10 @@ def _build_generate_result(outputs: Any) -> dict[str, Any]:
         output = outputs[0].outputs[0]
         return {
             "content": str(output.text),
-            "finish_reason": output.finish_reason or "stop",
+            "finish_reason": parse_finish_reason(output.finish_reason)
+            or FinishReason.STOP,
         }
-    return {"content": "", "finish_reason": "stop"}
+    return {"content": "", "finish_reason": FinishReason.STOP}
 
 
 @dataclass
@@ -75,7 +78,7 @@ class VLLMStreamingResult:
     _current_idx: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    finish_reason: str | None = None
+    finish_reason: FinishReason | None = None
 
     def __iter__(self) -> Iterator[str]:
         return self
@@ -130,7 +133,7 @@ class VLLMStreamingIterator:
         # Final stats (populated when generation completes)
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
-        self.finish_reason: str | None = None
+        self.finish_reason: FinishReason | None = None
 
     def _start_generation(self) -> None:
         """Add request to the engine's scheduler."""
@@ -158,7 +161,7 @@ class VLLMStreamingIterator:
         # Check if finished
         if output.finished:
             self._finished = True
-            self.finish_reason = completion.finish_reason
+            self.finish_reason = parse_finish_reason(completion.finish_reason)
             self.completion_tokens = len(
                 self._tokenizer.encode(current_text, add_special_tokens=False)
             )
@@ -685,7 +688,7 @@ class VLLMEngine:
                 result.completion_tokens = len(
                     self._tokenizer.encode(text, add_special_tokens=False)
                 )
-            result.finish_reason = output.finish_reason
+            result.finish_reason = parse_finish_reason(output.finish_reason)
         return result
 
     def generate_stream_sync(

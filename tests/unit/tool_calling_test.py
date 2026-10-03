@@ -296,16 +296,6 @@ class TestDetermineFinishReason:
         )
         assert result == FinishReason.LENGTH
 
-    def test_content_filter_highest_precedence(self) -> None:
-        """Test guard_triggered still takes highest precedence."""
-        result = determine_finish_reason(
-            is_eos=True,
-            max_tokens_reached=False,
-            guard_triggered=True,
-            has_tool_calls=True,
-        )
-        assert result == FinishReason.CONTENT_FILTER
-
     def test_no_tool_calls_normal_behavior(self) -> None:
         """Test normal finish reason when no tool calls."""
         result = determine_finish_reason(

@@ -26,19 +26,13 @@ if TYPE_CHECKING:
     from ...dispatch.types import Request as InternalRequest
 
 
-def _map_finish_reason(reason: str | None) -> FinishReason:
-    """Map internal finish reason to OpenAI finish reason.
+def _map_finish_reason(reason: FinishReason | None) -> FinishReason:
+    """Map the final chunk's finish reason to the reported one.
 
-    Note: Internal "error" maps to STOP since OpenAI's FinishReason enum
-    doesn't include an ERROR value. Error details are surfaced separately
-    via HTTP status codes and error responses for non-streaming requests.
+    A missing reason (including failed generations, which carry ``error``
+    instead) reports STOP, since OpenAI's FinishReason has no error value.
     """
-    if reason == "length":
-        return FinishReason.LENGTH
-    if reason == "tool_calls":
-        return FinishReason.TOOL_CALLS
-    # "error" and all other cases map to STOP
-    return FinishReason.STOP
+    return reason or FinishReason.STOP
 
 
 def _extract_adapter_info(chunk: Any) -> AdapterInfoResponse | None:

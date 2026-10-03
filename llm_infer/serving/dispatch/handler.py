@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from ...context import Event, RequestContext
+from ...schemas.openai import FinishReason
 from ..adapters import validate_adapter_key
 from .types import Request, RequestStatus, Response, ResponseAdapterInfo, StreamChunk
 
@@ -471,7 +472,7 @@ class RequestHandler(ABC):
         request: Request,
         result_text: str,
         tool_calls: list[dict[str, Any]] | None,
-        finish_reason: str | None,
+        finish_reason: FinishReason | None,
         usage: dict[str, Any] | None = None,
         adapter_info: ResponseAdapterInfo | None = None,
     ) -> Response:
@@ -656,14 +657,14 @@ class RequestHandler(ABC):
                 )
             if self._response_q is not None:
                 error_chunk = StreamChunk(
-                    id=request.id, token="", is_final=True, finish_reason="error"
+                    id=request.id, token="", is_final=True, error=str(e)
                 )
                 self._response_q.put(error_chunk)
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
         except Exception as e:
             if self._response_q is not None:
                 error_chunk = StreamChunk(
-                    id=request.id, token="", is_final=True, finish_reason="error"
+                    id=request.id, token="", is_final=True, error=str(e)
                 )
                 self._response_q.put(error_chunk)
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))

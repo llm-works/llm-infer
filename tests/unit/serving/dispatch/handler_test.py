@@ -638,11 +638,11 @@ class TestProcessStreamingRequest:
         h.engine.generate_stream_sync.side_effect = AdapterError("bad")  # type: ignore[attr-defined]
         resp = h._process_streaming_request(_request("r1", stream=True))
         assert resp.status == RequestStatus.FAILED
-        # Error chunk emitted
-        assert any(
-            isinstance(item, StreamChunk) and item.finish_reason == "error"
-            for item in q.items
-        )
+        # Final error chunk carries the error, not a finish_reason
+        finals = [i for i in q.items if isinstance(i, StreamChunk) and i.is_final]
+        assert len(finals) == 1
+        assert finals[0].error == "bad"
+        assert finals[0].finish_reason is None
 
     def test_streaming_generic_exception(self) -> None:
         q = ResponseQueueFake()
@@ -651,6 +651,8 @@ class TestProcessStreamingRequest:
         resp = h._process_streaming_request(_request("r1", stream=True))
         assert resp.status == RequestStatus.FAILED
         assert "boom" in resp.error
+        finals = [i for i in q.items if isinstance(i, StreamChunk) and i.is_final]
+        assert finals[0].error == "boom"
 
 
 # ---------------------------------------------------------------------------

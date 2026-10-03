@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Serving: a chat request without `max_tokens` now generates up to the remaining context window
   instead of 256 tokens, matching OpenAI and vLLM. Ollama uses its own default when unset.
+- Engine protocol: `max_tokens` accepts `None` (remaining context window), engines implement
+  `resolve_max_tokens`, and `finish_reason` is a `FinishReason`.
 
 ### Fixed
 

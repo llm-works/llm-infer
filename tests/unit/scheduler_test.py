@@ -7,6 +7,7 @@ import pytest
 
 from llm_infer.engines.native.kv_cache.pool import BlockPool
 from llm_infer.engines.native.scheduler import Request, RequestState, Scheduler
+from llm_infer.schemas.openai import FinishReason
 
 pytestmark = pytest.mark.unit
 
@@ -87,7 +88,7 @@ class TestRequestProperties:
     def test_is_finished_by_finish_reason(self) -> None:
         """Test is_finished when finish_reason set."""
         request = Request.create(prompt_tokens=[1])
-        request.finish_reason = "guard"
+        request.finish_reason = FinishReason.STOP
         assert request.is_finished
 
 
@@ -103,18 +104,18 @@ class TestRequestMethods:
     def test_finish_with_reason(self) -> None:
         """Test finish sets reason and state."""
         request = Request.create(prompt_tokens=[1])
-        request.finish("guard", "Token repetition detected")
+        request.finish(FinishReason.STOP, "Token repetition detected")
 
-        assert request.finish_reason == "guard"
+        assert request.finish_reason == FinishReason.STOP
         assert request.state == RequestState.FINISHED
         assert "Token repetition detected" in request.warnings
 
     def test_finish_without_message(self) -> None:
         """Test finish without message."""
         request = Request.create(prompt_tokens=[1])
-        request.finish("max_tokens")
+        request.finish(FinishReason.LENGTH)
 
-        assert request.finish_reason == "max_tokens"
+        assert request.finish_reason == FinishReason.LENGTH
         assert len(request.warnings) == 0
 
     def test_add_warning(self) -> None:

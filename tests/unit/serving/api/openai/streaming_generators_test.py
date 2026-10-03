@@ -38,21 +38,19 @@ pytestmark = pytest.mark.unit
 
 
 class TestMapFinishReason:
-    def test_length(self) -> None:
-        assert _map_finish_reason("length") == FinishReason.LENGTH
+    def test_passes_reason_through(self) -> None:
+        assert _map_finish_reason(FinishReason.LENGTH) == FinishReason.LENGTH
+        assert _map_finish_reason(FinishReason.TOOL_CALLS) == FinishReason.TOOL_CALLS
 
-    def test_tool_calls(self) -> None:
-        assert _map_finish_reason("tool_calls") == FinishReason.TOOL_CALLS
-
-    def test_stop(self) -> None:
-        assert _map_finish_reason("stop") == FinishReason.STOP
-
-    def test_none(self) -> None:
+    def test_none_reports_stop(self) -> None:
+        """Missing reason (e.g. a failed generation) reports STOP."""
         assert _map_finish_reason(None) == FinishReason.STOP
 
-    def test_error(self) -> None:
-        """Internal 'error' maps to STOP."""
-        assert _map_finish_reason("error") == FinishReason.STOP
+    def test_error_chunk_reports_stop(self) -> None:
+        chunks = [StreamChunk(id="r1", token="", is_final=True, error="boom")]
+        gen = TestChatStreamingGenerator()._make(chunks=chunks)
+        result = asyncio.run(_collect(gen.stream(_request())))
+        assert _final_finish_reason(result) == "stop"
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ These protocols define the contracts for inference engines, enabling:
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from ..schemas.openai import FinishReason
+
 if TYPE_CHECKING:
     from ..context import RequestContext
     from .native.scheduler import Request
@@ -40,8 +42,8 @@ class StreamingResultProtocol(Protocol):
         ...
 
     @property
-    def finish_reason(self) -> str:
-        """Reason generation stopped ('stop' or 'length')."""
+    def finish_reason(self) -> FinishReason | None:
+        """Reason generation stopped; None until generation finishes."""
         ...
 
     def __iter__(self) -> Iterator[str]:
@@ -214,8 +216,7 @@ class InferenceEngineProtocol(Protocol):
 
         Returns:
             Generated text, or a dict with "content" plus any of "tool_calls",
-            "usage", "adapter" and "finish_reason" ("stop" / "length" /
-            "tool_calls").
+            "usage", "adapter" and "finish_reason" (a FinishReason).
         """
         ...
 

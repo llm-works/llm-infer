@@ -336,7 +336,6 @@ def completion_request_to_internal(
 def determine_finish_reason(
     is_eos: bool,
     max_tokens_reached: bool,
-    guard_triggered: bool = False,
     has_tool_calls: bool = False,
 ) -> FinishReason:
     """Determine OpenAI finish_reason from internal state.
@@ -345,8 +344,6 @@ def determine_finish_reason(
     parsed tool calls whose arguments are truncated, and reporting tool_calls
     would make it indistinguishable from a complete call.
     """
-    if guard_triggered:
-        return FinishReason.CONTENT_FILTER
     if max_tokens_reached:
         return FinishReason.LENGTH
     if has_tool_calls:

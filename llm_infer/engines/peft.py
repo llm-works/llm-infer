@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
 
+from ..schemas.openai import FinishReason
+
 if TYPE_CHECKING:
     from ..context import RequestContext
     from ..serving.adapters import LoadedAdapter
@@ -57,7 +59,7 @@ class PEFTStreamingIterator:
         # Stats
         self.prompt_tokens: int = prompt_tokens
         self.completion_tokens: int = 0
-        self.finish_reason: str = "stop"
+        self.finish_reason: FinishReason = FinishReason.STOP
 
     def __iter__(self) -> Iterator[str]:
         return self
@@ -84,7 +86,7 @@ class PEFTStreamingIterator:
             # Re-encoded count approximates the generated count; skipped special
             # tokens can only make it smaller, so a hit is a real budget hit
             if self.completion_tokens >= self._max_new_tokens:
-                self.finish_reason = "length"
+                self.finish_reason = FinishReason.LENGTH
             # Check if generation thread had an error
             if self._error_holder and self._error_holder.error:
                 raise RuntimeError(
@@ -652,9 +654,9 @@ class PEFTEngine:
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
             },
-            "finish_reason": "length"
+            "finish_reason": FinishReason.LENGTH
             if completion_tokens >= max_new_tokens
-            else "stop",
+            else FinishReason.STOP,
         }
         if adapter_path:
             result["adapter"] = self._build_adapter_info(adapter_path)

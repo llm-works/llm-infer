@@ -189,7 +189,7 @@ def _determine_chat_finish_reason(
     token-count comparison covers engines that don't report a reason.
     """
     max_tokens = effective_max_tokens(body)
-    max_tokens_reached = response.finish_reason == "length" or (
+    max_tokens_reached = response.finish_reason == FinishReason.LENGTH or (
         response.completion_tokens is not None
         and max_tokens is not None
         and response.completion_tokens >= max_tokens

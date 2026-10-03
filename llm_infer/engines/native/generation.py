@@ -9,6 +9,7 @@ import torch
 from torch import Tensor
 
 from ...context import Event
+from ...schemas.openai import FinishReason
 from .guards import GenerationGuard
 from .kv_cache import BlockPool
 from .model import TransformerModel
@@ -54,7 +55,8 @@ def _run_guards(
             logits,
         )
         if result.action == "stop":
-            request.finish("guard", result.message)
+            # OpenAI has no guard value; content_filter would wrongly imply moderation
+            request.finish(FinishReason.STOP, result.message)
             return False
         elif result.action == "warn" and result.message:
             request.add_warning(result.message)

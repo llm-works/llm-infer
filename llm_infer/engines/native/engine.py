@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
+from ...schemas.openai import FinishReason
 from .attention import get_attention_backend
 from .backends.linear import BackendRegistry, QuantFormat
 from .config import EngineConfig
@@ -23,6 +24,19 @@ from .tokenizer import HuggingFaceTokenizer
 
 if TYPE_CHECKING:
     from ...context import RequestContext
+
+
+def _native_finish_reason(request: Request) -> FinishReason:
+    """Finish reason for a completed native request.
+
+    A guard stop is recorded on the request (as STOP); otherwise reaching the
+    request's budget means the output was cut off.
+    """
+    if request.finish_reason is not None:
+        return request.finish_reason
+    if len(request.output_tokens) >= request.max_tokens:
+        return FinishReason.LENGTH
+    return FinishReason.STOP
 
 
 class InferenceEngine:
@@ -221,12 +235,11 @@ class InferenceEngine:
 
     def _build_generate_result(self, request: Request) -> dict[str, Any]:
         """Build the generate() result dict from a finished request."""
-        hit_limit = len(request.output_tokens) >= request.max_tokens
         return {
             "content": self.tokenizer.decode(
                 request.output_tokens, skip_special_tokens=True
             ),
-            "finish_reason": "length" if hit_limit else "stop",
+            "finish_reason": _native_finish_reason(request),
         }
 
     def _decode_last_token(self, request: Request) -> str:
@@ -604,14 +617,11 @@ class StreamingResult:
         return self._completion_tokens
 
     @property
-    def finish_reason(self) -> str:
-        """Reason generation stopped ('stop' or 'length')."""
+    def finish_reason(self) -> FinishReason | None:
+        """Reason generation stopped; None while still running."""
         if not self._finished:
-            return "stop"  # Default if still running
-        # Check if we hit max tokens
-        if self._completion_tokens >= self._request.max_tokens:
-            return "length"
-        return "stop"
+            return None
+        return _native_finish_reason(self._request)
 
     def __iter__(self) -> StreamingResult:
         return self

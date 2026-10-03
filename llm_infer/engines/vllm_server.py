@@ -35,6 +35,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from appinfra.log import Logger
 
+from ..schemas.openai import FinishReason
+from .finish import parse_finish_reason
 from .vllm_common import resolve_gpu_memory_utilization
 
 if TYPE_CHECKING:
@@ -129,7 +131,7 @@ class VLLMServerStreamingIterator:
         # Final stats (populated when generation completes)
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
-        self.finish_reason: str | None = None
+        self.finish_reason: FinishReason | None = None
         self._tool_call_chunks: dict[int, dict[str, Any]] = {}
         self.tool_calls: list[dict[str, Any]] | None = None
 
@@ -205,8 +207,8 @@ class VLLMServerStreamingIterator:
                 self._tool_call_chunks[idx]
                 for idx in sorted(self._tool_call_chunks.keys())
             ]
-            if self.finish_reason != "length":
-                self.finish_reason = "tool_calls"
+            if self.finish_reason != FinishReason.LENGTH:
+                self.finish_reason = FinishReason.TOOL_CALLS
 
     def _handle_completion(self, data: dict[str, Any]) -> str | None:
         """Handle stream completion from the final SSE chunk.
@@ -226,10 +228,8 @@ class VLLMServerStreamingIterator:
         # Set finish reason from choices if not already set by tool calls
         if not self.finish_reason:
             choices = data.get("choices", [])
-            if choices:
-                self.finish_reason = choices[0].get("finish_reason", "stop")
-            else:
-                self.finish_reason = "stop"
+            raw = choices[0].get("finish_reason") if choices else None
+            self.finish_reason = parse_finish_reason(raw) or FinishReason.STOP
 
         if _hit_token_limit(
             self.prompt_tokens,
@@ -237,7 +237,7 @@ class VLLMServerStreamingIterator:
             self._payload.get("max_tokens"),
             self._max_model_len,
         ):
-            self.finish_reason = "length"
+            self.finish_reason = FinishReason.LENGTH
         return None
 
     def _verify_adapter(self) -> None:
@@ -263,7 +263,7 @@ class VLLMServerStreamingIterator:
             self._finished = True
             self._finalize_tool_calls()
             if not self.finish_reason:
-                self.finish_reason = "stop"
+                self.finish_reason = FinishReason.STOP
 
     def _bridge_reasoning_content(self, delta: dict[str, Any]) -> str:
         """Bridge vLLM reasoning_content into <think> tags for ThinkTagParser."""
@@ -860,17 +860,16 @@ class VLLMServerEngine:
 
     def _completion_finish_reason(
         self, choice: dict[str, Any], usage: dict[str, Any], max_tokens: int | None
-    ) -> str | None:
-        """Return vLLM's finish_reason, overridden to "length" on truncation."""
+    ) -> FinishReason | None:
+        """Return vLLM's finish_reason, overridden to LENGTH on truncation."""
         if _hit_token_limit(
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0),
             max_tokens,
             self._max_model_len,
         ):
-            return "length"
-        reason: str | None = choice.get("finish_reason")
-        return reason
+            return FinishReason.LENGTH
+        return parse_finish_reason(choice.get("finish_reason"))
 
     def _parse_completion_response(
         self,

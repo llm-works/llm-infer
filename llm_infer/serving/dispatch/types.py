@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from ...schemas.openai import FinishReason
+
 if TYPE_CHECKING:
     from ...context import RequestContext
 
@@ -88,8 +90,8 @@ class Response:
     tool_calls: list[dict[str, Any]] | None = None
     # LoRA adapter info (when adapter was requested)
     adapter: ResponseAdapterInfo | None = None
-    # Engine-reported "stop" / "length" / "tool_calls"; None if the engine didn't say
-    finish_reason: str | None = None
+    # Engine-reported reason; None if the engine didn't report one
+    finish_reason: FinishReason | None = None
 
 
 @dataclass
@@ -104,9 +106,8 @@ class StreamChunk:
     id: str  # Request ID this chunk belongs to
     token: str  # The token text
     is_final: bool = False  # True for the last chunk
-    finish_reason: str | None = (
-        None  # "stop", "length", "tool_calls", etc. (only on final)
-    )
+    finish_reason: FinishReason | None = None  # Only on final
+    error: str | None = None  # Set on the final chunk when generation failed
     prompt_tokens: int | None = None  # Only set on final chunk
     completion_tokens: int | None = None  # Only set on final chunk
     # Tool calling support for streaming

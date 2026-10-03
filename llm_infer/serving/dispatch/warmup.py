@@ -9,6 +9,7 @@ from typing import Any
 from appinfra.log import Logger
 from appinfra.time import since, start
 
+from ...schemas.openai import FinishReason
 from ..adapters import AdapterManager
 
 # Default max_model_len when engine doesn't provide it
@@ -30,7 +31,7 @@ class WarmupResult:
     """Result of a single warmup test."""
 
     max_tokens: int
-    finish_reason: str  # "stop", "length", "unknown"
+    finish_reason: FinishReason | None  # None if the engine didn't report one
 
 
 class _WarmupLoraRequest:
@@ -57,12 +58,12 @@ def _build_token_sweep(max_model_len: int) -> list[int]:
     return [t for t in sorted(_WARMUP_PROMPTS.keys()) if t <= cap]
 
 
-def _extract_finish_reason(output: str | dict[str, Any]) -> str:
-    """Extract finish_reason from generate output."""
+def _extract_finish_reason(output: str | dict[str, Any]) -> FinishReason | None:
+    """Extract finish_reason from generate output (None if not reported)."""
     if isinstance(output, dict):
-        reason: str = output.get("finish_reason", "unknown")
+        reason: FinishReason | None = output.get("finish_reason")
         return reason
-    return "unknown"
+    return None
 
 
 def _check_adapter_fallback(output: str | dict[str, Any]) -> bool:
@@ -266,7 +267,15 @@ def _test_adapter_step(
             "max_tokens": max_tokens,
         },
     )
-    return base_result.finish_reason == "stop" and result.finish_reason == "length"
+    return _is_eos_mismatch(base_result, result)
+
+
+def _is_eos_mismatch(base_result: WarmupResult, result: WarmupResult) -> bool:
+    """True when the base model stopped on EOS but the adapter ran to max_tokens."""
+    return (
+        base_result.finish_reason == FinishReason.STOP
+        and result.finish_reason == FinishReason.LENGTH
+    )
 
 
 def _execute_adapter_test(

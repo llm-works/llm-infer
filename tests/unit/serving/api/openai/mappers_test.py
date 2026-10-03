@@ -460,11 +460,3 @@ class TestDetermineFinishReason:
             )
             == FinishReason.LENGTH
         )
-
-    def test_guard_triggered(self) -> None:
-        assert (
-            determine_finish_reason(
-                is_eos=True, max_tokens_reached=False, guard_triggered=True
-            )
-            == FinishReason.CONTENT_FILTER
-        )

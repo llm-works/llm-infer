@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from appinfra.log import Logger
 
+from ..schemas.openai import FinishReason
+
 if TYPE_CHECKING:
     from ..context import RequestContext
     from ..serving.dispatch.config import OllamaConfig
@@ -75,15 +77,15 @@ def _build_tool_call_id_mapping(messages: list[dict[str, Any]]) -> dict[str, str
     return id_to_name
 
 
-def _ollama_finish_reason(data: dict[str, Any], has_tool_calls: bool) -> str:
+def _ollama_finish_reason(data: dict[str, Any], has_tool_calls: bool) -> FinishReason:
     """Map an Ollama final response to an OpenAI finish_reason.
 
     Length wins over tool_calls: arguments cut off at the token limit must not
     look like a complete call.
     """
-    if data.get("done_reason") == "length":
-        return "length"
-    return "tool_calls" if has_tool_calls else "stop"
+    if data.get("done_reason") == FinishReason.LENGTH:
+        return FinishReason.LENGTH
+    return FinishReason.TOOL_CALLS if has_tool_calls else FinishReason.STOP
 
 
 def _convert_single_message(
@@ -154,7 +156,7 @@ class OllamaStreamingIterator:
         # Final stats (populated when generation completes)
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
-        self.finish_reason: str | None = None
+        self.finish_reason: FinishReason | None = None
         # Tool calls (populated on completion if model made tool calls)
         self.tool_calls: list[dict[str, Any]] | None = None
 

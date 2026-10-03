@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ....context import Event
+from ....schemas.openai import FinishReason
 from ..handler import RequestHandler
 from ..types import Request, RequestStatus, Response, StreamChunk
 
@@ -319,15 +320,16 @@ class BoundedQueueHandler(RequestHandler):
             finish_reason=self._get_finish_reason(running.engine_request),
         )
 
-    def _get_finish_reason(self, engine_req: Any) -> str:
+    def _get_finish_reason(self, engine_req: Any) -> FinishReason:
         """Determine finish reason for a completed engine request."""
-        finish_reason = engine_req.finish_reason or "length"
         if (
             engine_req.output_tokens
             and engine_req.output_tokens[-1] in engine_req.stop_token_ids
         ):
-            return "stop"
-        return finish_reason
+            return FinishReason.STOP
+        # Set by a guard stop; otherwise the request ran out of budget
+        reason: FinishReason = engine_req.finish_reason or FinishReason.LENGTH
+        return reason
 
     def _send_final_stream_chunk(self, running: RunningRequest) -> None:
         """Send final StreamChunk for a completed streaming request."""
