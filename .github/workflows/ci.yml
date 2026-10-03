@@ -183,10 +183,42 @@ jobs:
             kill $SERVER_PID 2>/dev/null || true
           fi
 
+  # Every example script, each run as its `# ci-run:` / `# ci-skip:` header
+  # says (appinfra's run_examples.py). One Python version; the test matrix
+  # covers the rest.
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # The client examples need FastAPI (retry demo server), not torch
+          python -m pip install "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
+          python -m pip install -e ".[dev]"
+
+      - name: Run examples
+        # appinfra's make files look for ~/.venv unless told which Python to use
+        env:
+          INFRA_ENV_PYTHON: python
+        run: make examples.check
+
   test-summary:
     name: Test
     runs-on: ubuntu-latest
-    needs: [test, ollama-smoke-test]
+    needs: [test, ollama-smoke-test, examples]
     if: always()
     steps:
       - name: Check test results
@@ -197,6 +229,10 @@ jobs:
           fi
           if [[ "${{ needs.ollama-smoke-test.result }}" != "success" ]]; then
             echo "Ollama smoke test failed"
+            exit 1
+          fi
+          if [[ "${{ needs.examples.result }}" != "success" ]]; then
+            echo "Examples failed"
             exit 1
           fi
           echo "All tests passed"
