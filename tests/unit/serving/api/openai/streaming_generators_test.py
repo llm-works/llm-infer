@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -114,6 +115,13 @@ async def _collect(generator: Any) -> list[str]:
     return [chunk async for chunk in generator]
 
 
+def _final_finish_reason(events: list[str]) -> str:
+    """Return finish_reason from the last data event before [DONE]."""
+    payload = json.loads(events[-2].removeprefix("data: ").strip())
+    reason: str = payload["choices"][0]["finish_reason"]
+    return reason
+
+
 # ---------------------------------------------------------------------------
 # ChatStreamingGenerator
 # ---------------------------------------------------------------------------
@@ -192,24 +200,30 @@ class TestChatStreamingGenerator:
         full = "".join(result)
         assert "length" in full
 
-    def test_tool_calls_finish_reason_preserved(self) -> None:
-        """Tool calls finish_reason should not be overridden by max_tokens."""
-        chunks = [
+    def _tool_call_final(self, completion_tokens: int) -> list[StreamChunk]:
+        return [
             StreamChunk(
                 id="r1",
                 token="",
                 is_final=True,
                 finish_reason="tool_calls",
                 tool_calls=[
-                    {"function": {"name": "f", "arguments": "{}"}, "id": "tc1"}
+                    {"function": {"name": "f", "arguments": '{"a": '}, "id": "tc1"}
                 ],
-                completion_tokens=100,
+                completion_tokens=completion_tokens,
             ),
         ]
-        gen = self._make(chunks=chunks, max_tokens=100)
+
+    def test_tool_calls_finish_reason_preserved_under_limit(self) -> None:
+        gen = self._make(chunks=self._tool_call_final(50), max_tokens=100)
         result = asyncio.run(_collect(gen.stream(_request())))
-        full = "".join(result)
-        assert "tool_calls" in full
+        assert _final_finish_reason(result) == "tool_calls"
+
+    def test_tool_calls_at_limit_reports_length(self) -> None:
+        """Truncated tool-call arguments must not look like a complete call."""
+        gen = self._make(chunks=self._tool_call_final(100), max_tokens=100)
+        result = asyncio.run(_collect(gen.stream(_request())))
+        assert _final_finish_reason(result) == "length"
 
     def test_empty_token_chunks_ignored(self) -> None:
         chunks = [

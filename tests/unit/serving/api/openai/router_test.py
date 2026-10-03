@@ -258,6 +258,11 @@ class TestDetermineChatFinishReason:
         result = _determine_chat_finish_reason(response, self._body(100), True)
         assert result == "tool_calls"
 
+    def test_tool_calls_at_limit_reports_length(self) -> None:
+        response = MagicMock(completion_tokens=100)
+        result = _determine_chat_finish_reason(response, self._body(100), True)
+        assert result == "length"
+
 
 # ---------------------------------------------------------------------------
 # _build_adapter_info / _build_adapter_fallback_headers / _with_fallback_headers

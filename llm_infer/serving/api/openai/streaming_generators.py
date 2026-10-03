@@ -166,12 +166,9 @@ class ChatStreamingGenerator(StreamingGenerator):
     ) -> FinishReason:
         """Override finish_reason if max tokens was reached.
 
-        Ensures streaming path uses same logic as non-streaming path.
-        Tool calls take precedence over length limit (matching determine_finish_reason).
+        Ensures streaming path uses same logic as non-streaming path: length
+        wins over tool_calls (matching determine_finish_reason).
         """
-        # Preserve tool_calls finish_reason (takes precedence over length)
-        if finish_reason == FinishReason.TOOL_CALLS:
-            return finish_reason
         if (
             self._effective_max_tokens is not None
             and completion_tokens is not None

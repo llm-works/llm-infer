@@ -327,11 +327,16 @@ def determine_finish_reason(
     guard_triggered: bool = False,
     has_tool_calls: bool = False,
 ) -> FinishReason:
-    """Determine OpenAI finish_reason from internal state."""
+    """Determine OpenAI finish_reason from internal state.
+
+    Length wins over tool_calls: a reply cut off at max_tokens can still carry
+    parsed tool calls whose arguments are truncated, and reporting tool_calls
+    would make it indistinguishable from a complete call.
+    """
     if guard_triggered:
         return FinishReason.CONTENT_FILTER
-    if has_tool_calls:
-        return FinishReason.TOOL_CALLS
     if max_tokens_reached:
         return FinishReason.LENGTH
+    if has_tool_calls:
+        return FinishReason.TOOL_CALLS
     return FinishReason.STOP

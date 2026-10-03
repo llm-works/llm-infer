@@ -445,12 +445,20 @@ class TestDetermineFinishReason:
             == FinishReason.LENGTH
         )
 
-    def test_tool_calls_takes_precedence(self) -> None:
+    def test_tool_calls(self) -> None:
+        assert (
+            determine_finish_reason(
+                is_eos=True, max_tokens_reached=False, has_tool_calls=True
+            )
+            == FinishReason.TOOL_CALLS
+        )
+
+    def test_max_tokens_takes_precedence_over_tool_calls(self) -> None:
         assert (
             determine_finish_reason(
                 is_eos=False, max_tokens_reached=True, has_tool_calls=True
             )
-            == FinishReason.TOOL_CALLS
+            == FinishReason.LENGTH
         )
 
     def test_guard_triggered(self) -> None:

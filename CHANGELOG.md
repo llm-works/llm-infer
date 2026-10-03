@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Serving: a chat reply that hits `max_tokens` now reports `finish_reason: "length"` even when it
+  contains tool calls, so truncated tool-call arguments are no longer reported as `tool_calls`.
+
 ## [0.7.1] - 2026-09-08
 
 ### Changed

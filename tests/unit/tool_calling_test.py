@@ -289,12 +289,12 @@ class TestDetermineFinishReason:
         )
         assert result == FinishReason.TOOL_CALLS
 
-    def test_tool_calls_over_max_tokens(self) -> None:
-        """Test tool_calls takes precedence over max_tokens."""
+    def test_max_tokens_over_tool_calls(self) -> None:
+        """Test max_tokens takes precedence over tool_calls (truncated arguments)."""
         result = determine_finish_reason(
             is_eos=False, max_tokens_reached=True, has_tool_calls=True
         )
-        assert result == FinishReason.TOOL_CALLS
+        assert result == FinishReason.LENGTH
 
     def test_content_filter_highest_precedence(self) -> None:
         """Test guard_triggered still takes highest precedence."""
