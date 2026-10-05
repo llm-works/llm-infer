@@ -133,6 +133,26 @@ class OllamaConfig:
         )
 
 
+# Keys that vLLM 0.30 removed or renamed. Both vLLM config parsers drop unknown
+# keys, so these are rejected explicitly instead of silently disabling a feature.
+_REMOVED_VLLM_KEYS: dict[str, str] = {
+    "swap_space": "removed in vLLM 0.30; delete it",
+    "speculative_model": "renamed to spec_model",
+    "num_speculative_tokens": "renamed to spec_tokens",
+}
+
+
+def _reject_removed_vllm_keys(data: dict[str, Any]) -> None:
+    """Raise ValueError if the vllm config section uses a removed or renamed key."""
+    found = [
+        f"{key} ({_REMOVED_VLLM_KEYS[key]})"
+        for key in data
+        if key in _REMOVED_VLLM_KEYS
+    ]
+    if found:
+        raise ValueError(f"unsupported vllm config keys: {', '.join(found)}")
+
+
 @dataclass
 class VLLMConfig:
     """vLLM engine configuration.
@@ -155,7 +175,6 @@ class VLLMConfig:
     gpu_memory_gb: float | None = None
     gpu_memory_utilization: float = 0.9
     cpu_offload_gb: float = 0.0
-    swap_space: int = 4  # GB
     max_model_len: int | None = None  # Max context length (None = use model default)
 
     # Parallelism
@@ -183,8 +202,8 @@ class VLLMConfig:
     quantization: str | None = None  # awq, gptq, fp8, etc.
 
     # Speculative decoding (advanced)
-    speculative_model: str | None = None
-    num_speculative_tokens: int | None = None
+    spec_model: str | None = None
+    spec_tokens: int | None = None
 
     # Dtype
     dtype: str = "auto"  # auto, float16, bfloat16, float32
@@ -211,6 +230,7 @@ class VLLMConfig:
         """
         from dataclasses import fields
 
+        _reject_removed_vllm_keys(data)
         kwargs: dict[str, Any] = {"model_path": model_path}
         for f in fields(cls):
             if f.name != "model_path" and f.name in data:
@@ -228,7 +248,6 @@ class VLLMConfig:
             "dtype": self.dtype,
             "gpu_memory_utilization": self.gpu_memory_utilization,
             "cpu_offload_gb": self.cpu_offload_gb,
-            "swap_space": self.swap_space,
             "tensor_parallel_size": self.tensor_parallel_size,
             "pipeline_parallel_size": self.pipeline_parallel_size,
             "max_num_seqs": self.max_num_seqs,
@@ -256,8 +275,8 @@ class VLLMConfig:
             ("max_model_len", self.max_model_len),
             ("max_num_batched_tokens", self.max_num_batched_tokens),
             ("quantization", self.quantization),
-            ("speculative_model", self.speculative_model),
-            ("num_speculative_tokens", self.num_speculative_tokens),
+            ("spec_model", self.spec_model),
+            ("spec_tokens", self.spec_tokens),
         ]
         for key, value in optional_fields:
             if value is not None:
@@ -514,12 +533,12 @@ class InferenceConfig:
     @classmethod
     def _parse_vllm_config(cls, data: dict[str, Any]) -> VLLMConfig:
         """Parse vLLM engine configuration."""
+        _reject_removed_vllm_keys(data)
         return VLLMConfig(
             task=data.get("task", "generate"),
             gpu_memory_gb=data.get("gpu_memory_gb"),
             gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),
             cpu_offload_gb=data.get("cpu_offload_gb", 0.0),
-            swap_space=data.get("swap_space", 4),
             max_model_len=data.get("max_model_len"),
             tensor_parallel_size=data.get("tensor_parallel_size", 1),
             pipeline_parallel_size=data.get("pipeline_parallel_size", 1),
@@ -533,8 +552,8 @@ class InferenceConfig:
             disable_log_stats=data.get("disable_log_stats", False),
             max_cudagraph_capture_size=data.get("max_cudagraph_capture_size"),
             quantization=data.get("quantization"),
-            speculative_model=data.get("speculative_model"),
-            num_speculative_tokens=data.get("num_speculative_tokens"),
+            spec_model=data.get("spec_model"),
+            spec_tokens=data.get("spec_tokens"),
             dtype=data.get("dtype", "auto"),
             trust_remote_code=data.get("trust_remote_code", True),
             warmup=data.get("warmup", True),

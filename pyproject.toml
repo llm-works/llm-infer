@@ -113,6 +113,13 @@ disallow_untyped_defs = true
 ignore_missing_imports = true
 exclude = ["llm_infer/examples/"]
 
+# numpy >= 2.5 stubs use 3.12 `type` statements, which mypy rejects under
+# python_version 3.11. llm_infer never imports numpy; torch/transformers stubs do.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
