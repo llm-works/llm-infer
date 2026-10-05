@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for VLLMConfig kwargs against the installed vLLM."""
+"""Unit tests for VLLMConfig parsing and kwargs against the installed vLLM."""
 
 import dataclasses
 
 import pytest
 
-from llm_infer.serving.dispatch.config import LoRAConfig, VLLMConfig
+from llm_infer.serving.dispatch.config import InferenceConfig, LoRAConfig, VLLMConfig
 
 pytestmark = pytest.mark.unit
 
@@ -47,3 +47,44 @@ class TestToLlmKwargs:
 
         for key in ("spec_model", "spec_tokens", "enable_lora", "quantization"):
             assert key in kwargs
+
+    def test_full_config_sets_every_optional_field(self) -> None:
+        """A new None-default field must be added to _full_config() to be checked."""
+        # gpu_memory_gb is converted to gpu_memory_utilization, never emitted itself
+        config = _full_config()
+        unset = [
+            f.name
+            for f in dataclasses.fields(VLLMConfig)
+            if f.default is None
+            and f.name != "gpu_memory_gb"
+            and getattr(config, f.name) is None
+        ]
+
+        assert not unset, f"_full_config() leaves unset: {unset}"
+
+
+class TestRemovedKeys:
+    """Keys vLLM 0.30 removed or renamed are rejected, not silently dropped."""
+
+    @pytest.mark.parametrize(
+        ("key", "hint"),
+        [
+            ("swap_space", "removed"),
+            ("speculative_model", "spec_model"),
+            ("num_speculative_tokens", "spec_tokens"),
+        ],
+    )
+    def test_from_dict_rejects(self, key: str, hint: str) -> None:
+        with pytest.raises(ValueError, match=f"{key}.*{hint}"):
+            VLLMConfig.from_dict({key: 1})
+
+    def test_inference_config_rejects(self) -> None:
+        with pytest.raises(ValueError, match="speculative_model.*spec_model"):
+            InferenceConfig.from_dict(
+                {"engines": {"vllm": {"speculative_model": "/m"}}}
+            )
+
+    def test_new_keys_accepted(self) -> None:
+        config = VLLMConfig.from_dict({"spec_model": "/m", "spec_tokens": 4})
+
+        assert (config.spec_model, config.spec_tokens) == ("/m", 4)

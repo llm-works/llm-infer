@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies: the `runtime` extra requires `transformers>=5.10.4,<6.0.0` (was `<5.0.0`), so
   the `cuda` extra installs with vLLM 0.30. transformers 4 is no longer supported.
 - Dependencies: the `cuda` extra requires `vllm>=0.30.0` (was `>=0.7.0`).
-- vLLM engine config: `swap_space` is removed (vLLM 0.30 dropped it), and `speculative_model` /
-  `num_speculative_tokens` are renamed to `spec_model` / `spec_tokens`, matching vLLM 0.30.
+- **Breaking:** vLLM engine config: `swap_space` is removed (vLLM 0.30 dropped it), and
+  `speculative_model` / `num_speculative_tokens` are renamed to `spec_model` / `spec_tokens`.
+  Config loading rejects the old keys.
 
 ### Fixed
 

@@ -133,6 +133,26 @@ class OllamaConfig:
         )
 
 
+# Keys that vLLM 0.30 removed or renamed. Both vLLM config parsers drop unknown
+# keys, so these are rejected explicitly instead of silently disabling a feature.
+_REMOVED_VLLM_KEYS: dict[str, str] = {
+    "swap_space": "removed in vLLM 0.30; delete it",
+    "speculative_model": "renamed to spec_model",
+    "num_speculative_tokens": "renamed to spec_tokens",
+}
+
+
+def _reject_removed_vllm_keys(data: dict[str, Any]) -> None:
+    """Raise ValueError if the vllm config section uses a removed or renamed key."""
+    found = [
+        f"{key} ({_REMOVED_VLLM_KEYS[key]})"
+        for key in data
+        if key in _REMOVED_VLLM_KEYS
+    ]
+    if found:
+        raise ValueError(f"unsupported vllm config keys: {', '.join(found)}")
+
+
 @dataclass
 class VLLMConfig:
     """vLLM engine configuration.
@@ -210,6 +230,7 @@ class VLLMConfig:
         """
         from dataclasses import fields
 
+        _reject_removed_vllm_keys(data)
         kwargs: dict[str, Any] = {"model_path": model_path}
         for f in fields(cls):
             if f.name != "model_path" and f.name in data:
@@ -512,6 +533,7 @@ class InferenceConfig:
     @classmethod
     def _parse_vllm_config(cls, data: dict[str, Any]) -> VLLMConfig:
         """Parse vLLM engine configuration."""
+        _reject_removed_vllm_keys(data)
         return VLLMConfig(
             task=data.get("task", "generate"),
             gpu_memory_gb=data.get("gpu_memory_gb"),

@@ -35,13 +35,15 @@ class TestEnsureInterpreterBinOnPath:
 
         assert os.environ["PATH"] == path
 
-    def test_sets_path_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_keeps_default_path_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(cli.sys, "executable", _PYTHON)
         monkeypatch.delenv("PATH", raising=False)
 
         cli._ensure_interpreter_bin_on_path()
 
-        assert os.environ["PATH"] == _BIN
+        assert os.environ["PATH"] == os.pathsep.join([_BIN, os.defpath])
 
     def test_noop_without_executable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(cli.sys, "executable", "")

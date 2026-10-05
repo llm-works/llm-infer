@@ -32,13 +32,17 @@ def _ensure_interpreter_bin_on_path() -> None:
     vLLM and FlashInfer run env tools (ninja, nvcc) by bare name, and `vllm serve`
     inherits our environment. A process started as <env>/bin/llm-infer without an
     activated env (e.g. a systemd unit) does not have that dir on PATH.
+    Prepended, not appended, so the env's own tools win over others on PATH;
+    a bare binary_path such as "vllm" then resolves to this env's install.
     sys.executable is deliberately not resolved: in a venv it is a symlink to the
     base interpreter, while the tools live next to the symlink.
+    An unset PATH falls back to os.defpath, the search path subprocess would use,
+    so setting PATH does not drop /bin and /usr/bin.
     """
     if not sys.executable:
         return
     bin_dir = os.path.dirname(sys.executable)
-    path = os.environ.get("PATH", "")
+    path = os.environ.get("PATH", os.defpath)
     if bin_dir in path.split(os.pathsep):
         return
     os.environ["PATH"] = os.pathsep.join(p for p in (bin_dir, path) if p)
