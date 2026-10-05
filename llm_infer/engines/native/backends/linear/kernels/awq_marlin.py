@@ -31,7 +31,7 @@ try:
     from vllm import _custom_ops as ops
     from vllm.model_executor.layers.quantization.utils.marlin_utils import (
         awq_to_marlin_zero_points,
-        marlin_make_empty_g_idx,
+        marlin_make_empty,
         marlin_make_workspace_new,
         marlin_permute_bias,
         marlin_permute_scales,
@@ -144,7 +144,7 @@ class MarlinAWQBackend:
 
         device = qweight.device
         workspace = marlin_make_workspace_new(device)
-        g_idx = marlin_make_empty_g_idx(device)
+        g_idx = marlin_make_empty(device)
 
         return _MarlinWeights(
             qweight=marlin_qweight,
