@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of 256 tokens, matching OpenAI and vLLM. Ollama uses its own default when unset.
 - Engine protocol: `max_tokens` accepts `None` (remaining context window), engines implement
   `resolve_max_tokens`, and `finish_reason` is a `FinishReason`.
+- Dependencies: the `runtime` extra requires `transformers>=5.10.4,<6.0.0` (was `<5.0.0`), so
+  the `cuda` extra installs with vLLM 0.30. transformers 4 is no longer supported.
 
 ### Fixed
 
