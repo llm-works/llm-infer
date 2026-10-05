@@ -21,8 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- vLLM engine: the in-process engine starts on vLLM 0.30 again; it failed at construction with
+- vLLM engine: the in-process engine starts on vLLM 0.30; it failed at construction with
   `unexpected keyword argument 'swap_space'`.
+- CLI: `llm-infer` puts its interpreter's bin dir on `PATH` when it is missing, so vLLM and
+  FlashInfer find the env's `ninja` when started without an activated env (e.g. from systemd).
 - Serving: a chat reply that hits `max_tokens` now reports `finish_reason: "length"` even when it
   contains tool calls, so truncated tool-call arguments are no longer reported as `tool_calls`.
 - Serving: a streaming request whose generation fails now ends with an SSE error event and
