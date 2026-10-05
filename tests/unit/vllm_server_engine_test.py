@@ -357,3 +357,56 @@ class TestVLLMServerStreamingFinishReason:
             {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 20}}
         )
         assert it.finish_reason == "tool_calls"
+
+
+class TestBuildServeCommand:
+    """_build_serve_command() must only emit flags `vllm serve` accepts."""
+
+    def _full_command(self) -> list[str]:
+        """Serve command with every optional flag enabled."""
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+        from llm_infer.serving.dispatch.config import LoRAConfig, VLLMServerConfig
+
+        # Skip __init__: it connects to (or starts) the server
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._config = VLLMServerConfig(
+            model_path="/models/test",
+            max_model_len=4096,
+            quantization="awq",
+            enforce_eager=True,
+            reasoning_parser="qwen3",
+            chat_template_kwargs={"enable_thinking": False},
+            lora=LoRAConfig(enabled=True),
+        )
+        engine._model_name = "test"
+        engine._adapter_paths = {"a": "/adapters/a", "b": "/adapters/b"}
+        return engine._build_serve_command()
+
+    def test_installed_vllm_parses_command(self) -> None:
+        """The installed vLLM's own `serve` parser accepts the command."""
+        # Skip only without vllm; a moved module must fail, not skip
+        pytest.importorskip("vllm", reason="vllm not installed")
+        from vllm.entrypoints.cli.serve import ServeSubcommand
+        from vllm.utils.argparse_utils import FlexibleArgumentParser
+
+        parser = FlexibleArgumentParser(prog="vllm")
+        ServeSubcommand().subparser_init(parser.add_subparsers())
+
+        # argparse exits with code 2 on an unrecognized flag or invalid choice
+        parser.parse_args(self._full_command()[1:])
+
+    def test_optional_flags_emitted_when_set(self) -> None:
+        """Optional flags reach the command, so the parse check above covers them."""
+        cmd = self._full_command()
+
+        for flag in (
+            "--max-model-len",
+            "--quantization",
+            "--enforce-eager",
+            "--reasoning-parser",
+            "--default-chat-template-kwargs",
+            "--enable-lora",
+            "--lora-modules",
+        ):
+            assert flag in cmd

@@ -31,8 +31,11 @@ class TestToLlmKwargs:
 
     def test_keys_are_engine_args_fields(self) -> None:
         """Every emitted key is a field of the installed vLLM's EngineArgs."""
-        arg_utils = pytest.importorskip("vllm.engine.arg_utils")
-        accepted = {f.name for f in dataclasses.fields(arg_utils.EngineArgs)}
+        # Skip only without vllm; a moved module must fail, not skip
+        pytest.importorskip("vllm", reason="vllm not installed")
+        from vllm.engine.arg_utils import EngineArgs
+
+        accepted = {f.name for f in dataclasses.fields(EngineArgs)}
 
         unknown = set(_full_config().to_llm_kwargs()) - accepted
 
