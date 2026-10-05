@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resolve_max_tokens`, and `finish_reason` is a `FinishReason`.
 - Dependencies: the `runtime` extra requires `transformers>=5.10.4,<6.0.0` (was `<5.0.0`), so
   the `cuda` extra installs with vLLM 0.30. transformers 4 is no longer supported.
+- Dependencies: the `cuda` extra requires `vllm>=0.30.0` (was `>=0.7.0`).
 
 ### Fixed
 
