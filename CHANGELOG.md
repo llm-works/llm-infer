@@ -16,9 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependencies: the `runtime` extra requires `transformers>=5.10.4,<6.0.0` (was `<5.0.0`), so
   the `cuda` extra installs with vLLM 0.30. transformers 4 is no longer supported.
 - Dependencies: the `cuda` extra requires `vllm>=0.30.0` (was `>=0.7.0`).
+- vLLM engine config: `swap_space` is removed (vLLM 0.30 dropped it), and `speculative_model` /
+  `num_speculative_tokens` are renamed to `spec_model` / `spec_tokens`, matching vLLM 0.30.
 
 ### Fixed
 
+- vLLM engine: the in-process engine starts on vLLM 0.30 again; it failed at construction with
+  `unexpected keyword argument 'swap_space'`.
 - Serving: a chat reply that hits `max_tokens` now reports `finish_reason: "length"` even when it
   contains tool calls, so truncated tool-call arguments are no longer reported as `tool_calls`.
 - Serving: a streaming request whose generation fails now ends with an SSE error event and
