@@ -430,7 +430,18 @@ class TestCheckedExtraArgs:
 
     @pytest.mark.parametrize(
         "arg",
-        ["--port", "--port=9000", "--served-model-name", "--served_model_name=x"],
+        [
+            "--port",
+            "--port=9000",
+            "--served-model-name",
+            "--served_model_name=x",
+            "--host",
+            "--host=0.0.0.0",
+            "--uds",
+            "--uds=/tmp/vllm.sock",
+            "--api-key",
+            "--api-key=secret",
+        ],
     )
     def test_reserved_flags_rejected(self, arg: str) -> None:
         from llm_infer.engines.vllm_server import _checked_extra_args

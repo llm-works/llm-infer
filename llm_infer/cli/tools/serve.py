@@ -280,7 +280,7 @@ class ServeTool(Tool):
             )
             return False
         server_cfg = config.engines.vllm_server
-        server_cfg.extra_args = [*server_cfg.extra_args, *engine_args]
+        server_cfg.extra_args = [*(server_cfg.extra_args or []), *engine_args]
         return True
 
     def _parse_overrides(self) -> dict[str, str] | None:

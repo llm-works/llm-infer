@@ -46,7 +46,15 @@ if TYPE_CHECKING:
 
 
 # `vllm serve` flags llm-infer sets itself and relies on to reach the server
-_RESERVED_SERVE_FLAGS = ("--port", "--served-model-name")
+# --host and --uds would make the server bind elsewhere while we connect to config
+# --api-key would require llm-infer's httpx client to authenticate (not yet supported)
+_RESERVED_SERVE_FLAGS = (
+    "--port",
+    "--served-model-name",
+    "--host",
+    "--uds",
+    "--api-key",
+)
 
 
 def _checked_extra_args(extra_args: list[Any]) -> list[str]:
@@ -67,7 +75,7 @@ def _checked_extra_args(extra_args: list[Any]) -> list[str]:
     if reserved:
         raise ValueError(
             f"extra_args cannot set {', '.join(reserved)}: llm-infer manages "
-            "them, use the port / served_model_name config instead"
+            "these; use the host / port / served_model_name config instead"
         )
     return args
 
