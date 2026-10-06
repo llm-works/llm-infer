@@ -65,6 +65,12 @@ class ServeTool(Tool):
             dest="overrides",
             help="Override config value (e.g. -o engines.vllm.gpu_memory_utilization=0.1)",
         )
+        parser.add_argument(
+            "engine_args",
+            nargs="*",
+            metavar="-- VLLM_SERVE_ARGS",
+            help="Arguments after -- are passed to `vllm serve` (vllm-server only)",
+        )
 
     def _get_raw_config(self) -> dict:
         """Get raw config dict from app (loaded by appinfra, respects --etc-dir)."""
@@ -252,8 +258,30 @@ class ServeTool(Tool):
             return 1
 
         self._apply_cli_overrides(config, model_path)
+        if not self._apply_engine_args(config):
+            return 1
         run_server(self.lg, config)
         return 0
+
+    def _apply_engine_args(self, config: Any) -> bool:
+        """Append arguments given after `--` to the vllm-server engine's extra_args.
+
+        Returns False (after logging) for any other engine, where they would
+        otherwise be ignored without notice.
+        """
+        engine_args = self.args.engine_args
+        if not engine_args:
+            return True
+        engine = config.backends.engine
+        if engine != "vllm-server":
+            self.lg.error(
+                "arguments after -- are only supported by the vllm-server engine",
+                extra={"engine": engine, "args": engine_args},
+            )
+            return False
+        server_cfg = config.engines.vllm_server
+        server_cfg.extra_args = [*server_cfg.extra_args, *engine_args]
+        return True
 
     def _parse_overrides(self) -> dict[str, str] | None:
         """Parse -o key=value arguments into a dict."""

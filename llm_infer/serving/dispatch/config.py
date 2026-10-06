@@ -346,6 +346,10 @@ class VLLMServerConfig:
     # e.g., {"enable_thinking": false} for Qwen 3.5 to suppress CoT output
     chat_template_kwargs: dict[str, Any] = field(default_factory=dict)
 
+    # Extra `vllm serve` arguments, appended last (CLI: `llm-infer serve ... -- <args>`)
+    # e.g., ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}']
+    extra_args: list[str] = field(default_factory=list)
+
     # Warmup
     warmup: bool = True
 

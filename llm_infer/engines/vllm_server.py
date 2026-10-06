@@ -45,6 +45,31 @@ if TYPE_CHECKING:
     from ..serving.dispatch.config import VLLMServerConfig
 
 
+# `vllm serve` flags llm-infer sets itself and relies on to reach the server
+_RESERVED_SERVE_FLAGS = ("--port", "--served-model-name")
+
+
+def _checked_extra_args(extra_args: list[Any]) -> list[str]:
+    """Validate user-supplied `vllm serve` arguments and return them as strings.
+
+    Values are stringified because YAML lists turn numbers into ints. Option
+    names are compared the way vLLM's parser reads them: `--x=v` and
+    underscores (`--served_model_name`) included.
+    """
+    if isinstance(extra_args, str):
+        raise ValueError(f"extra_args must be a list, got a string: {extra_args!r}")
+    args = [str(a) for a in extra_args]
+    reserved = [
+        a for a in args if a.split("=", 1)[0].replace("_", "-") in _RESERVED_SERVE_FLAGS
+    ]
+    if reserved:
+        raise ValueError(
+            f"extra_args cannot set {', '.join(reserved)}: llm-infer manages "
+            "them, use the port / served_model_name config instead"
+        )
+    return args
+
+
 def _get_adapter_name(lora_request: Any) -> str:
     """Extract adapter name from a LoRA request object."""
     if hasattr(lora_request, "lora_name"):
@@ -530,6 +555,17 @@ class VLLMServerEngine:
         cmd.extend(["--served-model-name", self._model_name])
 
         self._add_engine_flags(cmd)
+        self._add_chat_flags(cmd)
+        self._add_lora_flags(cmd)
+
+        # Last, so user arguments win over the flags above
+        cmd.extend(_checked_extra_args(cfg.extra_args))
+
+        return cmd
+
+    def _add_chat_flags(self, cmd: list[str]) -> None:
+        """Add tool-calling, reasoning and chat-template flags to command."""
+        cfg = self._config
 
         # Tool calling
         cmd.append("--enable-auto-tool-choice")
@@ -547,10 +583,6 @@ class VLLMServerEngine:
                     json.dumps(cfg.chat_template_kwargs),
                 ]
             )
-
-        self._add_lora_flags(cmd)
-
-        return cmd
 
     def _start_server(self) -> None:
         """Start the vLLM server process."""
