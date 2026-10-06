@@ -56,6 +56,8 @@ def _checked_extra_args(extra_args: list[Any]) -> list[str]:
     names are compared the way vLLM's parser reads them: `--x=v` and
     underscores (`--served_model_name`) included.
     """
+    if extra_args is None:
+        return []
     if isinstance(extra_args, str):
         raise ValueError(f"extra_args must be a list, got a string: {extra_args!r}")
     args = [str(a) for a in extra_args]

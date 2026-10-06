@@ -459,3 +459,9 @@ class TestCheckedExtraArgs:
 
         args = ["--port-range", "1"]
         assert _checked_extra_args(args) == args
+
+    def test_none_returns_empty_list(self) -> None:
+        """YAML `extra_args: null` or `extra_args:` (no value) yields None."""
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        assert _checked_extra_args(None) == []  # type: ignore[arg-type]
