@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- vLLM server engine: pass any `vllm serve` argument through `llm-infer serve ... -- <args>`
+  or the `extra_args` config list; `--port` and `--served-model-name` are rejected.
+
 ### Changed
 
 - Serving: a chat request without `max_tokens` now generates up to the remaining context window

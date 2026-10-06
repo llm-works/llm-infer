@@ -359,6 +359,14 @@ class TestVLLMServerStreamingFinishReason:
         assert it.finish_reason == "tool_calls"
 
 
+_EXTRA_ARGS = (
+    "--speculative-config",
+    '{"method": "mtp", "num_speculative_tokens": 3}',
+    "--max-num-batched-tokens",
+    "8192",
+)
+
+
 class TestBuildServeCommand:
     """_build_serve_command() must only emit flags `vllm serve` accepts."""
 
@@ -378,6 +386,7 @@ class TestBuildServeCommand:
             reasoning_parser="qwen3",
             chat_template_kwargs={"enable_thinking": False},
             lora=LoRAConfig(enabled=True),
+            extra_args=list(_EXTRA_ARGS),
         )
         engine._model_name = "test"
         engine._adapter_paths = {"a": "/adapters/a", "b": "/adapters/b"}
@@ -410,3 +419,60 @@ class TestBuildServeCommand:
             "--lora-modules",
         ):
             assert flag in cmd
+
+    def test_extra_args_appended_last(self) -> None:
+        """Extra args come after every flag llm-infer sets, so they win."""
+        assert self._full_command()[-len(_EXTRA_ARGS) :] == list(_EXTRA_ARGS)
+
+
+class TestCheckedExtraArgs:
+    """_checked_extra_args() validates user-supplied `vllm serve` arguments."""
+
+    @pytest.mark.parametrize(
+        "arg",
+        [
+            "--port",
+            "--port=9000",
+            "--served-model-name",
+            "--served_model_name=x",
+            "--host",
+            "--host=0.0.0.0",
+            "--uds",
+            "--uds=/tmp/vllm.sock",
+            "--api-key",
+            "--api-key=secret",
+        ],
+    )
+    def test_reserved_flags_rejected(self, arg: str) -> None:
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        with pytest.raises(ValueError, match="llm-infer manages"):
+            _checked_extra_args([arg, "9000"])
+
+    def test_string_rejected(self) -> None:
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        with pytest.raises(ValueError, match="must be a list"):
+            _checked_extra_args("--enforce-eager")  # type: ignore[arg-type]
+
+    def test_values_stringified(self) -> None:
+        """YAML turns numbers into ints; argv needs strings."""
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        assert _checked_extra_args(["--max-num-batched-tokens", 8192]) == [
+            "--max-num-batched-tokens",
+            "8192",
+        ]
+
+    def test_port_lookalike_allowed(self) -> None:
+        """Only exact reserved names are rejected, not flags sharing a prefix."""
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        args = ["--port-range", "1"]
+        assert _checked_extra_args(args) == args
+
+    def test_none_returns_empty_list(self) -> None:
+        """YAML `extra_args: null` or `extra_args:` (no value) yields None."""
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        assert _checked_extra_args(None) == []  # type: ignore[arg-type]

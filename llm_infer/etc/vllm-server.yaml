@@ -43,6 +43,12 @@ reasoning_parser: null
 # e.g., {enable_thinking: false} for Qwen 3.5 to suppress chain-of-thought
 chat_template_kwargs: {}
 
+# Extra `vllm serve` arguments, appended after the flags above (they win on
+# conflict). Also settable per run: `llm-infer serve ... -- <args>`.
+# --port and --served-model-name are rejected: use port / served_model_name.
+# e.g., [--speculative-config, '{"method": "mtp", "num_speculative_tokens": 3}']
+extra_args: []
+
 # Warmup: Run initial query on startup to ensure model is loaded
 warmup: true
 
