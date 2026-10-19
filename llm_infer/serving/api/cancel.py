@@ -17,6 +17,13 @@ from ..dispatch.types import CancelRequest
 # How long the cancel waits for the engine side's acknowledgement
 CANCEL_ACK_TIMEOUT = 5.0
 
+# The cancel goes through the same IPC channel as requests, which refuses new
+# messages while its pending limit is reached. Slots free up quickly (the
+# handler answers requests beyond its own, smaller limit with 503 at once), so
+# the cancel retries until RETRY_WINDOW has passed.
+CANCEL_RETRY_INTERVAL = 0.1
+CANCEL_RETRY_WINDOW = 30.0
+
 # Strong references: the event loop keeps only weak ones to running tasks
 _pending: set[asyncio.Task[None]] = set()
 
@@ -39,14 +46,24 @@ def send_cancel(lg: Logger, ipc: Any, request_id: str) -> None:
 
 async def _cancel(lg: Logger, ipc: Any, request_id: str) -> None:
     message = CancelRequest(id=f"cancel-{uuid.uuid4().hex}", request_id=request_id)
-    try:
-        ack = await ipc.submit(message, timeout=CANCEL_ACK_TIMEOUT)
-    except Exception as e:
-        lg.warning(
-            "cancel not delivered", extra={"request_id": request_id, "exception": e}
-        )
-        return
+    deadline = asyncio.get_running_loop().time() + CANCEL_RETRY_WINDOW
+    while True:
+        try:
+            ack = await ipc.submit(message, timeout=CANCEL_ACK_TIMEOUT)
+            break
+        except RuntimeError as e:  # IPCChannel's pending limit; channel errors aren't
+            if asyncio.get_running_loop().time() >= deadline:
+                _log_undelivered(lg, request_id, e)
+                return
+            await asyncio.sleep(CANCEL_RETRY_INTERVAL)
+        except Exception as e:
+            _log_undelivered(lg, request_id, e)
+            return
     lg.debug("request cancelled", extra={"request_id": request_id, "found": ack.found})
+
+
+def _log_undelivered(lg: Logger, request_id: str, e: Exception) -> None:
+    lg.warning("cancel not delivered", extra={"request_id": request_id, "exception": e})
 
 
 async def wait_for_disconnect(http_request: HTTPRequest) -> None:

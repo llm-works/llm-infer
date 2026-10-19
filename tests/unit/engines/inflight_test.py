@@ -191,6 +191,16 @@ def test_engine_abort_blocking_call(server: SilentServer) -> None:
     assert server.client_closed.wait(5)
 
 
+def test_engine_forget_abort_clears_abort_without_a_call(server: SilentServer) -> None:
+    """A cancelled request that failed before calling vLLM leaves no state."""
+    engine = _engine(server)
+    engine.abort("r1")
+
+    engine.forget_abort("r1")
+
+    assert not engine._connections.was_aborted("r1")
+
+
 def test_engine_abort_streaming_call(server: SilentServer) -> None:
     from llm_infer.engines.vllm_server import VLLMServerStreamingIterator
 

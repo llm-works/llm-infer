@@ -41,9 +41,13 @@ class _AbortableEngine:
 
     def __init__(self) -> None:
         self.aborted: list[str] = []
+        self.forgotten: list[str] = []
 
     def abort(self, request_id: str) -> None:
         self.aborted.append(request_id)
+
+    def forget_abort(self, request_id: str) -> None:
+        self.forgotten.append(request_id)
 
 
 @pytest.fixture
@@ -329,6 +333,9 @@ class TestConcurrentHttpHandlerCancel:
         assert handler._collect_completed() == []
         assert handler.pending_count == 0  # slot free for the next request
         assert "req-1" not in handler._cancelled
+        if abortable:
+            # Abort state dropped even if the work never reached the backend
+            assert engine.forgotten == ["req-1"]
 
     def test_cancel_unknown_request_returns_false(
         self, handler: ConcurrentHttpHandler

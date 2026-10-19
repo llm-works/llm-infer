@@ -941,6 +941,10 @@ class VLLMServerEngine:
         """
         self._connections.abort(request_id)
 
+    def forget_abort(self, request_id: str) -> None:
+        """Drop abort state for a request whose work has ended."""
+        self._connections.release(request_id)
+
     def _verify_adapter_response(
         self, response_model: str, lora_request: Any | None
     ) -> dict[str, Any] | None:

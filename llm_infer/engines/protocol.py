@@ -289,3 +289,11 @@ class AbortableEngineProtocol(Protocol):
     def abort(self, request_id: str) -> None:
         """Abort the request now, or as soon as its call starts."""
         ...
+
+    def forget_abort(self, request_id: str) -> None:
+        """Drop abort state once the request's work has ended.
+
+        Needed when the work ended without reaching the backend (e.g. it failed
+        before its call), which would otherwise leave the abort recorded.
+        """
+        ...

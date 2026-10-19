@@ -139,6 +139,56 @@ async def test_error_response_does_not_cancel() -> None:
     assert ipc.cancelled == []
 
 
+class _FullIPC:
+    """IPC stub at its pending limit for the first `full_for` cancel attempts."""
+
+    def __init__(self, full_for: int) -> None:
+        self._full_for = full_for
+        self.attempts = 0
+        self.cancelled: list[str] = []
+
+    async def submit(self, request: Any, timeout: float | None = None) -> Any:
+        self.attempts += 1
+        if self.attempts <= self._full_for:
+            raise RuntimeError("Max pending requests exceeded (100)")
+        self.cancelled.append(request.request_id)
+        return CancelResponse(id=request.id, found=True)
+
+
+@pytest.fixture
+def fast_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cancel_module, "CANCEL_RETRY_INTERVAL", 0.01)
+    monkeypatch.setattr(cancel_module, "CANCEL_RETRY_WINDOW", 0.5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fast_retry")
+async def test_cancel_retries_while_channel_is_full() -> None:
+    ipc = _FullIPC(full_for=3)
+    lg = MagicMock(spec=Logger)
+
+    cancel_module.send_cancel(lg, ipc, "r1")
+    await _drain_cancels()
+
+    assert ipc.cancelled == ["r1"]
+    assert ipc.attempts == 4
+    lg.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("fast_retry")
+async def test_cancel_gives_up_after_retry_window() -> None:
+    ipc = _FullIPC(full_for=10_000)
+    lg = MagicMock(spec=Logger)
+
+    cancel_module.send_cancel(lg, ipc, "r1")
+    await asyncio.wait_for(_drain_cancels(), timeout=5)
+
+    assert ipc.cancelled == []
+    lg.warning.assert_called_once()
+    assert lg.warning.call_args[0][0] == "cancel not delivered"
+
+
 def _generator(ipc: _IPC) -> ChatStreamingGenerator:
     return ChatStreamingGenerator(MagicMock(spec=Logger), "r1", "model", ipc)
 

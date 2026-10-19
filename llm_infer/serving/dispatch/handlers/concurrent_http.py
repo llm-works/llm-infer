@@ -137,6 +137,8 @@ class ConcurrentHttpHandler(RequestHandler):
             if req_id in self._cancelled:
                 # The caller gave up; nobody reads this response
                 self._cancelled.discard(req_id)
+                if isinstance(self._engine, AbortableEngineProtocol):
+                    self._engine.forget_abort(req_id)
                 continue
             if (response := self._response_from(req_id, future)) is not None:
                 responses.append(response)
