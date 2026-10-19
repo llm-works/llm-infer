@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
@@ -20,6 +23,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -30,8 +35,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff mypy types-PyYAML
+          python -m pip install ruff mypy types-PyYAML zizmor==1.31.1 actionlint-py==1.7.12.25
           python -m pip install "appinfra @ git+https://github.com/llm-works/appinfra.git@develop"
+
+      - name: Lint workflows
+        # zizmor policy in .github/zizmor.yml; actionlint runs shellcheck on run: scripts
+        run: |
+          zizmor --offline .github/workflows/
+          actionlint
 
       - name: Check SPDX headers
         run: python -m appinfra.cli.cli -l error cq spdx
@@ -57,6 +68,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -96,7 +109,7 @@ jobs:
 
     services:
       ollama:
-        image: ollama/ollama:latest
+        image: ollama/ollama:0.40.6
         ports:
           - 11434:11434
         options: >-
@@ -108,6 +121,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -137,9 +152,11 @@ jobs:
           python -c "from llm_infer.client import Factory, FallbackClient, LLMRouter, EmbeddingClient; import llm_infer; print('llm_infer', llm_infer.__version__)"
 
       - name: Pull Ollama model
+        env:
+          OLLAMA_CONTAINER: ${{ job.services.ollama.id }}
         run: |
           # Use ollama CLI (blocking) instead of async curl to ensure model is ready
-          docker exec $(docker ps -q --filter ancestor=ollama/ollama:latest) ollama pull qwen2.5:0.5b
+          docker exec "$OLLAMA_CONTAINER" ollama pull qwen2.5:0.5b
           curl http://localhost:11434/api/tags | jq .
 
       - name: Start llm-infer server
@@ -149,7 +166,7 @@ jobs:
         run: |
           llm-infer serve --model qwen2.5:0.5b &
           SERVER_PID=$!
-          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
           for i in {1..60}; do
             if curl -s http://localhost:8000/health | grep -q '"status":"ok"'; then
               echo "Server is ready"
@@ -180,7 +197,7 @@ jobs:
         if: always()
         run: |
           if [ -n "$SERVER_PID" ]; then
-            kill $SERVER_PID 2>/dev/null || true
+            kill "$SERVER_PID" 2>/dev/null || true
           fi
 
   # Every example script, each run as its `# ci-run:` / `# ci-skip:` header
@@ -248,6 +265,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
