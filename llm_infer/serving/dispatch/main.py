@@ -277,9 +277,11 @@ class BootSequence:
             self._run_shutdown_step("in-flight requests", self._join_handler)
 
         if self._server and self._server.is_running:
-            self._lg.debug("stopping server...")
-            self._server.stop(timeout=self._config.dispatch.server_stop_timeout)
-            self._lg.info("server stopped")
+            server = self._server
+            self._run_shutdown_step(
+                "server",
+                lambda: server.stop(timeout=self._config.dispatch.server_stop_timeout),
+            )
 
         for q in (self._request_q, self._response_q):
             q.cancel_join_thread()

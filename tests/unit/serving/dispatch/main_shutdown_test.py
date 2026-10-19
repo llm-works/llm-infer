@@ -75,3 +75,17 @@ def test_unfinished_in_flight_calls_are_logged() -> None:
         "in-flight requests still running at shutdown", extra={"timeout": 1.5}
     )
     recorder.server.stop.assert_called_once()
+
+
+def test_server_stop_failure_does_not_skip_queue_detach() -> None:
+    boot, recorder = _boot_with_mocks()
+    recorder.server.stop.side_effect = RuntimeError("server stuck")
+
+    boot.shutdown()
+
+    recorder.request_q.cancel_join_thread.assert_called_once()
+    recorder.response_q.cancel_join_thread.assert_called_once()
+    boot._lg.warning.assert_any_call(
+        "shutdown error",
+        extra={"step": "server", "exception": recorder.server.stop.side_effect},
+    )
