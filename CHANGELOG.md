@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (5 s, was a fixed 15 s).
 - Serving: a request rejected at capacity returns 503 again (was 500); other failed non-streaming
   requests return 500 with the error message.
+- vLLM server engine: a request that times out (504) or whose client disconnects is aborted in
+  vLLM and frees its slot at once, instead of generating until done.
 
 ## [0.7.1] - 2026-09-08
 

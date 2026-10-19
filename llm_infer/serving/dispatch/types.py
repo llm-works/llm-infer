@@ -136,6 +136,25 @@ def refusal_message(
 
 
 @dataclass
+class CancelRequest:
+    """Stop work on an inference request the API side gave up on (queue message).
+
+    Sent when a client's request timed out or the client disconnected.
+    """
+
+    id: str  # Id of this message (for the acknowledgement)
+    request_id: str  # Id of the inference request to cancel
+
+
+@dataclass
+class CancelResponse:
+    """Acknowledges a CancelRequest (queue message)."""
+
+    id: str
+    found: bool  # False: already finished, or unknown
+
+
+@dataclass
 class MetricsRequest:
     """Request for server metrics (sent from API subprocess)."""
 

@@ -13,6 +13,7 @@ import pytest
 
 from llm_infer.serving.dispatch.processors import (
     AdapterProcessor,
+    CancelProcessor,
     EmbeddingProcessor,
     InferenceProcessor,
     MetricsProcessor,
@@ -23,6 +24,8 @@ from llm_infer.serving.dispatch.types import (
     AdapterListResponse,
     AdapterRefreshRequest,
     AdapterRefreshResponse,
+    CancelRequest,
+    CancelResponse,
     EmbeddingRequest,
     EmbeddingResponse,
     MetricsRequest,
@@ -284,6 +287,31 @@ def test_inference_submit_rejected() -> None:
     assert resp.status == RequestStatus.REJECTED
     # An `error` would make appinfra's channel raise ChannelError (500, not 503)
     assert resp.error is None
+
+
+@pytest.mark.parametrize("found", [True, False])
+def test_cancel_processor_cancels_and_acknowledges(found: bool) -> None:
+    handler = MagicMock()
+    handler.cancel.return_value = found
+    q = ResponseQueueFake()
+
+    CancelProcessor().handle(CancelRequest(id="c1", request_id="r1"), handler, q)
+
+    handler.cancel.assert_called_once_with("r1")
+    assert q.items == [CancelResponse(id="c1", found=found)]
+
+
+def test_chain_routes_cancel_to_cancel_processor() -> None:
+    handler = MagicMock()
+    handler.cancel.return_value = True
+    q = ResponseQueueFake()
+
+    create_request_processor_chain().process(
+        CancelRequest(id="c1", request_id="r1"), handler, q
+    )
+
+    handler.cancel.assert_called_once_with("r1")
+    handler.submit.assert_not_called()
 
 
 def test_inference_submit_rejected_streaming_sends_error_chunk() -> None:

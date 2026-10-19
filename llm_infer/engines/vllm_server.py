@@ -30,13 +30,14 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import httpx
 from appinfra.log import Logger
 
 from ..schemas.openai import FinishReason
 from .finish import parse_finish_reason
+from .inflight import InFlightConnections, RequestAbortedError
 from .vllm_common import resolve_gpu_memory_utilization
 
 if TYPE_CHECKING:
@@ -145,6 +146,7 @@ class VLLMServerStreamingIterator:
         max_model_len: int | None,
         lora_request: Any | None = None,
         adapter_metadata: dict[str, str] | None = None,
+        abort_scope: tuple[InFlightConnections, str] | None = None,
     ) -> None:
         self._lg = lg
         self._client = client
@@ -153,6 +155,8 @@ class VLLMServerStreamingIterator:
         self._max_model_len = max_model_len
         self._lora_request = lora_request
         self._adapter_metadata = adapter_metadata or {}
+        # (connections, request_id): makes the stream abortable; None: not abortable
+        self._abort_scope = abort_scope
         self._init_state()
 
     def _init_state(self) -> None:
@@ -180,12 +184,18 @@ class VLLMServerStreamingIterator:
 
     def _start_stream(self) -> None:
         """Start the streaming request."""
+        extensions = None
+        if self._abort_scope is not None:
+            connections, request_id = self._abort_scope
+            extensions = connections.extensions(request_id)
         self._stream_context = self._client.stream(
-            "POST", self._url, json=self._payload
+            "POST", self._url, json=self._payload, extensions=extensions
         )
-        self._response = self._stream_context.__enter__()
         try:
+            self._response = self._stream_context.__enter__()
             self._response.raise_for_status()
+        except httpx.HTTPError as e:
+            self._fail_transport(e)
         except Exception:
             self._cleanup()
             raise
@@ -209,6 +219,9 @@ class VLLMServerStreamingIterator:
                 self._lg.debug("cleanup exception suppressed", extra={"exception": e})
             self._stream_context = None
             self._response = None
+            if self._abort_scope is not None:
+                connections, request_id = self._abort_scope
+                connections.release(request_id)
 
     def __del__(self) -> None:
         self._cleanup()
@@ -388,6 +401,23 @@ class VLLMServerStreamingIterator:
             self._finished = True
             self._cleanup()
             raise RuntimeError(f"vLLM server returned malformed JSON: {e}") from e
+        except httpx.HTTPError as e:
+            self._fail_transport(e)
+
+    def _fail_transport(self, e: httpx.HTTPError) -> NoReturn:
+        """End the stream after a transport error.
+
+        Raises RequestAbortedError if the error came from abort(), else e.
+        """
+        aborted = False
+        if self._abort_scope is not None:
+            connections, request_id = self._abort_scope
+            aborted = connections.was_aborted(request_id)
+        self._finished = True
+        self._cleanup()
+        if aborted:
+            raise RequestAbortedError("streaming request aborted") from e
+        raise e
 
 
 class VLLMServerEngine:
@@ -427,11 +457,22 @@ class VLLMServerEngine:
         # Cached from /v1/models query during connection verification
         self._max_model_len: int | None = None
 
-        self._client = httpx.Client(
+        self._connections = InFlightConnections()
+        self._client = self._create_client(config)
+        self._initialize_connection()
+
+    def _create_client(self, config: VLLMServerConfig) -> httpx.Client:
+        """HTTP client for the vLLM server.
+
+        No keep-alive: each request gets its own connection, so it can be
+        aborted on its own (InFlightConnections). A localhost connect per
+        request is negligible next to generation time.
+        """
+        return httpx.Client(
             base_url=self._base_url,
             timeout=httpx.Timeout(config.timeout, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=0),
         )
-        self._initialize_connection()
 
     def _parse_base_url(self, config: VLLMServerConfig) -> str:
         """Parse and normalize host URL to avoid double-port issues."""
@@ -864,20 +905,45 @@ class VLLMServerEngine:
         except Exception:
             return str(response.text)
 
-    def _post_chat_completions(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """POST to /v1/chat/completions with error handling."""
+    def _post_chat_completions(
+        self, payload: dict[str, Any], request_id: str | None
+    ) -> dict[str, Any]:
+        """POST to /v1/chat/completions with error handling.
+
+        request_id (None: not abortable) makes the call abortable via abort().
+        """
+        extensions = self._connections.extensions(request_id) if request_id else None
         try:
-            response = self._client.post("/v1/chat/completions", json=payload)
+            response = self._client.post(
+                "/v1/chat/completions", json=payload, extensions=extensions
+            )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             detail = self._extract_error_detail(e.response)
             self._lg.error("generate request failed", extra={"detail": detail})
             raise RuntimeError(f"vLLM server error: {detail}") from e
         except httpx.HTTPError as e:
+            if request_id and self._connections.was_aborted(request_id):
+                raise RequestAbortedError(f"request {request_id} aborted") from e
             self._lg.error("generate request failed", extra={"exception": e})
             raise RuntimeError(f"vLLM server generate failed: {e}") from e
+        finally:
+            if request_id:
+                self._connections.release(request_id)
         result: dict[str, Any] = response.json()
         return result
+
+    def abort(self, request_id: str) -> None:
+        """Abort the in-flight call for request_id; vLLM sees a disconnect.
+
+        The blocked call raises RequestAbortedError. A call that hasn't
+        connected yet is aborted as soon as it does.
+        """
+        self._connections.abort(request_id)
+
+    def forget_abort(self, request_id: str) -> None:
+        """Drop abort state for a request whose work has ended."""
+        self._connections.release(request_id)
 
     def _verify_adapter_response(
         self, response_model: str, lora_request: Any | None
@@ -997,7 +1063,7 @@ class VLLMServerEngine:
         if top_k > 0:
             payload["top_k"] = top_k
 
-        data = self._post_chat_completions(payload)
+        data = self._post_chat_completions(payload, context.id if context else None)
         return self._parse_completion_response(data, lora_request, max_tokens)
 
     def generate_stream_sync(
@@ -1046,6 +1112,7 @@ class VLLMServerEngine:
             self._max_model_len,
             lora_request,
             self._get_adapter_metadata(lora_request),
+            abort_scope=(self._connections, context.id) if context else None,
         )
 
     # -------------------------------------------------------------------------

@@ -16,6 +16,8 @@ from .types import (
     AdapterListResponse,
     AdapterRefreshRequest,
     AdapterRefreshResponse,
+    CancelRequest,
+    CancelResponse,
     EmbeddingRequest,
     EmbeddingResponse,
     MetricsRequest,
@@ -86,6 +88,22 @@ class RequestProcessor(ABC):
             self.handle(request, handler, response_q)
         else:
             self.process_next(request, handler, response_q)
+
+
+class CancelProcessor(RequestProcessor):
+    """Handles CancelRequest by cancelling the inference request in the handler."""
+
+    def can_process(self, request: Any) -> bool:
+        return isinstance(request, CancelRequest)
+
+    def handle(
+        self,
+        request: CancelRequest,
+        handler: RequestHandler,
+        response_q: mp.Queue[Any],
+    ) -> None:
+        found = handler.cancel(request.request_id)
+        response_q.put(CancelResponse(id=request.id, found=found))
 
 
 class MetricsProcessor(RequestProcessor):
@@ -244,13 +262,14 @@ def create_request_processor_chain() -> RequestProcessor:
     """Create the default request processor chain.
 
     Chain order:
-    1. MetricsProcessor - handles metrics requests
-    2. AdapterProcessor - handles adapter management requests
-    3. EmbeddingProcessor - handles embedding requests
-    4. InferenceProcessor - handles inference requests (default)
+    1. CancelProcessor - handles cancellation of inference requests
+    2. MetricsProcessor - handles metrics requests
+    3. AdapterProcessor - handles adapter management requests
+    4. EmbeddingProcessor - handles embedding requests
+    5. InferenceProcessor - handles inference requests (default)
     """
-    chain = MetricsProcessor()
-    chain.set_next(AdapterProcessor()).set_next(EmbeddingProcessor()).set_next(
-        InferenceProcessor()
-    )
+    chain = CancelProcessor()
+    chain.set_next(MetricsProcessor()).set_next(AdapterProcessor()).set_next(
+        EmbeddingProcessor()
+    ).set_next(InferenceProcessor())
     return chain

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
@@ -14,6 +15,7 @@ from appinfra.log import Logger
 from appinfra.service.errors import ChannelError
 
 from ....schemas.openai import AdapterInfoResponse, FinishReason, Role
+from ..cancel import send_cancel
 from .streaming import (
     create_chat_chunk,
     create_completion_chunk,
@@ -116,30 +118,42 @@ class StreamingGenerator(ABC):
         if header := self.create_header_chunk():
             yield header
 
-        finish_reason, tool_calls, adapter, completion_tokens = (
-            FinishReason.STOP,
-            None,
-            None,
-            None,
-        )
+        final: Any = None
         try:
             async for chunk in self.ipc.submit_stream(internal_request):
                 if chunk.is_final:
-                    finish_reason = _map_finish_reason(chunk.finish_reason)
-                    completion_tokens = getattr(chunk, "completion_tokens", None)
-                    tool_calls = getattr(chunk, "tool_calls", None)
-                    adapter = _extract_adapter_info(chunk)
+                    final = chunk
                     break
                 if chunk.token and (content := self.create_content_chunk(chunk.token)):
                     yield content
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected: Starlette cancels or closes this stream
+            send_cancel(self._lg, self.ipc, internal_request.id)
+            raise
         except (TimeoutError, ChannelError) as e:
+            if isinstance(e, TimeoutError):
+                send_cancel(self._lg, self.ipc, internal_request.id)
             for event in self._handle_ipc_error(e):
                 yield event
             return
 
-        finish_reason = self._adjust_finish_reason(finish_reason, completion_tokens)
-        yield self.create_final_chunk(finish_reason, tool_calls, adapter)
+        yield self._final_event(final)
         yield format_sse_done()
+
+    def _final_event(self, final: Any) -> str:
+        """Final SSE chunk from the engine's final chunk (None: stream just ended)."""
+        if final is None:
+            stop = self._adjust_finish_reason(FinishReason.STOP, None)
+            return self.create_final_chunk(stop, None, None)
+        finish_reason = self._adjust_finish_reason(
+            _map_finish_reason(final.finish_reason),
+            getattr(final, "completion_tokens", None),
+        )
+        return self.create_final_chunk(
+            finish_reason,
+            getattr(final, "tool_calls", None),
+            _extract_adapter_info(final),
+        )
 
 
 class ChatStreamingGenerator(StreamingGenerator):

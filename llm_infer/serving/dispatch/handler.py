@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from ...context import Event, RequestContext
+from ...engines.inflight import RequestAbortedError
 from ...schemas.openai import FinishReason
 from ..adapters import validate_adapter_key
 from .types import Request, RequestStatus, Response, ResponseAdapterInfo, StreamChunk
@@ -189,6 +190,14 @@ class RequestHandler(ABC):
         Returns True if nothing is left running.
         """
         return True
+
+    def cancel(self, request_id: str) -> bool:
+        """Stop work on a request whose caller has given up. Must not block.
+
+        No response is sent for a cancelled request. Returns True if the
+        request was found queued or running. Default: not supported.
+        """
+        return False
 
     # -------------------------------------------------------------------------
     # Template Method: Request Processing (shared by all handlers)
@@ -674,6 +683,9 @@ class RequestHandler(ABC):
                     id=request.id, token="", is_final=True, error=str(e)
                 )
                 self._response_q.put(error_chunk)
+            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
+        except RequestAbortedError as e:
+            # Cancelled by the API side, which no longer reads this stream
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
         except Exception as e:
             if self._response_q is not None:
