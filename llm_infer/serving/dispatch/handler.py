@@ -176,6 +176,20 @@ class RequestHandler(ABC):
         """The inference engine used by this handler."""
         pass
 
+    def shutdown(self) -> None:
+        """Stop accepting requests and answer pending ones. Must not block.
+
+        Default: nothing to do. Handlers that run requests in step() on the
+        engine loop thread have none running once the loop has exited.
+        """
+
+    def join(self, timeout: float) -> bool:
+        """Wait up to `timeout` seconds for work still running after shutdown().
+
+        Returns True if nothing is left running.
+        """
+        return True
+
     # -------------------------------------------------------------------------
     # Template Method: Request Processing (shared by all handlers)
     # -------------------------------------------------------------------------

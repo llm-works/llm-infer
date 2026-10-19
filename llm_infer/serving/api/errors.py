@@ -9,15 +9,22 @@ Provides consistent HTTP error responses for internal request statuses.
 from typing import Any
 
 from appinfra.log import Logger
+from appinfra.service.errors import ChannelClosedError, ChannelError
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from ..dispatch.types import RequestStatus
 
 # Status -> (HTTP code, default message)
+#
+# appinfra's channel raises ChannelError for any response whose `error` field is
+# set, so a response only reaches raise_for_error_status() with `error` unset.
+# Statuses that must keep their own HTTP code are sent without `error` and rely
+# on the default message here.
 _ERROR_MAPPINGS: dict[RequestStatus, tuple[int, str]] = {
     RequestStatus.REJECTED: (503, "Server at capacity"),
     RequestStatus.FAILED: (500, "Internal error"),
+    RequestStatus.UNAVAILABLE: (503, "Server shutting down"),
 }
 
 
@@ -69,28 +76,38 @@ def get_http_status_for_request_status(status: RequestStatus) -> tuple[int, str]
     return _ERROR_MAPPINGS.get(status)
 
 
+def _error_json(status_code: int, message: str, code: str) -> JSONResponse:
+    """Build an OpenAI-style error JSONResponse."""
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"message": message, "type": "server_error", "code": code}},
+    )
+
+
 async def submit_or_timeout(lg: Logger, ipc: Any, request: Any) -> Any | JSONResponse:
-    """Submit request via IPC, returning 504 JSONResponse on timeout.
+    """Submit request via IPC, mapping channel failures to error responses.
+
+    - timeout: 504
+    - channel closed (the server is shutting down): 503
+    - any other ChannelError (raised when the response carries `error`): 500
+      with the error text
 
     Args:
-        lg: Logger for recording timeout errors.
+        lg: Logger for recording IPC failures.
         ipc: The IPC client instance.
         request: The request object to submit (must have .id attribute).
 
     Returns:
-        The response from the IPC call, or a 504 JSONResponse on timeout.
+        The response from the IPC call, or an error JSONResponse.
     """
     try:
         return await ipc.submit(request)
-    except TimeoutError as e:
+    except TimeoutError as e:  # ChannelTimeoutError is a TimeoutError
         lg.warning("IPC timeout", extra={"request_id": request.id, "error": str(e)})
-        return JSONResponse(
-            status_code=504,
-            content={
-                "error": {
-                    "message": str(e),
-                    "type": "server_error",
-                    "code": "timeout",
-                }
-            },
-        )
+        return _error_json(504, str(e), "timeout")
+    except ChannelClosedError as e:
+        lg.warning("IPC closed", extra={"request_id": request.id, "error": str(e)})
+        return _error_json(503, "Server shutting down", "unavailable")
+    except ChannelError as e:
+        lg.warning("request failed", extra={"request_id": request.id, "error": str(e)})
+        return _error_json(500, str(e), "error")

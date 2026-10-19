@@ -476,3 +476,45 @@ class TestCheckedExtraArgs:
         from llm_infer.engines.vllm_server import _checked_extra_args
 
         assert _checked_extra_args(None) == []  # type: ignore[arg-type]
+
+
+class TestVLLMServerStop:
+    """_stop_server escalates to SIGKILL after stop_timeout."""
+
+    def _engine_with_process(self, proc: object, stop_timeout: float) -> object:
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._config = MagicMock(stop_timeout=stop_timeout)
+        engine._process = proc
+        return engine
+
+    def test_sigkill_after_stop_timeout_when_sigterm_ignored(self) -> None:
+        import subprocess
+        import sys
+        import time
+
+        # Ignores SIGTERM like a server stuck in its shutdown; prints once ready
+        script = (
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "print('ready', flush=True); time.sleep(60)"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+        )
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == b"ready"
+        engine = self._engine_with_process(proc, stop_timeout=0.5)
+
+        start = time.monotonic()
+        engine._stop_server()
+        elapsed = time.monotonic() - start
+
+        assert proc.poll() is not None
+        assert 0.5 <= elapsed < 5.0
+        engine._lg.warning.assert_called_once_with(
+            "vllm server did not stop gracefully, force killing"
+        )

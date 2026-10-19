@@ -44,6 +44,7 @@ class RequestStatus(Enum):
     COMPLETED = "completed"
     REJECTED = "rejected"
     FAILED = "failed"
+    UNAVAILABLE = "unavailable"  # Answered without a result: server shutting down
 
 
 @dataclass
@@ -116,6 +117,22 @@ class StreamChunk:
     )
     # LoRA adapter info (when adapter was requested)
     adapter: ResponseAdapterInfo | None = None
+
+
+def refusal_message(
+    request: Request, status: RequestStatus, message: str
+) -> Response | StreamChunk:
+    """Build the message that answers a request without running it.
+
+    Streaming requests get a final chunk carrying `message` as its error; the
+    channel raises it as ChannelError, which the streaming generator turns into
+    an SSE error event. Blocking requests get a bare `status` response: an
+    `error` there would also become a ChannelError and lose the status, whose
+    HTTP code and message come from the API layer's status mapping instead.
+    """
+    if request.stream:
+        return StreamChunk(id=request.id, token="", is_final=True, error=message)
+    return Response(id=request.id, status=status)
 
 
 @dataclass

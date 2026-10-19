@@ -3,6 +3,7 @@
 
 """Unit tests for ConcurrentHttpHandler."""
 
+import threading
 import time
 from collections.abc import Generator
 from concurrent.futures import Future
@@ -11,7 +12,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from llm_infer.serving.dispatch.handlers import ConcurrentHttpHandler
-from llm_infer.serving.dispatch.types import Request, RequestStatus, Response
+from llm_infer.serving.dispatch.types import (
+    Request,
+    RequestStatus,
+    Response,
+    StreamChunk,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -189,8 +195,8 @@ class TestConcurrentHttpHandlerStep:
 class TestConcurrentHttpHandlerShutdown:
     """Tests for shutdown() method."""
 
-    def test_shutdown_fails_queued_requests(self) -> None:
-        """shutdown() fails queued requests that haven't started."""
+    def test_shutdown_answers_queued_requests_unavailable(self) -> None:
+        """shutdown() answers queued requests as UNAVAILABLE, without `error`."""
         handler = ConcurrentHttpHandler(
             _create_mock_engine(), max_pending=10, max_concurrent=1
         )
@@ -198,7 +204,6 @@ class TestConcurrentHttpHandlerShutdown:
         handler.queue.append(_create_request("req-1"))
         handler.queue.append(_create_request("req-2"))
 
-        # Set up response queue to capture failed responses
         response_q = MagicMock()
         handler._response_q = response_q
 
@@ -206,12 +211,30 @@ class TestConcurrentHttpHandlerShutdown:
 
         assert len(handler.queue) == 0
         assert handler._shutdown is True
-        # Should have put 2 failed responses on queue
-        assert response_q.put.call_count == 2
-        for call in response_q.put.call_args_list:
-            response = call[0][0]
-            assert response.status == RequestStatus.FAILED
-            assert "shutting down" in response.error
+        sent = [call[0][0] for call in response_q.put.call_args_list]
+        assert [r.id for r in sent] == ["req-1", "req-2"]
+        for response in sent:
+            assert isinstance(response, Response)
+            assert response.status == RequestStatus.UNAVAILABLE
+            # An `error` would make appinfra's channel raise ChannelError (500)
+            assert response.error is None
+
+    def test_shutdown_answers_streaming_request_with_error_chunk(self) -> None:
+        """A streaming request gets a final chunk carrying the shutdown error."""
+        handler = ConcurrentHttpHandler(_create_mock_engine(), max_concurrent=1)
+        request = _create_request("req-s")
+        request.stream = True
+        handler.queue.append(request)
+        response_q = MagicMock()
+        handler._response_q = response_q
+
+        handler.shutdown()
+
+        chunk = response_q.put.call_args[0][0]
+        assert isinstance(chunk, StreamChunk)
+        assert chunk.id == "req-s"
+        assert chunk.is_final is True
+        assert chunk.error == "Server shutting down"
 
     def test_shutdown_sets_flag(self, handler: ConcurrentHttpHandler) -> None:
         """shutdown() sets the shutdown flag."""
@@ -219,16 +242,49 @@ class TestConcurrentHttpHandlerShutdown:
 
         assert handler._shutdown is True
 
-    def test_shutdown_waits_for_in_flight(self, handler: ConcurrentHttpHandler) -> None:
-        """shutdown() waits for in-flight requests to complete."""
-        # Submit and promote a request
-        handler.submit(_create_request())
-        handler._promote_to_in_flight()
+    def test_shutdown_does_not_wait_for_blocked_in_flight_call(self) -> None:
+        """shutdown() returns at once while an engine call is still blocked.
 
-        # shutdown() should complete without error (executor.shutdown waits)
+        The in-flight request is answered right away; join() reports the call
+        as running until it returns.
+        """
+        started, release = threading.Event(), threading.Event()
+
+        def blocked_generate(**_: object) -> str:
+            started.set()
+            release.wait(10)
+            return "late"
+
+        engine = _create_mock_engine()
+        engine.generate.side_effect = blocked_generate
+        handler = ConcurrentHttpHandler(engine, max_concurrent=1)
+        response_q = MagicMock()
+        handler._response_q = response_q
+        handler.submit(_create_request("req-1"))
+        handler._promote_to_in_flight()
+        assert started.wait(5), "engine call never started"
+
+        start = time.monotonic()
+        handler.shutdown()
+        elapsed = time.monotonic() - start
+
+        try:
+            assert elapsed < 1.0
+            answer = response_q.put.call_args[0][0]
+            assert answer.id == "req-1"
+            assert answer.status == RequestStatus.UNAVAILABLE
+            assert handler.join(timeout=0.1) is False
+        finally:
+            release.set()
+        assert handler.join(timeout=5.0) is True
+
+    def test_join_without_in_flight_returns_true(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
+        """join() returns True at once when nothing is running."""
         handler.shutdown()
 
-        assert handler._shutdown is True
+        assert handler.join(timeout=0.0) is True
 
 
 class TestConcurrentHttpHandlerProperties:
