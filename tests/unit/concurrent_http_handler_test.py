@@ -5,6 +5,7 @@
 
 import threading
 import time
+from collections import deque
 from collections.abc import Generator
 from concurrent.futures import Future
 from unittest.mock import MagicMock
@@ -353,6 +354,72 @@ class TestConcurrentHttpHandlerCancel:
         handler.shutdown()
 
         response_q.put.assert_not_called()
+
+
+class TestConcurrentHttpHandlerRejection:
+    """rejection(): the answer for a request submit() refused."""
+
+    def test_at_capacity_blocking_is_bare_rejected_status(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
+        resp = handler.rejection(_create_request())
+
+        assert isinstance(resp, Response)
+        assert resp.status == RequestStatus.REJECTED
+        # An `error` would make appinfra's channel raise ChannelError (500, not 503)
+        assert resp.error is None
+
+    def test_at_capacity_streaming_is_error_chunk(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
+        request = _create_request()
+        request.stream = True
+
+        chunk = handler.rejection(request)
+
+        assert isinstance(chunk, StreamChunk)
+        assert chunk.is_final is True
+        assert chunk.error == "Server at capacity"
+
+    def test_suspended_is_released(self, handler: ConcurrentHttpHandler) -> None:
+        handler.suspend()
+
+        resp = handler.rejection(_create_request())
+
+        assert isinstance(resp, Response)
+        assert resp.status == RequestStatus.RELEASED
+
+
+class TestConcurrentHttpHandlerSuspend:
+    """suspend() / resume(): an admin release of the backend."""
+
+    def test_suspend_answers_queued_and_running_and_refuses_new(self) -> None:
+        engine = _AbortableEngine()
+        handler = ConcurrentHttpHandler(engine, max_concurrent=1)
+        response_q = MagicMock()
+        handler._response_q = response_q
+        handler.queue.append(_create_request("queued"))
+        handler.in_flight["running"] = Future()
+        handler._in_flight_requests["running"] = _create_request("running")
+
+        handler.suspend()
+
+        sent = [call[0][0] for call in response_q.put.call_args_list]
+        assert sorted(r.id for r in sent) == ["queued", "running"]
+        assert all(r.status == RequestStatus.RELEASED for r in sent)
+        assert engine.aborted == ["running"]  # its late response is dropped
+        assert handler.queue == deque()
+        assert handler.submit(_create_request("new")) is False
+
+    def test_resume_accepts_again(self, handler: ConcurrentHttpHandler) -> None:
+        handler.suspend()
+
+        handler.resume()
+
+        assert handler.submit(_create_request()) is True
+
+    def test_supports_suspend(self, handler: ConcurrentHttpHandler) -> None:
+        assert handler.supports_suspend is True
 
 
 class TestConcurrentHttpHandlerProperties:

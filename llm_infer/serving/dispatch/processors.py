@@ -24,7 +24,6 @@ from .types import (
     Request,
     RequestStatus,
     Response,
-    refusal_message,
 )
 
 if TYPE_CHECKING:
@@ -253,9 +252,7 @@ class InferenceProcessor(RequestProcessor):
         response_q: mp.Queue[Any],
     ) -> None:
         if not handler.submit(request):
-            response_q.put(
-                refusal_message(request, RequestStatus.REJECTED, "Server at capacity")
-            )
+            response_q.put(handler.rejection(request))
 
 
 def create_request_processor_chain() -> RequestProcessor:

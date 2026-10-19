@@ -278,6 +278,33 @@ class InferenceEngineProtocol(Protocol):
         ...
 
 
+class BackendNotManagedError(RuntimeError):
+    """The engine's backend runs outside serve, which can't stop or start it."""
+
+
+@runtime_checkable
+class ReleasableEngineProtocol(Protocol):
+    """Engine whose backend can be stopped and started again while serve runs.
+
+    Lets an admin free the GPU (e.g. for training) without restarting serve.
+    Both methods block until done and raise BackendNotManagedError when serve
+    doesn't own the backend.
+    """
+
+    @property
+    def manages_backend(self) -> bool:
+        """Whether serve started the backend, and so can stop and start it."""
+        ...
+
+    def release(self) -> None:
+        """Stop the backend; returns once its GPU memory is freed."""
+        ...
+
+    def reacquire(self) -> None:
+        """Start the backend again; returns once it can serve."""
+        ...
+
+
 @runtime_checkable
 class AbortableEngineProtocol(Protocol):
     """Engine that can abort one in-flight request by its id.

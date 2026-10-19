@@ -45,6 +45,7 @@ class RequestStatus(Enum):
     REJECTED = "rejected"
     FAILED = "failed"
     UNAVAILABLE = "unavailable"  # Answered without a result: server shutting down
+    RELEASED = "released"  # Answered without a result: backend released by an admin
 
 
 @dataclass

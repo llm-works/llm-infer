@@ -17,7 +17,14 @@ from ...context import Event, RequestContext
 from ...engines.inflight import RequestAbortedError
 from ...schemas.openai import FinishReason
 from ..adapters import validate_adapter_key
-from .types import Request, RequestStatus, Response, ResponseAdapterInfo, StreamChunk
+from .types import (
+    Request,
+    RequestStatus,
+    Response,
+    ResponseAdapterInfo,
+    StreamChunk,
+    refusal_message,
+)
 
 
 class AdapterError(Exception):
@@ -198,6 +205,26 @@ class RequestHandler(ABC):
         request was found queued or running. Default: not supported.
         """
         return False
+
+    def rejection(self, request: Request) -> Response | StreamChunk:
+        """Answer for a request submit() refused."""
+        return refusal_message(request, RequestStatus.REJECTED, "Server at capacity")
+
+    @property
+    def supports_suspend(self) -> bool:
+        """Whether suspend()/resume() are implemented (for an admin release)."""
+        return False
+
+    def suspend(self) -> None:
+        """Answer queued and running requests as released and refuse new ones.
+
+        Unlike shutdown(), the handler can resume(). Must not block.
+        """
+        raise NotImplementedError(f"{type(self).__name__} can't suspend")
+
+    def resume(self) -> None:
+        """Accept requests again after suspend()."""
+        raise NotImplementedError(f"{type(self).__name__} can't resume")
 
     # -------------------------------------------------------------------------
     # Template Method: Request Processing (shared by all handlers)

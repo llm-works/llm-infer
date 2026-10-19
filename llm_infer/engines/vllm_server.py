@@ -38,6 +38,7 @@ from appinfra.log import Logger
 from ..schemas.openai import FinishReason
 from .finish import parse_finish_reason
 from .inflight import InFlightConnections, RequestAbortedError
+from .protocol import BackendNotManagedError
 from .vllm_common import resolve_gpu_memory_utilization
 
 if TYPE_CHECKING:
@@ -684,34 +685,82 @@ class VLLMServerEngine:
         )
 
     def _stop_server(self) -> None:
-        """Stop the vLLM server process if we started it."""
+        """Stop the vLLM server's process group if we started it.
+
+        Waits until every process of the group has exited, not just `vllm serve`:
+        its EngineCore holds the GPU memory and can outlive it briefly. Escalates
+        to SIGKILL after stop_timeout.
+        """
         if self._process is None:
             return
 
         self._lg.info("stopping vllm server")
-
-        try:
-            os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass  # Already dead, fine
-        except PermissionError as e:
-            self._lg.warning("failed to terminate vllm server", extra={"exception": e})
-
-        try:
-            self._process.wait(timeout=self._config.stop_timeout)
-        except subprocess.TimeoutExpired:
+        pgid = self._process.pid  # start_new_session: the process leads its group
+        self._signal_group(pgid, signal.SIGTERM)
+        if not self._wait_group_exit(pgid, self._config.stop_timeout):
             self._lg.warning("vllm server did not stop gracefully, force killing")
-            try:
-                os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
-                self._process.wait(timeout=5)  # Reap zombie process
-            except ProcessLookupError:
-                pass  # Already dead, fine
-            except PermissionError as e:
+            self._signal_group(pgid, signal.SIGKILL)
+            if not self._wait_group_exit(pgid, 5.0):
                 self._lg.error(
-                    "failed to force kill vllm server", extra={"exception": e}
+                    "vllm server processes still running", extra={"pgid": pgid}
                 )
-
         self._process = None
+
+    def _signal_group(self, pgid: int, sig: signal.Signals) -> None:
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            pass  # Already gone
+        except PermissionError as e:
+            self._lg.warning(
+                "failed to signal vllm server", extra={"signal": sig, "exception": e}
+            )
+
+    def _wait_group_exit(self, pgid: int, timeout: float) -> bool:
+        """Wait up to timeout for process group pgid to be gone; True if it is."""
+        assert self._process is not None
+        deadline = time.monotonic() + timeout
+        while True:
+            self._process.poll()  # Reap our child: a zombie still counts in the group
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.05)
+
+    @property
+    def manages_backend(self) -> bool:
+        """Whether serve started the vLLM server (auto_start), and so owns it."""
+        return self._owns_process
+
+    def release(self) -> None:
+        """Stop the vLLM server serve started, freeing its GPU memory.
+
+        Returns once its processes have exited. Raises BackendNotManagedError
+        for a server serve didn't start (auto_start off, or already running).
+        """
+        if not self._owns_process:
+            raise BackendNotManagedError("vLLM server is not managed by serve")
+        self._stop_server()
+
+    def reacquire(self) -> None:
+        """Start the vLLM server again after release(); returns once it serves.
+
+        A start that fails is stopped again, so nothing is left half-running.
+        """
+        if not self._owns_process:
+            raise BackendNotManagedError("vLLM server is not managed by serve")
+        if self._process is not None:
+            return  # Not released
+        try:
+            self._start_server()
+            self._verify_connection()
+            self._verify_adapters()
+        except Exception:
+            self._stop_server()
+            raise
 
     def _verify_connection(self) -> None:
         """Verify vLLM server is reachable and serving our model."""

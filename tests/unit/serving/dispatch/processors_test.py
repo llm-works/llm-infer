@@ -31,8 +31,6 @@ from llm_infer.serving.dispatch.types import (
     MetricsRequest,
     Request,
     RequestStatus,
-    Response,
-    StreamChunk,
 )
 
 from ._helpers import ResponseQueueFake
@@ -272,21 +270,16 @@ def test_inference_submit_accepted() -> None:
 
 
 def test_inference_submit_rejected() -> None:
-    """If handler rejects, processor emits a REJECTED response."""
+    """If handler rejects, processor emits the handler's rejection."""
     handler = MagicMock()
     handler.submit.return_value = False
     q = ResponseQueueFake()
+    request = Request(id="r1", prompt="hi", max_tokens=100)
 
-    InferenceProcessor().handle(
-        Request(id="r1", prompt="hi", max_tokens=100), handler, q
-    )  # type: ignore[arg-type]
+    InferenceProcessor().handle(request, handler, q)  # type: ignore[arg-type]
 
-    assert len(q.items) == 1
-    resp = q.items[0]
-    assert isinstance(resp, Response)
-    assert resp.status == RequestStatus.REJECTED
-    # An `error` would make appinfra's channel raise ChannelError (500, not 503)
-    assert resp.error is None
+    handler.rejection.assert_called_once_with(request)
+    assert q.items == [handler.rejection.return_value]
 
 
 @pytest.mark.parametrize("found", [True, False])
@@ -312,23 +305,6 @@ def test_chain_routes_cancel_to_cancel_processor() -> None:
 
     handler.cancel.assert_called_once_with("r1")
     handler.submit.assert_not_called()
-
-
-def test_inference_submit_rejected_streaming_sends_error_chunk() -> None:
-    """A rejected streaming request gets a final chunk carrying the error."""
-    handler = MagicMock()
-    handler.submit.return_value = False
-    q = ResponseQueueFake()
-
-    InferenceProcessor().handle(
-        Request(id="r1", prompt="hi", max_tokens=100, stream=True), handler, q
-    )
-
-    assert len(q.items) == 1
-    chunk = q.items[0]
-    assert isinstance(chunk, StreamChunk)
-    assert chunk.is_final is True
-    assert chunk.error == "Server at capacity"
 
 
 # ---------------------------------------------------------------------------

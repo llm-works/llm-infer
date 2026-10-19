@@ -16,7 +16,7 @@ Run as a script, never imported by pytest collection:
     _serve_procs.py serve <model_path> <api_port> <vllm_port> <vllm_binary> <options>
         Runs llm-infer serve with the vllm-server engine against the stand-in.
         <options> is JSON: auto_start (bool; false: connect to a running one),
-        response_timeout (s), max_concurrent.
+        response_timeout (s), max_concurrent, admin (the admin config section).
 """
 
 from __future__ import annotations
@@ -96,9 +96,11 @@ def run_serve(
     from appinfra.log import Logger
 
     from llm_infer.serving.dispatch import InferenceConfig, run_server
+    from llm_infer.serving.dispatch.config import AdminConfig
 
     opts = json.loads(options)
     config = InferenceConfig()
+    config.admin = AdminConfig.model_validate(opts.get("admin", {}))
     config.backends.engine = "vllm-server"
     config.models.path = model_dir
     config.api.host = "127.0.0.1"
