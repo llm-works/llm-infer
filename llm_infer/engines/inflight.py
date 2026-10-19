@@ -45,7 +45,9 @@ class InFlightConnections:
 
         return {"trace": trace}
 
-    def _register(self, request_id: str, sock: socket.socket) -> None:
+    def _register(self, request_id: str, sock: socket.socket | None) -> None:
+        if sock is None:
+            return  # Can't abort without socket access
         with self._lock:
             self._sockets[request_id] = sock
             aborted = request_id in self._aborted
