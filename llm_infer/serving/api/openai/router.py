@@ -36,7 +36,7 @@ from ....schemas.openai import (
     Role,
     ToolCall,
 )
-from ..errors import raise_for_error_status, submit_or_timeout
+from ..errors import raise_for_error_status, submit_inference, submit_or_timeout
 from .mappers import (
     chat_request_to_internal,
     completion_request_to_internal,
@@ -243,11 +243,12 @@ async def _handle_chat_non_streaming(
     body: ChatCompletionRequest,
     model_name: str,
     ipc: Any,
+    http_request: Request,
     model_config: ModelConfig | None = None,
 ) -> ChatCompletionResponse | JSONResponse:
     """Handle non-streaming chat completion request."""
     internal_request = chat_request_to_internal(body, request_id, model_config)
-    response = await submit_or_timeout(lg, ipc, internal_request)
+    response = await submit_inference(lg, ipc, internal_request, http_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -305,10 +306,11 @@ async def _handle_completion_non_streaming(
     body: CompletionRequest,
     model_name: str,
     ipc: Any,
+    http_request: Request,
 ) -> CompletionResponse | JSONResponse:
     """Handle non-streaming legacy completion request."""
     internal_request = completion_request_to_internal(body, request_id)
-    response = await submit_or_timeout(lg, ipc, internal_request)
+    response = await submit_inference(lg, ipc, internal_request, http_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -378,7 +380,7 @@ def _register_chat_completion_routes(
                 lg, request_id, body, model_name, ipc, model_config
             )
         return await _handle_chat_non_streaming(
-            lg, request_id, body, model_name, ipc, model_config
+            lg, request_id, body, model_name, ipc, request, model_config
         )
 
 
@@ -400,7 +402,7 @@ def _register_legacy_completion_routes(router: APIRouter, model_name: str) -> No
                 media_type="text/event-stream",
             )
         return await _handle_completion_non_streaming(
-            lg, request_id, body, model_name, ipc
+            lg, request_id, body, model_name, ipc, request
         )
 
 

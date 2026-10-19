@@ -35,6 +35,17 @@ def _create_mock_engine() -> MagicMock:
     return engine
 
 
+class _AbortableEngine:
+    """Engine stand-in with a real abort() (a MagicMock doesn't satisfy
+    isinstance() against a runtime-checkable protocol on Python 3.12+)."""
+
+    def __init__(self) -> None:
+        self.aborted: list[str] = []
+
+    def abort(self, request_id: str) -> None:
+        self.aborted.append(request_id)
+
+
 @pytest.fixture
 def handler() -> Generator[ConcurrentHttpHandler, None, None]:
     """Create a handler with deterministic cleanup."""
@@ -285,6 +296,56 @@ class TestConcurrentHttpHandlerShutdown:
         handler.shutdown()
 
         assert handler.join(timeout=0.0) is True
+
+
+class TestConcurrentHttpHandlerCancel:
+    """Tests for cancel(): the API side gave up on a request."""
+
+    def test_cancel_queued_request_removes_it(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
+        handler.queue.append(_create_request("req-1"))
+        handler.queue.append(_create_request("req-2"))
+
+        assert handler.cancel("req-1") is True
+
+        assert [r.id for r in handler.queue] == ["req-2"]
+
+    @pytest.mark.parametrize("abortable", [True, False])
+    def test_cancel_in_flight_aborts_and_drops_response(self, abortable: bool) -> None:
+        engine = _AbortableEngine() if abortable else _create_mock_engine()
+        handler = ConcurrentHttpHandler(engine, max_concurrent=1)
+        future: Future[Response] = Future()
+        handler.in_flight["req-1"] = future
+        handler._in_flight_requests["req-1"] = _create_request("req-1")
+
+        assert handler.cancel("req-1") is True
+
+        if abortable:
+            assert engine.aborted == ["req-1"]
+        future.set_result(
+            Response(id="req-1", status=RequestStatus.FAILED, error="aborted")
+        )
+        assert handler._collect_completed() == []
+        assert handler.pending_count == 0  # slot free for the next request
+        assert "req-1" not in handler._cancelled
+
+    def test_cancel_unknown_request_returns_false(
+        self, handler: ConcurrentHttpHandler
+    ) -> None:
+        assert handler.cancel("nope") is False
+
+    def test_shutdown_skips_cancelled_in_flight(self) -> None:
+        handler = ConcurrentHttpHandler(_create_mock_engine(), max_concurrent=1)
+        handler.in_flight["req-1"] = Future()
+        handler._in_flight_requests["req-1"] = _create_request("req-1")
+        handler.cancel("req-1")
+        response_q = MagicMock()
+        handler._response_q = response_q
+
+        handler.shutdown()
+
+        response_q.put.assert_not_called()
 
 
 class TestConcurrentHttpHandlerProperties:

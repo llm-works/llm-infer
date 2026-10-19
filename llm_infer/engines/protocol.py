@@ -276,3 +276,16 @@ class InferenceEngineProtocol(Protocol):
         - Clean up distributed process groups
         """
         ...
+
+
+@runtime_checkable
+class AbortableEngineProtocol(Protocol):
+    """Engine that can abort one in-flight request by its id.
+
+    The id is the RequestContext id passed to generate() / generate_stream_sync().
+    The aborted call raises inflight.RequestAbortedError in the thread running it.
+    """
+
+    def abort(self, request_id: str) -> None:
+        """Abort the request now, or as soon as its call starts."""
+        ...
