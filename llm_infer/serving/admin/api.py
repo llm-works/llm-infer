@@ -23,7 +23,7 @@ import asyncio
 import hmac
 import threading
 
-from appinfra.app.fastapi import ServerBuilder
+from appinfra.app.fastapi import Server, ServerBuilder
 from appinfra.log import Logger
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -88,16 +88,15 @@ class AdminApi:
         return JSONResponse({"state": state.label}, status_code=code)
 
 
-def start(
-    lg: Logger, controller: BackendController, cfg: AdminConfig
-) -> threading.Thread:
-    """Serve the admin API from a daemon thread; it ends with the process.
+STARTUP_SETTLE_TIME = 0.5
 
-    Uvicorn installs no signal handlers outside the main thread, so serve's own
-    SIGINT/SIGTERM handling stays in place.
-    """
-    api = AdminApi(lg, controller, cfg)
-    server = (
+
+class AdminStartupError(Exception):
+    """The admin listener failed to start (e.g., port already in use)."""
+
+
+def _build_server(lg: Logger, api: AdminApi, cfg: AdminConfig) -> Server:
+    return (
         ServerBuilder(lg, "admin")
         .with_host(cfg.host)
         .with_port(cfg.port)
@@ -108,10 +107,29 @@ def start(
         .build()
     )
 
+
+def start(
+    lg: Logger, controller: BackendController, cfg: AdminConfig
+) -> threading.Thread:
+    """Serve the admin API from a daemon thread; it ends with the process.
+
+    Uvicorn installs no signal handlers outside the main thread, so serve's own
+    SIGINT/SIGTERM handling stays in place.
+
+    Raises:
+        AdminStartupError: If uvicorn fails to bind (e.g., port already in use).
+    """
+    api = AdminApi(lg, controller, cfg)
+    server = _build_server(lg, api, cfg)
+    startup_error: list[BaseException] = []
+    failed = threading.Event()
+
     def run() -> None:
         try:
             server.start()
         except BaseException as e:  # uvicorn exits with SystemExit when it can't bind
+            startup_error.append(e)
+            failed.set()
             lg.error(
                 "admin listener failed",
                 extra={"host": cfg.host, "port": cfg.port, "exception": e},
@@ -119,6 +137,10 @@ def start(
 
     thread = threading.Thread(target=run, name="admin-api", daemon=True)
     thread.start()
+    if failed.wait(STARTUP_SETTLE_TIME):
+        raise AdminStartupError(
+            f"admin listener failed to bind {cfg.host}:{cfg.port}"
+        ) from startup_error[0]
     lg.info(
         "admin listener started",
         extra={"host": cfg.host, "port": cfg.port, "tokens": len(cfg.tokens)},

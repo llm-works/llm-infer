@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from appinfra.log import Logger
@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from llm_infer.serving.admin.api import AdminApi
+from llm_infer.serving.admin.api import AdminApi, AdminStartupError, start
 from llm_infer.serving.admin.controller import (
     ReleaseNotSupportedError,
     StateConflictError,
@@ -165,3 +165,22 @@ def test_admin_config_from_dict() -> None:
 def test_admin_config_rejects_bad_section(raw: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         InferenceConfig.from_dict({"admin": raw})
+
+
+# ---------------------------------------------------------------------------
+# start() startup failure propagation
+# ---------------------------------------------------------------------------
+
+
+def test_start_raises_on_bind_failure() -> None:
+    """If uvicorn fails to bind, start() raises AdminStartupError."""
+    cfg = AdminConfig(port=9999, tokens=["t"])
+    controller = MagicMock()
+    lg = MagicMock(spec=Logger)
+
+    mock_server = MagicMock()
+    mock_server.start.side_effect = SystemExit("Address already in use")
+
+    with patch("llm_infer.serving.admin.api._build_server", return_value=mock_server):
+        with pytest.raises(AdminStartupError, match="failed to bind"):
+            start(lg, controller, cfg)
