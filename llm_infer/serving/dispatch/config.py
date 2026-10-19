@@ -47,6 +47,10 @@ class DispatchConfig:
     max_pending: int = 10
     poll_timeout: float = 0.01
     batch_streaming: bool = False  # Allow streaming requests in batched decode
+    # Shutdown: wait for in-flight engine calls after the engine stopped, then
+    # for the HTTP subprocess to exit before it is terminated and killed
+    in_flight_join_timeout: float = 2.0
+    server_stop_timeout: float = 2.0
 
 
 @dataclass
@@ -315,6 +319,9 @@ class VLLMServerConfig:
     binary_path: str = "vllm"
     timeout: int = 300  # Request timeout in seconds
     startup_timeout: int = 300  # Server startup timeout (vllm is slow to load)
+    # Wait after SIGTERM before SIGKILL when stopping an auto-started server.
+    # Keeps the whole serve shutdown inside a service manager's stop timeout.
+    stop_timeout: float = 5.0
 
     # Served model name (alias for API requests, None = use model directory name)
     served_model_name: str | None = None
@@ -490,6 +497,8 @@ class InferenceConfig:
             max_pending=dispatch.get("max_pending", 10),
             poll_timeout=dispatch.get("poll_timeout", 0.01),
             batch_streaming=dispatch.get("batch_streaming", False),
+            in_flight_join_timeout=dispatch.get("in_flight_join_timeout", 2.0),
+            server_stop_timeout=dispatch.get("server_stop_timeout", 2.0),
         )
 
     @classmethod

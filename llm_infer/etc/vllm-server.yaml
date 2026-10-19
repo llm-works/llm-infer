@@ -9,6 +9,7 @@ host: http://localhost
 port: 8100                    # vllm serve port (different from llm-infer API port)
 timeout: 300                  # Request timeout in seconds
 startup_timeout: 300          # Server startup timeout (vllm model loading is slow)
+stop_timeout: 5.0             # Wait after SIGTERM before SIGKILL on shutdown
 
 # Server management
 auto_start: true              # Automatically start `vllm serve` if not running

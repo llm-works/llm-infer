@@ -4,14 +4,17 @@
 """Concurrent HTTP request handler for HTTP-based engines (vLLM server, Ollama)."""
 
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, wait
 from typing import TYPE_CHECKING
 
 from ..handler import RequestHandler
-from ..types import Request, RequestStatus, Response
+from ..types import Request, RequestStatus, Response, refusal_message
+from .daemon_executor import DaemonThreadExecutor
 
 if TYPE_CHECKING:
     from ....engines.protocol import InferenceEngineProtocol
+
+SHUTTING_DOWN_MESSAGE = "Server shutting down"
 
 
 class ConcurrentHttpHandler(RequestHandler):
@@ -57,7 +60,11 @@ class ConcurrentHttpHandler(RequestHandler):
         self.max_concurrent = max_concurrent
         self.queue: deque[Request] = deque()
         self.in_flight: dict[str, Future[Response]] = {}
-        self._executor = ThreadPoolExecutor(
+        # Requests behind in_flight, so shutdown() can answer each in its own form
+        self._in_flight_requests: dict[str, Request] = {}
+        # Daemon workers: a call still blocked at shutdown (e.g. on an external
+        # vLLM server, which shutdown doesn't stop) must not hold up exit
+        self._executor = DaemonThreadExecutor(
             max_workers=max_concurrent, thread_name_prefix="http-handler"
         )
         self._shutdown = False
@@ -100,6 +107,7 @@ class ConcurrentHttpHandler(RequestHandler):
             request = self.queue.popleft()
             future = self._executor.submit(self._process_request_threadsafe, request)
             self.in_flight[request.id] = future
+            self._in_flight_requests[request.id] = request
 
     def _process_request_threadsafe(self, request: Request) -> Response:
         """Process a request in a worker thread.
@@ -145,6 +153,7 @@ class ConcurrentHttpHandler(RequestHandler):
 
         for req_id in completed_ids:
             del self.in_flight[req_id]
+            self._in_flight_requests.pop(req_id, None)
 
         return responses
 
@@ -164,25 +173,29 @@ class ConcurrentHttpHandler(RequestHandler):
         return self._engine
 
     def shutdown(self) -> None:
-        """Graceful shutdown: fail pending requests and wait for in-flight to complete."""
+        """Answer queued and in-flight requests as unavailable; don't wait.
+
+        An in-flight HTTP call can't be interrupted from this thread: closing
+        the httpx client does not wake a read blocked in a worker. The calls end
+        when the engine stops an auto-started server; join() waits for them.
+        Calls on an external server may outlive this; the daemon workers then
+        end with the process.
+        """
         self._shutdown = True
 
-        # Fail queued requests that haven't started
-        failed_responses: list[Response] = []
-        while self.queue:
-            request = self.queue.popleft()
-            failed_responses.append(
-                Response(
-                    id=request.id,
-                    status=RequestStatus.FAILED,
-                    error="Handler shutting down",
-                )
-            )
-
-        # Put failed responses on the queue if available
+        unanswered = [*self.queue, *self._in_flight_requests.values()]
+        self.queue.clear()
         if self._response_q is not None:
-            for response in failed_responses:
-                self._response_q.put(response)
+            for request in unanswered:
+                self._response_q.put(
+                    refusal_message(
+                        request, RequestStatus.UNAVAILABLE, SHUTTING_DOWN_MESSAGE
+                    )
+                )
 
-        # Shutdown executor, waiting for in-flight requests to complete
-        self._executor.shutdown(wait=True, cancel_futures=False)
+        self._executor.shutdown(cancel_futures=True)
+
+    def join(self, timeout: float) -> bool:
+        """Wait up to `timeout` seconds for in-flight calls to return."""
+        _, not_done = wait(list(self.in_flight.values()), timeout=timeout)
+        return not not_done

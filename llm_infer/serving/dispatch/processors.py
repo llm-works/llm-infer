@@ -22,6 +22,7 @@ from .types import (
     Request,
     RequestStatus,
     Response,
+    refusal_message,
 )
 
 if TYPE_CHECKING:
@@ -235,11 +236,7 @@ class InferenceProcessor(RequestProcessor):
     ) -> None:
         if not handler.submit(request):
             response_q.put(
-                Response(
-                    id=request.id,
-                    status=RequestStatus.REJECTED,
-                    error="Server at capacity",
-                )
+                refusal_message(request, RequestStatus.REJECTED, "Server at capacity")
             )
 
 

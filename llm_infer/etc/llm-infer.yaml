@@ -62,6 +62,12 @@ dispatch:
   # - false: Streaming requests run sequentially (default, lowest latency for single stream)
   batch_streaming: true
 
+  # Shutdown (seconds). Requests still pending are answered with 503 at once.
+  # The whole stop must fit the service manager's stop timeout
+  # (e.g. systemd TimeoutStopSec), together with the engine's stop_timeout.
+  in_flight_join_timeout: 2.0   # Wait for in-flight engine calls after the engine stopped
+  server_stop_timeout: 2.0      # Wait for the HTTP subprocess before terminate/kill
+
 # API configuration
 api:
   host: 0.0.0.0

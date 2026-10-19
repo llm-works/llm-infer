@@ -6,6 +6,7 @@
 import multiprocessing as mp
 import signal
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -252,35 +253,56 @@ class BootSequence:
             self.shutdown()
 
     def shutdown(self) -> None:
-        """Clean shutdown of all components.
+        """Stop all components within a bounded time, without draining requests.
 
-        Shutdown order (reverse of boot):
+        Order:
         1. Stop memory ticker
-        2. Shutdown handler (stops thread pool, fails pending requests)
-        3. Shutdown engine (releases GPU, destroys process groups)
-        4. Stop HTTP server
+        2. Handler answers queued and in-flight requests with 503 (no wait)
+        3. Engine shutdown (stops an auto-started vLLM server; its exit ends
+           the in-flight HTTP calls, which can't be interrupted otherwise)
+        4. Wait briefly for those calls to return
+        5. Stop the HTTP server
+        6. Detach the IPC queues, so exit never blocks flushing into a pipe
+           the stopped HTTP subprocess no longer reads
         """
         if self._memory_ticker and self._memory_ticker.is_running():
             self._memory_ticker.stop()
 
-        if self._handler is not None and hasattr(self._handler, "shutdown"):
-            self._lg.debug("shutting down handler...")
-            try:
-                self._handler.shutdown()
-            except Exception as e:
-                self._lg.warning("handler shutdown error", extra={"exception": e})
-
+        handler = self._handler
+        if handler is not None:
+            self._run_shutdown_step("handler", handler.shutdown)
         if self._engine is not None:
-            self._lg.debug("shutting down engine...")
-            try:
-                self._engine.shutdown()
-            except Exception as e:
-                self._lg.warning("engine shutdown error", extra={"exception": e})
+            self._run_shutdown_step("engine", self._engine.shutdown)
+        if handler is not None:
+            self._run_shutdown_step("in-flight requests", self._join_handler)
 
         if self._server and self._server.is_running:
-            self._lg.debug("stopping server...")
-            self._server.stop()
-            self._lg.info("server stopped")
+            server = self._server
+            self._run_shutdown_step(
+                "server",
+                lambda: server.stop(timeout=self._config.dispatch.server_stop_timeout),
+            )
+
+        for q in (self._request_q, self._response_q):
+            q.cancel_join_thread()
+
+    def _run_shutdown_step(self, name: str, step: Callable[[], None]) -> None:
+        """Run one shutdown step; log and continue on failure."""
+        self._lg.debug("shutting down...", extra={"step": name})
+        try:
+            step()
+        except Exception as e:
+            self._lg.warning("shutdown error", extra={"step": name, "exception": e})
+
+    def _join_handler(self) -> None:
+        """Wait for engine calls still running after the engine stopped."""
+        assert self._handler is not None
+        timeout = self._config.dispatch.in_flight_join_timeout
+        if not self._handler.join(timeout):
+            self._lg.warning(
+                "in-flight requests still running at shutdown",
+                extra={"timeout": timeout},
+            )
 
     def signal_shutdown(self) -> None:
         """Signal the main loop to stop."""

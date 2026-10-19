@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contains tool calls, so truncated tool-call arguments are no longer reported as `tool_calls`.
 - Serving: a streaming request whose generation fails now ends with an SSE error event and
   `[DONE]` instead of a normal `finish_reason: "stop"`.
+- Serving: `serve` stops within a few seconds while requests are running (also on an external vLLM
+  server), instead of waiting for them; they get 503 "Server shutting down". New
+  `dispatch.in_flight_join_timeout`, `dispatch.server_stop_timeout` and vLLM server `stop_timeout`
+  (5 s, was a fixed 15 s).
+- Serving: a request rejected at capacity returns 503 again (was 500); other failed non-streaming
+  requests return 500 with the error message.
 
 ## [0.7.1] - 2026-09-08
 

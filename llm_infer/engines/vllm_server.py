@@ -657,7 +657,7 @@ class VLLMServerEngine:
             self._lg.warning("failed to terminate vllm server", extra={"exception": e})
 
         try:
-            self._process.wait(timeout=15)
+            self._process.wait(timeout=self._config.stop_timeout)
         except subprocess.TimeoutExpired:
             self._lg.warning("vllm server did not stop gracefully, force killing")
             try:
