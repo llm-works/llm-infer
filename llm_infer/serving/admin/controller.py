@@ -82,7 +82,13 @@ class BackendController:
             self._engine.release()
         except Exception as e:
             self._lg.error("release failed", extra={"exception": e})
-            self._resume_serving()
+            try:
+                self._resume_serving()
+            except Exception as resume_err:
+                self._lg.error(
+                    "resume after failed release also failed",
+                    extra={"exception": resume_err},
+                )
             raise
         self._state.set(BackendState.RELEASED)
         self._lg.info("backend released")
@@ -121,13 +127,16 @@ class BackendController:
             self._lg.error("reacquire failed", extra={"exception": e})
             self._state.set(BackendState.RELEASED)
             return
-        self._resume_serving()
+        try:
+            self._resume_serving()
+        except Exception as e:
+            self._last_error = f"handler resume failed: {e}"
+            self._lg.error("handler resume failed", extra={"exception": e})
+            self._state.set(BackendState.RELEASED)
+            return
         self._lg.info("backend reacquired")
 
     def _resume_serving(self) -> None:
         """Let the handler accept requests again and mark the backend SERVING."""
-        try:
-            self._loop_tasks.call(self._handler.resume, HANDLER_CALL_TIMEOUT)
-        except Exception as e:
-            self._lg.error("handler resume failed", extra={"exception": e})
+        self._loop_tasks.call(self._handler.resume, HANDLER_CALL_TIMEOUT)
         self._state.set(BackendState.SERVING)

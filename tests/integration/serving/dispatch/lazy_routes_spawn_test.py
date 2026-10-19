@@ -26,6 +26,7 @@ import multiprocessing as mp
 import pytest
 from appinfra.subprocess import Lazy
 
+from llm_infer.serving.admin.state import SharedBackendState
 from llm_infer.serving.api.openai.router import OpenAIRouterConfig
 
 pytestmark = pytest.mark.integration
@@ -56,3 +57,29 @@ def test_lazy_bundle_survives_forkserver_spawn() -> None:
         proc.terminate()
         proc.join(timeout=5)
     assert proc.exitcode == 0, f"forkserver child exited {proc.exitcode}"
+
+
+def _read_shared_state(state: SharedBackendState, result: mp.Value[int]) -> None:
+    """Child target: read the shared state and write to result."""
+    result.value = state.get().value
+
+
+def test_shared_backend_state_survives_forkserver_spawn() -> None:
+    """SharedBackendState (mp.Value) must be readable in a forkserver child.
+
+    BackendGateMiddleware receives SharedBackendState as a kwarg. If the state
+    can't cross the forkserver boundary, serve fails to start under Py3.14.
+    SharedBackendState must be created from the same context as the subprocess.
+    """
+    ctx = mp.get_context("forkserver")
+    state = SharedBackendState(ctx)
+    state.set(state.get().__class__(3))  # Set to a known value (RELEASED = 3)
+    result = ctx.Value("i", -1)
+    proc = ctx.Process(target=_read_shared_state, args=(state, result))
+    proc.start()
+    proc.join(timeout=10)
+    if proc.exitcode is None:
+        proc.terminate()
+        proc.join(timeout=5)
+    assert proc.exitcode == 0, f"forkserver child exited {proc.exitcode}"
+    assert result.value == 3, f"child read {result.value}, expected 3"

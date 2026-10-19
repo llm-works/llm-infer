@@ -178,6 +178,19 @@ def test_failed_reacquire_stays_released_with_error() -> None:
     assert controller.status()["last_error"] == "vllm serve exited with code 1"
 
 
+def test_failed_resume_after_reacquire_stays_released_with_error() -> None:
+    """If engine.reacquire() succeeds but handler.resume() fails, stay RELEASED."""
+    engine, handler = _Engine(), _handler()
+    handler.resume.side_effect = TimeoutError("loop thread unresponsive")
+    controller, shared = _controller(engine, handler, BackendState.RELEASED)
+
+    controller.start_reacquire()
+    _wait_state(shared, BackendState.RELEASED)
+
+    handler.resume.assert_called_once()
+    assert "handler resume failed" in controller.status()["last_error"]
+
+
 def test_reacquire_refused_while_releasing() -> None:
     controller, _ = _controller(_Engine(), _handler(), BackendState.RELEASING)
 

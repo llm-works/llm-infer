@@ -30,10 +30,17 @@ class SharedBackendState:
     Created in the main process before the HTTP subprocess starts, and handed to
     it as a constructor argument, so both see the same value. The main process
     writes it; the subprocess only reads it.
+
+    Under Py3.14 the default multiprocessing context switches from ``fork`` to
+    ``forkserver``. The Value must be created from the same context that spawns
+    the subprocess, otherwise passing it raises RuntimeError. When ``ctx`` is
+    omitted, the default context is used — correct as long as the subprocess
+    also uses the default.
     """
 
-    def __init__(self) -> None:
-        self._value: Any = mp.Value("i", BackendState.INITIALIZING)
+    def __init__(self, ctx: mp.context.BaseContext | None = None) -> None:
+        factory = ctx if ctx is not None else mp
+        self._value: Any = factory.Value("i", BackendState.INITIALIZING)
 
     def get(self) -> BackendState:
         return BackendState(self._value.value)
