@@ -68,6 +68,18 @@ dispatch:
   in_flight_join_timeout: 2.0   # Wait for in-flight engine calls after the engine stopped
   server_stop_timeout: 2.0      # Wait for the HTTP subprocess before terminate/kill
 
+# Admin listener (llm_infer/serving/admin/api.py): release the backend's GPU (e.g. for
+# training) and reacquire it without restarting serve; inference answers 503 meanwhile.
+# A listener of its own in the main process, bound to an intranet address only, never a
+# public one. Every call needs one of the bearer tokens; with none, every call gets 401.
+# Provide real tokens per environment, e.g. tokens: !include? '<secrets file>'.
+admin:
+  enabled: false
+  host: 127.0.0.1
+  port: 8090
+  tokens: []
+  retry_after: 60         # Retry-After (s) on inference answered 503 while released
+
 # API configuration
 api:
   host: 0.0.0.0

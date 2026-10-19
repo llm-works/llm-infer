@@ -28,6 +28,7 @@ _ERROR_MAPPINGS: dict[RequestStatus, tuple[int, str]] = {
     RequestStatus.REJECTED: (503, "Server at capacity"),
     RequestStatus.FAILED: (500, "Internal error"),
     RequestStatus.UNAVAILABLE: (503, "Server shutting down"),
+    RequestStatus.RELEASED: (503, "Backend released"),
 }
 
 

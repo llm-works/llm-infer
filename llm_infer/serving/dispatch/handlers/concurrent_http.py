@@ -9,13 +9,14 @@ from typing import TYPE_CHECKING
 
 from ....engines.protocol import AbortableEngineProtocol
 from ..handler import RequestHandler
-from ..types import Request, RequestStatus, Response, refusal_message
+from ..types import Request, RequestStatus, Response, StreamChunk, refusal_message
 from .daemon_executor import DaemonThreadExecutor
 
 if TYPE_CHECKING:
     from ....engines.protocol import InferenceEngineProtocol
 
 SHUTTING_DOWN_MESSAGE = "Server shutting down"
+RELEASED_MESSAGE = "Backend released"
 
 
 class ConcurrentHttpHandler(RequestHandler):
@@ -71,6 +72,8 @@ class ConcurrentHttpHandler(RequestHandler):
             max_workers=max_concurrent, thread_name_prefix="http-handler"
         )
         self._shutdown = False
+        # Admin release in progress or done: refuse requests until resume()
+        self._suspended = False
 
     def submit(self, request: Request) -> bool:
         """
@@ -84,7 +87,7 @@ class ConcurrentHttpHandler(RequestHandler):
         Returns:
             True if accepted, False if rejected (at capacity).
         """
-        if self._shutdown:
+        if self._shutdown or self._suspended:
             return False
         if self.pending_count >= self.max_pending:
             return False
@@ -221,3 +224,36 @@ class ConcurrentHttpHandler(RequestHandler):
         """Wait up to `timeout` seconds for in-flight calls to return."""
         _, not_done = wait(list(self.in_flight.values()), timeout=timeout)
         return not not_done
+
+    def rejection(self, request: Request) -> Response | StreamChunk:
+        """Answer for a request submit() refused."""
+        if self._suspended:
+            return refusal_message(request, RequestStatus.RELEASED, RELEASED_MESSAGE)
+        return super().rejection(request)
+
+    @property
+    def supports_suspend(self) -> bool:
+        return True
+
+    def suspend(self) -> None:
+        """Answer queued and running requests as released; refuse new ones.
+
+        Running requests are cancelled (aborted through the engine when it can,
+        their late responses dropped), so the backend can stop right after.
+        """
+        self._suspended = True
+        unanswered = [*self.queue]
+        self.queue.clear()
+        for request_id, request in list(self._in_flight_requests.items()):
+            if request_id not in self._cancelled:
+                unanswered.append(request)
+                self.cancel(request_id)
+        if self._response_q is not None:
+            for request in unanswered:
+                self._response_q.put(
+                    refusal_message(request, RequestStatus.RELEASED, RELEASED_MESSAGE)
+                )
+
+    def resume(self) -> None:
+        """Accept requests again after suspend()."""
+        self._suspended = False

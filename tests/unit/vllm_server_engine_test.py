@@ -3,6 +3,7 @@
 
 """Unit tests for vLLM server inference engine."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -518,3 +519,97 @@ class TestVLLMServerStop:
         engine._lg.warning.assert_called_once_with(
             "vllm server did not stop gracefully, force killing"
         )
+
+    def test_waits_for_whole_process_group(self) -> None:
+        """A grandchild that outlives the main process (as vLLM's EngineCore can)
+        is stopped too before _stop_server returns."""
+        import os
+        import subprocess
+        import sys
+
+        grandchild = (
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "time.sleep(60)"
+        )
+        # Main process: starts the grandchild, prints its pid, exits on SIGTERM
+        script = (
+            "import subprocess, sys, time; "
+            f"p = subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+            "print(p.pid, flush=True); time.sleep(60)"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+        )
+        assert proc.stdout is not None
+        grandchild_pid = int(proc.stdout.readline())
+        engine = self._engine_with_process(proc, stop_timeout=0.5)
+
+        engine._stop_server()
+
+        with pytest.raises(ProcessLookupError):
+            os.killpg(proc.pid, 0)
+        with pytest.raises(ProcessLookupError):
+            os.kill(grandchild_pid, 0)
+
+
+class TestVLLMServerRelease:
+    """release() / reacquire(): stop and start the backend while serve runs."""
+
+    def _engine(self, owns: bool) -> Any:
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._owns_process = owns
+        engine._process = None
+        return engine
+
+    def test_external_backend_is_not_managed(self) -> None:
+        from llm_infer.engines.protocol import BackendNotManagedError
+
+        engine = self._engine(owns=False)
+
+        assert engine.manages_backend is False
+        with pytest.raises(BackendNotManagedError):
+            engine.release()
+        with pytest.raises(BackendNotManagedError):
+            engine.reacquire()
+
+    def test_release_stops_server(self) -> None:
+        engine = self._engine(owns=True)
+        engine._stop_server = MagicMock()
+
+        engine.release()
+
+        engine._stop_server.assert_called_once()
+
+    def test_reacquire_starts_and_verifies(self) -> None:
+        engine = self._engine(owns=True)
+        for name in ("_start_server", "_verify_connection", "_verify_adapters"):
+            setattr(engine, name, MagicMock())
+
+        engine.reacquire()
+
+        engine._start_server.assert_called_once()
+        engine._verify_connection.assert_called_once()
+
+    def test_failed_reacquire_stops_what_it_started(self) -> None:
+        engine = self._engine(owns=True)
+        engine._start_server = MagicMock(side_effect=RuntimeError("exited"))
+        engine._stop_server = MagicMock()
+
+        with pytest.raises(RuntimeError):
+            engine.reacquire()
+
+        engine._stop_server.assert_called_once()
+
+    def test_reacquire_while_running_is_a_noop(self) -> None:
+        engine = self._engine(owns=True)
+        engine._process = MagicMock()
+        engine._start_server = MagicMock()
+
+        engine.reacquire()
+
+        engine._start_server.assert_not_called()

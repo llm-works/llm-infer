@@ -4,9 +4,10 @@
 """Configuration loading for inference server."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Annotated, Any
 
 from appinfra.app.fastapi import ApiConfig, UvicornConfig
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from ...models import ModelsConfig
 from .config_overrides import CliOverrides, apply_standard_overrides
@@ -51,6 +52,25 @@ class DispatchConfig:
     # for the HTTP subprocess to exit before it is terminated and killed
     in_flight_join_timeout: float = 2.0
     server_stop_timeout: float = 2.0
+
+
+class AdminConfig(BaseModel):
+    """Admin listener: release and reacquire the backend's GPU (config key: admin).
+
+    A listener of its own in the main process, never on the public API port,
+    bound to an intranet address, with its own bearer tokens. Unknown keys and
+    malformed values fail validation, so a bad section stops startup.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    host: str = "127.0.0.1"  # An intranet address; never the public interface
+    port: int = Field(default=8090, ge=1, le=65535)
+    # Bearer tokens; none: every call gets 401
+    tokens: list[Annotated[str, StringConstraints(min_length=1)]] = []
+    # Retry-After (s) on inference answered 503 while the backend is released
+    retry_after: int = Field(default=60, ge=0)
 
 
 @dataclass
@@ -452,6 +472,7 @@ class InferenceConfig:
     engines: EnginesConfig = field(default_factory=EnginesConfig)
     dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
+    admin: AdminConfig = field(default_factory=AdminConfig)
     logging: ThirdPartyLoggingConfig = field(default_factory=ThirdPartyLoggingConfig)
 
     @classmethod
@@ -471,6 +492,7 @@ class InferenceConfig:
             engines=cls._parse_engines_config(data.get("engines", {}) or {}),
             dispatch=cls._parse_dispatch_config(dispatch),
             api=cls._parse_api_config(data.get("api", {}) or {}),
+            admin=AdminConfig.model_validate(data.get("admin") or {}),
             logging=ThirdPartyLoggingConfig(
                 torch=logging.get("torch", "warning"),
                 transformers=logging.get("transformers", "error"),

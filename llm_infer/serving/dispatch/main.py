@@ -18,12 +18,16 @@ from appinfra.subprocess import Lazy
 from appinfra.time import Ticker, since, start
 
 from ..adapters import AdapterManager
+from ..admin import api as admin_api
+from ..admin.controller import BackendController
+from ..admin.gate import BackendGateMiddleware
+from ..admin.state import BackendState, SharedBackendState
 from ..api.openai.router import OpenAIRouterConfig
 from .config import InferenceConfig
 from .errors import ExceptionHandler
 from .factories import get_engine_factory, get_handler_factory
 from .handler import RequestHandler
-from .loop import run_engine_loop
+from .loop import LoopTasks, run_engine_loop
 from .progress import ProgressTracker
 from .warmup import warmup_adapters, warmup_base_model
 
@@ -94,7 +98,8 @@ class BootSequence:
         3. create_handler() - Create request handler
         4. warmup() - Run warmup query if configured
         5. mark_ready() - Health now returns 'ok'
-        6. run_loop() - Process requests until shutdown
+        6. start_admin() - Admin listener (release / reacquire), if enabled
+        7. run_loop() - Process requests until shutdown
     """
 
     def __init__(self, config: InferenceConfig, lg: Logger) -> None:
@@ -107,6 +112,10 @@ class BootSequence:
 
         # Shared ready flag for health endpoint
         self._ready = mp.Value("b", False)
+        # Backend state: the HTTP subprocess answers inference 503 while released
+        self._backend_state = SharedBackendState()
+        # Handler calls from other threads (admin listener) run on the loop thread
+        self._loop_tasks = LoopTasks()
 
         # Components (initialized during boot phases)
         self._server: Server | None = None
@@ -216,10 +225,25 @@ class BootSequence:
     def mark_ready(self) -> None:
         """Phase 5: Mark server as ready to accept requests."""
         self._ready.value = True
+        self._backend_state.set(BackendState.SERVING)
         self._lg.info("ready to serve requests")
 
+    def start_admin(self) -> None:
+        """Phase 6: Start the admin listener (release / reacquire), if enabled."""
+        if not self._config.admin.enabled:
+            return
+        assert self._handler is not None
+        controller = BackendController(
+            self._lg,
+            self._engine,
+            self._handler,
+            self._backend_state,
+            self._loop_tasks,
+        )
+        admin_api.start(self._lg, controller, self._config.admin)
+
     def run_loop(self) -> None:
-        """Phase 6: Run main request loop until shutdown."""
+        """Phase 7: Run main request loop until shutdown."""
         assert self._handler is not None, "create_handler() must be called first"
         run_engine_loop(
             self._lg,
@@ -227,6 +251,7 @@ class BootSequence:
             self._request_q,
             self._response_q,
             self._shutdown,
+            self._loop_tasks,
         )
 
     # -----------------------------------------------------------------------
@@ -243,6 +268,7 @@ class BootSequence:
             self.create_handler()
             self.warmup()
             self.mark_ready()
+            self.start_admin()
             self.run_loop()
         except KeyboardInterrupt:
             self._lg.info("interrupted")
@@ -334,6 +360,17 @@ class BootSequence:
             .with_version(cfg.version)
         )
 
+    def _with_middleware(self, routes: Any) -> Any:
+        """Add the HTTP subprocess's middleware: tracing, and the 503 gate on
+        inference while an admin has the backend released."""
+        from ..api.trace import TraceMiddleware
+
+        return routes.with_middleware(TraceMiddleware).with_middleware(
+            BackendGateMiddleware,
+            state=self._backend_state,
+            retry_after=self._config.admin.retry_after,
+        )
+
     def _build_routes(self, model_name: str) -> Any:
         """Build routes configuration.
 
@@ -342,15 +379,12 @@ class BootSequence:
         and constructs the handler locally, so nested closures inside the
         factories never get pickled. Required under Py3.14 forkserver.
         """
-        from ..api.trace import TraceMiddleware
-
         openai_cfg = OpenAIRouterConfig(
             model_name=model_name,
             model_config=self._config.models.get(model_name),
         )
         routes = (
-            self._build_server_builder()
-            .routes.with_middleware(TraceMiddleware)
+            self._with_middleware(self._build_server_builder().routes)
             .with_route(
                 "/health",
                 Lazy(
