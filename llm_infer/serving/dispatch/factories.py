@@ -287,6 +287,8 @@ class VLLMServerEngineFactory(EngineFactory):
     def warmup_concurrency(self, config: InferenceConfig) -> int:
         # As many as the handler sends at once, and vLLM can batch
         cfg = config.engines.vllm_server
+        if cfg.max_num_seqs is None:
+            return cfg.max_concurrent
         return min(cfg.max_concurrent, cfg.max_num_seqs)
 
 

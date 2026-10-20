@@ -181,6 +181,12 @@ class TestWarmupConcurrency:
         cfg.engines.vllm_server.max_num_seqs = max_num_seqs
         assert VLLMServerEngineFactory().warmup_concurrency(cfg) == expected
 
+    def test_vllm_server_none_max_num_seqs_uses_max_concurrent(self) -> None:
+        cfg = _config()
+        cfg.engines.vllm_server.max_concurrent = 8
+        cfg.engines.vllm_server.max_num_seqs = None  # type: ignore[assignment]
+        assert VLLMServerEngineFactory().warmup_concurrency(cfg) == 8
+
 
 # ---------------------------------------------------------------------------
 # get_engine_factory / get_handler_factory registry
