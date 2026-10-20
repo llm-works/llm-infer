@@ -112,6 +112,9 @@ jobs:
         image: ollama/ollama:0.40.6
         ports:
           - 11434:11434
+        env:
+          # Serve two sequences at once, so serve's concurrent warmup batches on the runner
+          OLLAMA_NUM_PARALLEL: "2"
         options: >-
           --health-cmd "ollama list || exit 1"
           --health-interval 10s

@@ -3,8 +3,10 @@
 
 """Model and adapter warmup utilities."""
 
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from appinfra.log import Logger
 from appinfra.time import since, start
@@ -39,6 +41,38 @@ class _WarmupLoraRequest:
 
     def __init__(self, name: str) -> None:
         self.lora_name = name
+
+
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+def _run_steps(
+    fn: Callable[[T], R | None], items: list[T], concurrency: int
+) -> list[R]:
+    """Run fn over items, up to `concurrency` at a time.
+
+    Returns the results in item order, up to (not including) the first None,
+    which marks a failed step. With concurrency 1 the steps run one at a time
+    and stop at the first failure. With more, they all run at once, which also
+    warms the backend for batched requests, and the results are cut the same way.
+    """
+    outcomes: Iterable[R | None]
+    if concurrency <= 1 or len(items) <= 1:
+        outcomes = map(fn, items)  # Lazy: no step runs after a failed one
+    else:
+        workers = min(concurrency, len(items))
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="warmup"
+        ) as pool:
+            outcomes = list(pool.map(fn, items))
+
+    results: list[R] = []
+    for outcome in outcomes:
+        if outcome is None:
+            break
+        results.append(outcome)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -97,12 +131,13 @@ def _run_warmup_test(
 # ---------------------------------------------------------------------------
 
 
-def warmup_base_model(lg: Logger, engine: Any) -> list[WarmupResult]:
+def warmup_base_model(lg: Logger, engine: Any, concurrency: int) -> list[WarmupResult]:
     """Warmup base model with token sweep, return results as baseline.
 
     For embedding models, runs a simple embed and returns empty list.
-    For generation models, runs token sweep and records finish_reason at each level.
-    The results serve as baseline for adapter comparison.
+    For generation models, runs token sweep and records finish_reason at each level,
+    up to `concurrency` requests at a time. The results serve as baseline for
+    adapter comparison.
     """
     if getattr(engine, "supports_embeddings", lambda: False)():
         lg.debug("warming up embedding model...")
@@ -112,17 +147,23 @@ def warmup_base_model(lg: Logger, engine: Any) -> list[WarmupResult]:
         return []
 
     token_sweep = _build_token_sweep(_get_max_model_len(engine))
-    lg.debug("warming up base model...", extra={"sweep": token_sweep})
+    lg.debug(
+        "warming up base model...",
+        # Joined with "|": the logger renders a list as "32,128,...", which reads as one number
+        extra={"sweep": "|".join(map(str, token_sweep)), "concurrency": concurrency},
+    )
     t0 = start()
 
-    results: list[WarmupResult] = []
-    for max_tokens in token_sweep:
-        result = _warmup_base_step(lg, engine, max_tokens)
-        if result is None:
-            break
-        results.append(result)
+    results = _run_steps(
+        lambda max_tokens: _warmup_base_step(lg, engine, max_tokens),
+        token_sweep,
+        concurrency,
+    )
 
-    lg.info("base model warmed up", extra={"after": since(t0), "steps": len(results)})
+    lg.info(
+        "base model warmed up",
+        extra={"after": since(t0), "steps": len(results), "concurrency": concurrency},
+    )
     return results
 
 
@@ -154,12 +195,13 @@ def warmup_adapters(
     engine: Any,
     adapter_manager: AdapterManager | None,
     baseline: list[WarmupResult],
+    concurrency: int,
 ) -> None:
     """Warmup LoRA adapters and compare against baseline.
 
     Compares adapter behavior to base model baseline. Flags adapters that
     hit max_tokens where base model produced EOS - indicates potential
-    training issue with EOS tokens.
+    training issue with EOS tokens. Runs up to `concurrency` requests at a time.
     """
     if adapter_manager is None:
         return
@@ -170,7 +212,7 @@ def warmup_adapters(
 
     if not baseline:
         lg.debug("no baseline results, skipping adapter EOS verification")
-        _warmup_adapters_simple(lg, engine, adapters)
+        _warmup_adapters_simple(lg, engine, adapters, concurrency)
         return
 
     lg.debug("warming up LoRA adapters...", extra={"count": len(adapters)})
@@ -178,7 +220,7 @@ def warmup_adapters(
 
     failed = 0
     for adapter in adapters:
-        if not _warmup_single_adapter(lg, engine, adapter.key, baseline):
+        if not _warmup_single_adapter(lg, engine, adapter.key, baseline, concurrency):
             failed += 1
 
     extra = {"after": since(t0), "count": len(adapters), "failed": failed}
@@ -188,19 +230,25 @@ def warmup_adapters(
         lg.info("all adapters warmed up", extra=extra)
 
 
-def _warmup_adapters_simple(lg: Logger, engine: Any, adapters: list[Any]) -> None:
+def _warmup_adapters_simple(
+    lg: Logger, engine: Any, adapters: list[Any], concurrency: int
+) -> None:
     """Simple adapter warmup without baseline comparison."""
     t0 = start()
     min_tokens = min(_WARMUP_PROMPTS.keys())
-    for adapter in adapters:
-        lora_req = _WarmupLoraRequest(adapter.key)
+
+    def warm(adapter: Any) -> bool:
         try:
-            _run_warmup_test(engine, min_tokens, lora_req)
+            _run_warmup_test(engine, min_tokens, _WarmupLoraRequest(adapter.key))
             lg.info("adapter warmed up", extra={"adapter": adapter.key})
+            return True
         except Exception as e:
             lg.error(
                 "adapter warmup failed", extra={"adapter": adapter.key, "exception": e}
             )
+            return False  # Not None: a failed adapter doesn't stop the others
+
+    _run_steps(warm, adapters, concurrency)
     lg.info("adapters warmed up", extra={"after": since(t0), "count": len(adapters)})
 
 
@@ -209,17 +257,18 @@ def _warmup_single_adapter(
     engine: Any,
     adapter_key: str,
     baseline: list[WarmupResult],
+    concurrency: int,
 ) -> bool:
     """Warmup single adapter and compare against baseline."""
     lora_req = _WarmupLoraRequest(adapter_key)
-    mismatches: list[int] = []
-
-    for base_result in baseline:
-        step_result = _test_adapter_step(lg, engine, adapter_key, base_result, lora_req)
-        if step_result is None:
-            return False  # Fatal error (exception or fallback)
-        if step_result:
-            mismatches.append(base_result.max_tokens)
+    outcomes = _run_steps(
+        lambda base: _test_adapter_step(lg, engine, adapter_key, base, lora_req),
+        baseline,
+        concurrency,
+    )
+    if len(outcomes) < len(baseline):
+        return False  # Fatal error (exception or fallback) at some step
+    mismatches = [b.max_tokens for b, mismatch in zip(baseline, outcomes) if mismatch]
 
     if mismatches:
         lg.warning(

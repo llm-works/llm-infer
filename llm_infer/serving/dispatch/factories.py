@@ -44,6 +44,13 @@ class EngineFactory(ABC):
         """Get max batch size for handler configuration."""
         ...
 
+    def warmup_concurrency(self, config: InferenceConfig) -> int:
+        """How many warmup requests may run at once.
+
+        Default 1: in-process engines aren't safe to call from several threads.
+        """
+        return 1
+
 
 class NativeEngineFactory(EngineFactory):
     """Factory for native inference engine."""
@@ -200,6 +207,10 @@ class OllamaEngineFactory(EngineFactory):
         # Ollama handles batching internally
         return 1
 
+    def warmup_concurrency(self, config: InferenceConfig) -> int:
+        # HTTP engine: as many as the handler sends at once
+        return config.engines.ollama.max_concurrent
+
 
 class VLLMServerEngineFactory(EngineFactory):
     """Factory for vLLM server-backed inference engine.
@@ -272,6 +283,13 @@ class VLLMServerEngineFactory(EngineFactory):
     def max_batch_size(self, config: InferenceConfig) -> int:
         # Server handles batching internally
         return 1
+
+    def warmup_concurrency(self, config: InferenceConfig) -> int:
+        # As many as the handler sends at once, and vLLM can batch
+        cfg = config.engines.vllm_server
+        if cfg.max_num_seqs is None:
+            return cfg.max_concurrent
+        return min(cfg.max_concurrent, cfg.max_num_seqs)
 
 
 class PEFTEngineFactory(EngineFactory):
