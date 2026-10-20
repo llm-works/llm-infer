@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -17,6 +18,7 @@ from llm_infer.serving.dispatch.warmup import (
     _check_adapter_fallback,
     _extract_finish_reason,
     _get_max_model_len,
+    _run_steps,
     warmup_adapters,
     warmup_base_model,
 )
@@ -121,13 +123,13 @@ class TestHelpers:
 class TestWarmupBaseModel:
     def test_embedding_engine_only_runs_embed(self, lg: Logger) -> None:
         e = _engine(supports_embeddings=True, embed_result=[[0.1, 0.2]])
-        results = warmup_base_model(lg, e)
+        results = warmup_base_model(lg, e, 1)
         assert results == []
         e.embed.assert_called_once_with(["warmup"])
 
     def test_token_sweep_all_succeed(self, lg: Logger) -> None:
         e = _engine(max_model_len=4096)
-        results = warmup_base_model(lg, e)
+        results = warmup_base_model(lg, e, 1)
         assert len(results) == 4
         assert all(r.finish_reason == "stop" for r in results)
         assert [r.max_tokens for r in results] == [32, 128, 512, 2048]
@@ -141,14 +143,14 @@ class TestWarmupBaseModel:
                 RuntimeError("boom"),
             ],
         )
-        results = warmup_base_model(lg, e)
+        results = warmup_base_model(lg, e, 1)
         # First step succeeded; second failed -> stops sweep
         assert len(results) == 1
         assert lg.error.called  # type: ignore[attr-defined]
 
     def test_small_max_model_len(self, lg: Logger) -> None:
         e = _engine(max_model_len=512)
-        results = warmup_base_model(lg, e)
+        results = warmup_base_model(lg, e, 1)
         # cap = 256, sweep = [32, 128]
         assert len(results) == 2
 
@@ -167,21 +169,21 @@ def _adapter(key: str = "ad-1") -> MagicMock:
 class TestWarmupAdapters:
     def test_no_adapter_manager(self, lg: Logger) -> None:
         e = _engine()
-        warmup_adapters(lg, e, None, [])
+        warmup_adapters(lg, e, None, [], 1)
         e.generate.assert_not_called()
 
     def test_empty_adapter_list(self, lg: Logger) -> None:
         mgr = MagicMock()
         mgr.list.return_value = []
         e = _engine()
-        warmup_adapters(lg, e, mgr, [])
+        warmup_adapters(lg, e, mgr, [], 1)
         e.generate.assert_not_called()
 
     def test_no_baseline_runs_simple_warmup(self, lg: Logger) -> None:
         mgr = MagicMock()
         mgr.list.return_value = [_adapter("a1"), _adapter("a2")]
         e = _engine()
-        warmup_adapters(lg, e, mgr, [])  # empty baseline
+        warmup_adapters(lg, e, mgr, [], 1)  # empty baseline
         # Each adapter ran a single warmup test
         assert e.generate.call_count == 2
 
@@ -189,7 +191,7 @@ class TestWarmupAdapters:
         mgr = MagicMock()
         mgr.list.return_value = [_adapter("a1")]
         e = _engine(generate_side_effect=RuntimeError("boom"))
-        warmup_adapters(lg, e, mgr, [])
+        warmup_adapters(lg, e, mgr, [], 1)
         assert lg.error.called  # type: ignore[attr-defined]
 
     def test_baseline_all_match(self, lg: Logger) -> None:
@@ -205,7 +207,7 @@ class TestWarmupAdapters:
                 {"finish_reason": "stop"},
             ]
         )
-        warmup_adapters(lg, e, mgr, baseline)
+        warmup_adapters(lg, e, mgr, baseline, 1)
         # No warning emitted
         warning_msgs = [
             c.args[0]
@@ -219,7 +221,7 @@ class TestWarmupAdapters:
         mgr = MagicMock()
         mgr.list.return_value = [_adapter("a1")]
         e = _engine(generate_outputs=[{"finish_reason": "length"}])
-        warmup_adapters(lg, e, mgr, baseline)
+        warmup_adapters(lg, e, mgr, baseline, 1)
         warning_msgs = [
             c.args[0]
             for c in lg.warning.call_args_list  # type: ignore[attr-defined]
@@ -237,7 +239,7 @@ class TestWarmupAdapters:
                 {"finish_reason": "stop", "adapter_info": {"fallback": True}}
             ]
         )
-        warmup_adapters(lg, e, mgr, baseline)
+        warmup_adapters(lg, e, mgr, baseline, 1)
         warning_msgs = [
             c.args[0]
             for c in lg.warning.call_args_list  # type: ignore[attr-defined]
@@ -249,5 +251,101 @@ class TestWarmupAdapters:
         mgr = MagicMock()
         mgr.list.return_value = [_adapter("a1")]
         e = _engine(generate_side_effect=RuntimeError("boom"))
-        warmup_adapters(lg, e, mgr, baseline)
+        warmup_adapters(lg, e, mgr, baseline, 1)
         assert lg.error.called  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Concurrent warmup
+# ---------------------------------------------------------------------------
+
+
+class _ConcurrentEngine:
+    """Thread-safe stand-in engine that records how many generate calls overlap.
+
+    Each call waits on a barrier of `parties`, so a test only passes when that
+    many calls really are in flight together.
+    """
+
+    max_model_len = 4096
+
+    def __init__(self, parties: int, fail_at: int | None = None) -> None:
+        self._barrier = threading.Barrier(parties)
+        self._lock = threading.Lock()
+        self._active = 0
+        self._fail_at = fail_at
+        self.peak = 0
+        self.calls: list[int] = []
+
+    def supports_embeddings(self) -> bool:
+        return False
+
+    def generate(self, prompt: str, max_tokens: int, **kwargs: Any) -> dict[str, Any]:
+        with self._lock:
+            self._active += 1
+            self.peak = max(self.peak, self._active)
+            self.calls.append(max_tokens)
+        self._barrier.wait(timeout=5)
+        with self._lock:
+            self._active -= 1
+        if max_tokens == self._fail_at:
+            raise RuntimeError("boom")
+        return {"finish_reason": "stop"}
+
+
+class TestRunSteps:
+    def test_sequential_stops_calling_after_failure(self) -> None:
+        calls: list[int] = []
+
+        def fn(i: int) -> int | None:
+            calls.append(i)
+            return None if i == 2 else i * 10
+
+        assert _run_steps(fn, [1, 2, 3], 1) == [10]
+        assert calls == [1, 2]
+
+    def test_concurrent_keeps_item_order(self) -> None:
+        assert _run_steps(lambda i: i * 10, [3, 1, 2], 3) == [30, 10, 20]
+
+    def test_empty_items(self) -> None:
+        assert _run_steps(lambda i: i, [], 4) == []
+
+
+class TestConcurrentWarmup:
+    def test_base_sweep_runs_all_steps_at_once(self, lg: Logger) -> None:
+        e = _ConcurrentEngine(parties=4)
+        results = warmup_base_model(lg, e, 4)
+        assert [r.max_tokens for r in results] == [32, 128, 512, 2048]
+        assert e.peak == 4
+
+    def test_base_sweep_capped_at_concurrency(self, lg: Logger) -> None:
+        e = _ConcurrentEngine(parties=2)
+        results = warmup_base_model(lg, e, 2)
+        assert len(results) == 4
+        assert e.peak == 2
+
+    def test_base_failure_cuts_baseline_at_failed_step(self, lg: Logger) -> None:
+        """Same baseline as the sequential sweep: steps before the first failure."""
+        e = _ConcurrentEngine(parties=4, fail_at=128)
+        results = warmup_base_model(lg, e, 4)
+        assert [r.max_tokens for r in results] == [32]
+        assert sorted(e.calls) == [32, 128, 512, 2048]  # All were in flight
+        assert lg.error.called  # type: ignore[attr-defined]
+
+    def test_adapter_steps_run_at_once(self, lg: Logger) -> None:
+        baseline = [WarmupResult(max_tokens=t, finish_reason="stop") for t in (32, 128)]
+        mgr = MagicMock()
+        mgr.list.return_value = [_adapter("a1"), _adapter("a2")]
+        e = _ConcurrentEngine(parties=2)
+        warmup_adapters(lg, e, mgr, baseline, 4)
+        assert len(e.calls) == 4
+        assert e.peak == 2
+        assert not lg.warning.called  # type: ignore[attr-defined]
+
+    def test_simple_adapter_warmup_runs_at_once(self, lg: Logger) -> None:
+        mgr = MagicMock()
+        mgr.list.return_value = [_adapter("a1"), _adapter("a2"), _adapter("a3")]
+        e = _ConcurrentEngine(parties=3)
+        warmup_adapters(lg, e, mgr, [], 4)
+        assert e.calls == [32, 32, 32]
+        assert e.peak == 3

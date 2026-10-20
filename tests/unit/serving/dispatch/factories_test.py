@@ -5,7 +5,7 @@
 
 Focuses on:
 - _validate_model_path branches for each engine factory
-- warmup_enabled / max_batch_size pass-throughs
+- warmup_enabled / max_batch_size / warmup_concurrency pass-throughs
 - Registry: get_engine_factory / get_handler_factory
 - Ollama model name resolution
 - Adapter scanning for vllm-server / peft factories
@@ -156,6 +156,30 @@ class TestEngineFactoryProperties:
 
     def test_peft_max_batch_size_is_one(self) -> None:
         assert PEFTEngineFactory().max_batch_size(_config()) == 1
+
+
+class TestWarmupConcurrency:
+    @pytest.mark.parametrize(
+        "factory", [NativeEngineFactory(), VLLMEngineFactory(), PEFTEngineFactory()]
+    )
+    def test_in_process_engines_warm_up_one_at_a_time(self, factory: object) -> None:
+        assert factory.warmup_concurrency(_config()) == 1  # type: ignore[attr-defined]
+
+    def test_ollama_uses_max_concurrent(self) -> None:
+        cfg = _config()
+        cfg.engines.ollama.max_concurrent = 6
+        assert OllamaEngineFactory().warmup_concurrency(cfg) == 6
+
+    @pytest.mark.parametrize(
+        "max_concurrent,max_num_seqs,expected", [(8, 16, 8), (8, 4, 4), (1, 16, 1)]
+    )
+    def test_vllm_server_capped_by_max_num_seqs(
+        self, max_concurrent: int, max_num_seqs: int, expected: int
+    ) -> None:
+        cfg = _config()
+        cfg.engines.vllm_server.max_concurrent = max_concurrent
+        cfg.engines.vllm_server.max_num_seqs = max_num_seqs
+        assert VLLMServerEngineFactory().warmup_concurrency(cfg) == expected
 
 
 # ---------------------------------------------------------------------------

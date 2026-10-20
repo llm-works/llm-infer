@@ -219,8 +219,11 @@ class BootSequence:
         if not factory.warmup_enabled(self._config):
             return
 
-        baseline = warmup_base_model(self._lg, self._engine)
-        warmup_adapters(self._lg, self._engine, self._adapter_manager, baseline)
+        concurrency = factory.warmup_concurrency(self._config)
+        baseline = warmup_base_model(self._lg, self._engine, concurrency)
+        warmup_adapters(
+            self._lg, self._engine, self._adapter_manager, baseline, concurrency
+        )
 
     def mark_ready(self) -> None:
         """Phase 5: Mark server as ready to accept requests."""
