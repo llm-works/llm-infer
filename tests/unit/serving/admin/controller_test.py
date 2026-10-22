@@ -198,6 +198,19 @@ def test_failed_adapter_refresh_stays_released_with_error() -> None:
     assert controller.status()["last_error"] == "adapter directory unreadable"
 
 
+def test_failed_resume_releases_engine_so_retry_works() -> None:
+    engine, handler = _Engine(), _handler()
+    handler.resume.side_effect = TimeoutError("loop thread blocked")
+    controller, shared = _controller(engine, handler, BackendState.RELEASED)
+
+    controller.start_reacquire()
+    _wait_state(shared, BackendState.RELEASED)
+
+    # Engine was started, then released when resume failed
+    assert engine.calls == ["refresh_adapters", "reacquire", "release"]
+    assert "handler resume failed" in controller.status()["last_error"]
+
+
 def test_reacquire_when_serving_is_a_noop() -> None:
     engine = _Engine()
     controller, _ = _controller(engine, _handler())

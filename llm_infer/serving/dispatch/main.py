@@ -259,6 +259,7 @@ class BootSequence:
         if manager is None:
             return
         adapters = manager.collect()
+        # apply() mutates indexes the loop thread reads; timeout guards against hangs
         self._loop_tasks.call(lambda: manager.apply(adapters), HANDLER_CALL_TIMEOUT)
         self._engine.set_adapters(adapters)
 

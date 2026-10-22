@@ -138,6 +138,13 @@ class BackendController:
         except Exception as e:
             self._last_error = f"handler resume failed: {e}"
             self._lg.error("handler resume failed", extra={"exception": e})
+            try:
+                self._engine.release()
+            except Exception as release_err:
+                self._lg.warning(
+                    "failed to release engine after resume failure",
+                    extra={"exception": release_err},
+                )
             self._state.set(BackendState.RELEASED)
             return
         self._lg.info("backend reacquired")
