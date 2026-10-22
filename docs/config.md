@@ -77,13 +77,16 @@ call is refused with 401.
 | Call | Result |
 |---|---|
 | `POST /admin/release` | Stops the backend; returns 200 `{"state": "released"}` once its processes are gone and the GPU memory is free. Idempotent. |
-| `POST /admin/reacquire` | Starts the backend again; returns 202 `{"state": "loading"}` (200 if already serving). |
+| `POST /admin/reacquire` | Rescans the LoRA adapter directory and starts the backend again with what it finds; returns 202 `{"state": "loading"}` (200 if already serving). |
 | `GET /admin/status` | `{"state": ..., "last_error": ...}`; state is `initializing`, `serving`, `releasing`, `released` or `loading`. A failed reacquire leaves `released` with the error in `last_error`. |
 
 While the backend is releasing, released or loading, the inference routes (`/v1/chat/completions`,
 `/v1/completions`, `/v1/embeddings`, `/generate`) answer 503 with `Retry-After`; `/health` and
 `/v1/models` keep answering. Requests already queued or running when a release starts are
 answered 503 too.
+
+Adapters deployed to, replaced in or removed from the LoRA `base_path` while the backend is
+released are served, or gone, once it is reacquired.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8090/admin/release

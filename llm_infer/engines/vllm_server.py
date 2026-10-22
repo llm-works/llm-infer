@@ -453,7 +453,7 @@ class VLLMServerEngine:
         self._adapter_paths: dict[str, str] = {}
         self._adapter_metadata: dict[str, dict[str, str]] = {}
         if adapters:
-            self._init_adapters(adapters)
+            self.set_adapters(adapters)
 
         # Cached from /v1/models query during connection verification
         self._max_model_len: int | None = None
@@ -509,12 +509,19 @@ class VLLMServerEngine:
     # LoRA adapter initialization
     # -------------------------------------------------------------------------
 
-    def _init_adapters(self, adapters: list[LoadedAdapter]) -> None:
-        """Initialize adapter maps from pre-scanned LoadedAdapter list.
+    def set_adapters(self, adapters: list[LoadedAdapter]) -> None:
+        """Replace the adapters the server is started with (--lora-modules).
 
         Builds _adapter_paths and _adapter_metadata from adapters provided
-        by AdapterManager (single source of truth).
+        by AdapterManager (single source of truth). Takes effect at the next
+        server start, so only while no server runs: at init, or while released.
         """
+        if self._process is not None:
+            raise RuntimeError(
+                "adapters can only be replaced while the server is stopped"
+            )
+        self._adapter_paths = {}
+        self._adapter_metadata = {}
         for adapter in adapters:
             self._adapter_paths[adapter.key] = str(adapter.path)
             self._adapter_metadata[adapter.key] = {

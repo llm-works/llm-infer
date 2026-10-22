@@ -362,3 +362,57 @@ class TestLogChanges:
         ]
         assert "ad-bbbbbbbbbbbb" in loaded_keys
         assert "ad-aaaaaaaaaaaa" not in loaded_keys
+
+
+# ---------------------------------------------------------------------------
+# collect() / apply(): scan() split so the slow half can run off the loop thread
+# ---------------------------------------------------------------------------
+
+
+class TestCollectApply:
+    def test_collect_leaves_manager_unchanged(self, lg: Logger, tmp_path: Path) -> None:
+        _make_adapter_dir(
+            tmp_path, "ad-aaaaaaaaaaaa", adapter_config_json={"peft_type": "LORA"}
+        )
+        mgr = AdapterManager(lg, base_path=str(tmp_path))
+
+        collected = mgr.collect()
+
+        assert [a.key for a in collected] == ["ad-aaaaaaaaaaaa"]
+        assert mgr.list() == []
+        assert mgr.resolve("ad-aaaaaaaaaaaa") is None
+
+    def test_apply_replaces_adapters(self, lg: Logger, tmp_path: Path) -> None:
+        old = _make_adapter_dir(
+            tmp_path, "ad-aaaaaaaaaaaa", adapter_config_json={"peft_type": "LORA"}
+        )
+        mgr = AdapterManager(lg, base_path=str(tmp_path))
+        mgr.scan()
+        (old / "adapter_config.json").unlink()  # No longer an adapter
+        _make_adapter_dir(
+            tmp_path, "ad-bbbbbbbbbbbb", adapter_config_json={"peft_type": "LORA"}
+        )
+
+        assert mgr.apply(mgr.collect()) == 1
+
+        assert [a.key for a in mgr.list()] == ["ad-bbbbbbbbbbbb"]
+        assert mgr.resolve("ad-aaaaaaaaaaaa") is None
+        assert mgr.resolve("ad") is not None  # Name resolves to the remaining version
+
+    def test_missing_base_path_clears_adapters(
+        self, lg: Logger, tmp_path: Path
+    ) -> None:
+        d = _make_adapter_dir(
+            tmp_path / "base",
+            "ad-aaaaaaaaaaaa",
+            adapter_config_json={"peft_type": "LORA"},
+        )
+        mgr = AdapterManager(lg, base_path=str(tmp_path / "base"))
+        mgr.scan()
+        (d / "adapter_config.json").unlink()
+        (d / "adapter_model.safetensors").unlink()
+        d.rmdir()
+        (tmp_path / "base").rmdir()
+
+        assert mgr.scan() == 0
+        assert mgr.list() == []

@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Serving: admin listener to release the vLLM server's GPU and reacquire it without restarting
-  serve; inference answers 503 with `Retry-After` meanwhile. Off by default; see the `admin`
-  section in [docs/config.md](docs/config.md#admin-listener).
+  serve; inference answers 503 with `Retry-After` meanwhile, and reacquire rescans the LoRA
+  adapter directory. Off by default; see the `admin` section in
+  [docs/config.md](docs/config.md#admin-listener).
 
 - vLLM server engine: pass any `vllm serve` argument through `llm-infer serve ... -- <args>`
   or the `extra_args` config list; `--port` and `--served-model-name` are rejected.
