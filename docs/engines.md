@@ -384,7 +384,7 @@ The PEFT engine handles these non-LoRA adapter types using the PEFT library dire
 ### Prerequisites
 
 ```bash
-pip install transformers peft
+pip install llm-infer[runtime]
 
 # Optional: 4-bit quantization
 pip install bitsandbytes

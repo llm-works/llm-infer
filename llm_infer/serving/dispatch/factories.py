@@ -342,7 +342,7 @@ class PEFTEngineFactory(EngineFactory):
         except ImportError as e:
             raise ImportError(
                 "PEFT engine requested (backends.engine=peft) but dependencies "
-                "not installed. Install with: pip install transformers peft"
+                "not installed. Install with: pip install llm-infer[runtime]"
             ) from e
 
         self._validate_model_path(config)
