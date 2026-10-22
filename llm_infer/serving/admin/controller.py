@@ -140,8 +140,8 @@ class BackendController:
         try:
             self._resume_serving()
         except Exception as e:
-            self._fail_reacquire(f"handler resume failed: {e}", e)
             self._try_release_after_failure()
+            self._fail_reacquire(f"handler resume failed: {e}", e)
             return
         self._lg.info("backend reacquired")
 
