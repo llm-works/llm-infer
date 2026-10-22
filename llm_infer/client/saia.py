@@ -16,7 +16,7 @@ Usage:
         saia = SAIA(backend=backend)
         result = await saia.verify("The sky is blue", "factually accurate")
 
-Requires: pip install llm-infer[saia]
+Requires: pip install 'llm-infer[saia]'
 """
 
 from __future__ import annotations

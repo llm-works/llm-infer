@@ -41,7 +41,7 @@ backend = AnthropicBackend(
 )
 ```
 
-Requires: `pip install llm-infer[anthropic]`
+Requires: `pip install 'llm-infer[anthropic]'`
 
 Key differences from OpenAI:
 - System messages passed separately (not in messages array)
@@ -90,7 +90,7 @@ result = backend.embed("Hello world")
 ```
 
 Token counting uses tiktoken (local, no API call).
-Requires: `pip install llm-infer[embedding]`
+Requires: `pip install 'llm-infer[embedding]'`
 
 ### GoogleEmbeddingBackend
 

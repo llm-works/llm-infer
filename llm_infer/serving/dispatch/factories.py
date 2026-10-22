@@ -68,7 +68,7 @@ class NativeEngineFactory(EngineFactory):
         except ImportError as e:
             raise ImportError(
                 "Native engine requested (backends.engine=native) but torch is not installed. "
-                "Install with: pip install llm-infer[runtime]\n"
+                "Install with: pip install 'llm-infer[runtime]'\n"
                 "Or use Ollama engine: llm-infer serve --engine ollama"
             ) from e
 
@@ -342,7 +342,7 @@ class PEFTEngineFactory(EngineFactory):
         except ImportError as e:
             raise ImportError(
                 "PEFT engine requested (backends.engine=peft) but dependencies "
-                "not installed. Install with: pip install transformers peft"
+                "not installed. Install with: pip install 'llm-infer[runtime]'"
             ) from e
 
         self._validate_model_path(config)

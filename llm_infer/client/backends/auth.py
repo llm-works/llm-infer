@@ -13,7 +13,7 @@ Three implementations cover current providers:
 - ``GoogleAPIKeyHeaderAuth``: ``x-goog-api-key: <key>`` (AI Studio embeddings).
 - ``GCPServiceAccountAuth``: ``Authorization: Bearer <token>`` with token
   exchange + refresh from a service-account JSON key (Vertex AI). Requires the
-  ``[gcp]`` extra (``pip install llm-infer[gcp]``).
+  ``[gcp]`` extra (``pip install 'llm-infer[gcp]'``).
 
 The async path wraps the sync refresh in ``asyncio.to_thread`` because
 ``google-auth``'s transport is sync-only.

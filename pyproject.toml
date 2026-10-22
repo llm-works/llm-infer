@@ -61,6 +61,7 @@ runtime = [
     "torch>=2.0.0,<3.0.0",
     "transformers>=5.10.4,<6.0.0",
     "safetensors>=0.4.0,<1.0.0",
+    "peft>=0.21.0,<1.0.0",
 ]
 # CUDA: GPU serving with vLLM (includes runtime)
 cuda = [
@@ -110,15 +111,29 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
-ignore_missing_imports = true
 exclude = ["llm_infer/examples/"]
 
+# ML stack: not analysed, its imports are Any. vllm, flashinfer and pynvml need
+# CUDA and don't install on the CI runner, and analysing torch/transformers ties
+# the check to their annotations across our wide version ranges. Skipped the same
+# way locally and in CI, so both give the same verdict. pynvml has no types at all;
 # numpy >= 2.5 stubs use 3.12 `type` statements, which mypy rejects under
-# python_version 3.11. llm_infer never imports numpy; torch/transformers stubs do.
+# python_version 3.11 (llm_infer never imports numpy, its dependencies do).
 [[tool.mypy.overrides]]
-module = ["numpy", "numpy.*"]
+module = [
+    "torch.*",
+    "transformers.*",
+    "vllm.*",
+    "flashinfer.*",
+    "safetensors.*",
+    "peft.*",
+    "tokenizers.*",
+    "pynvml.*",
+    "numpy.*",
+]
 follow_imports = "skip"
 follow_imports_for_stubs = true
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

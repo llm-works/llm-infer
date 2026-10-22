@@ -448,7 +448,7 @@ class PEFTEngine:
         except ImportError as e:
             raise ImportError(
                 "PEFT library required for PROMPT_TUNING adapters. "
-                "Install with: pip install peft"
+                "Install with: pip install 'llm-infer[runtime]'"
             ) from e
 
         if self._peft_model is None:

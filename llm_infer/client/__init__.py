@@ -55,7 +55,7 @@ Classes:
 
 Backends:
     - OpenAICompatibleBackend: Works with OpenAI, llm-infer, vLLM, Ollama
-    - AnthropicBackend: Anthropic Claude API (requires: pip install llm-infer[anthropic])
+    - AnthropicBackend: Anthropic Claude API (requires: pip install 'llm-infer[anthropic]')
 
 llm-infer Extensions:
     - adapter: LoRA adapter selection for vLLM
@@ -176,7 +176,7 @@ __all__ = [
     "ModelConflictError",
 ]
 
-# Optional SAIA integration (requires: pip install llm-infer[saia])
+# Optional SAIA integration (requires: pip install 'llm-infer[saia]')
 try:
     from .saia import SAIAAdapter  # noqa: F401
 
