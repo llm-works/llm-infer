@@ -125,29 +125,38 @@ class BackendController:
 
     def _reacquire(self) -> None:
         self._lg.info("reacquiring backend")
+        # Clean up stale process from a prior failed cleanup. Idempotent if released.
+        try:
+            self._engine.release()
+        except Exception as e:
+            self._fail_reacquire(f"cleanup of stale process failed: {e}", e)
+            return
         try:
             self._refresh_adapters()
             self._engine.reacquire()
         except Exception as e:
-            self._last_error = str(e)
-            self._lg.error("reacquire failed", extra={"exception": e})
-            self._state.set(BackendState.RELEASED)
+            self._fail_reacquire(str(e), e)
             return
         try:
             self._resume_serving()
         except Exception as e:
-            self._last_error = f"handler resume failed: {e}"
-            self._lg.error("handler resume failed", extra={"exception": e})
-            try:
-                self._engine.release()
-            except Exception as release_err:
-                self._lg.warning(
-                    "failed to release engine after resume failure",
-                    extra={"exception": release_err},
-                )
-            self._state.set(BackendState.RELEASED)
+            self._fail_reacquire(f"handler resume failed: {e}", e)
+            self._try_release_after_failure()
             return
         self._lg.info("backend reacquired")
+
+    def _fail_reacquire(self, msg: str, exc: Exception) -> None:
+        """Log error, record it, and set state to RELEASED."""
+        self._last_error = msg
+        self._lg.error("reacquire failed", extra={"error": msg, "exception": exc})
+        self._state.set(BackendState.RELEASED)
+
+    def _try_release_after_failure(self) -> None:
+        """Best-effort release after a resume failure left the engine running."""
+        try:
+            self._engine.release()
+        except Exception as e:
+            self._lg.warning("failed to release engine", extra={"exception": e})
 
     def _resume_serving(self) -> None:
         """Let the handler accept requests again and mark the backend SERVING."""

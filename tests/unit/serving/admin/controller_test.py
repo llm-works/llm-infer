@@ -40,11 +40,14 @@ class _Engine:
         self.manages_backend = manages_backend
         self.calls: list[str] = []
         self.reacquire_error: Exception | None = None
+        self.release_error: Exception | None = None
         self.reacquire_gate = threading.Event()
         self.reacquire_gate.set()
 
     def release(self) -> None:
         self.calls.append("release")
+        if self.release_error:
+            raise self.release_error
 
     def reacquire(self) -> None:
         self.reacquire_gate.wait(5)
@@ -179,7 +182,8 @@ def test_reacquire_refreshes_adapters_before_starting_backend() -> None:
     controller.start_reacquire()
     _wait_state(shared, BackendState.SERVING)
 
-    assert engine.calls == ["refresh_adapters", "reacquire"]
+    # release() first (idempotent cleanup), then refresh, then reacquire
+    assert engine.calls == ["release", "refresh_adapters", "reacquire"]
 
 
 def test_failed_adapter_refresh_stays_released_with_error() -> None:
@@ -193,7 +197,8 @@ def test_failed_adapter_refresh_stays_released_with_error() -> None:
     controller.start_reacquire()
     _wait_state(shared, BackendState.RELEASED)
 
-    assert engine.calls == []  # Backend not started on a failed scan
+    # release() runs first (idempotent), then refresh fails
+    assert engine.calls == ["release"]
     handler.resume.assert_not_called()
     assert controller.status()["last_error"] == "adapter directory unreadable"
 
@@ -206,9 +211,23 @@ def test_failed_resume_releases_engine_so_retry_works() -> None:
     controller.start_reacquire()
     _wait_state(shared, BackendState.RELEASED)
 
-    # Engine was started, then released when resume failed
-    assert engine.calls == ["refresh_adapters", "reacquire", "release"]
+    # release() first (idempotent), then started, then released when resume failed
+    assert engine.calls == ["release", "refresh_adapters", "reacquire", "release"]
     assert "handler resume failed" in controller.status()["last_error"]
+
+
+def test_stale_process_cleanup_failure_stays_released() -> None:
+    """If cleanup of a stale process fails, stay RELEASED with the error."""
+    engine, handler = _Engine(), _handler()
+    engine.release_error = OSError("zombie process won't die")
+    controller, shared = _controller(engine, handler, BackendState.RELEASED)
+
+    controller.start_reacquire()
+    _wait_state(shared, BackendState.RELEASED)
+
+    assert engine.calls == ["release"]  # Cleanup attempted, failed, nothing else ran
+    handler.resume.assert_not_called()
+    assert "cleanup of stale process failed" in controller.status()["last_error"]
 
 
 def test_reacquire_when_serving_is_a_noop() -> None:
