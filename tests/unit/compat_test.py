@@ -7,7 +7,6 @@ import tempfile
 
 import pytest
 import yaml
-from appinfra.log import create_lg
 
 from llm_infer.compat import (
     DEFAULT_ARCHITECTURE_TYPES,
@@ -21,12 +20,6 @@ from llm_infer.compat import (
 )
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def lg():
-    """Create a logger for tests."""
-    return create_lg("test", "debug")
 
 
 class TestGetVersion:

@@ -5,7 +5,6 @@
 
 import pytest
 import torch
-from appinfra.log import create_lg
 
 from llm_infer.engines.native.backends.linear.formats import QuantFormat
 from llm_infer.engines.native.backends.linear.formats.fp8 import FP8Weights
@@ -14,12 +13,6 @@ from llm_infer.engines.native.backends.linear.kernels.fp8_pytorch import (
 )
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def lg():
-    """Create a logger for tests."""
-    return create_lg("test", "debug")
 
 
 class TestPyTorchFP8BackendAvailability:
