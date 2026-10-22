@@ -19,7 +19,7 @@ from appinfra.time import Ticker, since, start
 
 from ..adapters import AdapterManager
 from ..admin import api as admin_api
-from ..admin.controller import BackendController
+from ..admin.controller import HANDLER_CALL_TIMEOUT, BackendController
 from ..admin.gate import BackendGateMiddleware
 from ..admin.state import BackendState, SharedBackendState
 from ..api.openai.router import OpenAIRouterConfig
@@ -242,8 +242,25 @@ class BootSequence:
             self._handler,
             self._backend_state,
             self._loop_tasks,
+            self._refresh_adapters,
         )
         admin_api.start(self._lg, controller, self._config.admin)
+
+    def _refresh_adapters(self) -> None:
+        """Rescan the adapter directory before a reacquire.
+
+        The handler resolves, and the engine starts its backend with, the same
+        scan, so adapters deployed or removed while released are served or gone.
+        The scan hashes every adapter's weights, so it runs on the calling thread;
+        only the index swap runs on the loop thread, which owns the handler and
+        reads the indexes for every adapter lookup.
+        """
+        manager = self._adapter_manager
+        if manager is None:
+            return
+        adapters = manager.collect()
+        self._loop_tasks.call(lambda: manager.apply(adapters), HANDLER_CALL_TIMEOUT)
+        self._engine.set_adapters(adapters)
 
     def run_loop(self) -> None:
         """Phase 7: Run main request loop until shutdown."""

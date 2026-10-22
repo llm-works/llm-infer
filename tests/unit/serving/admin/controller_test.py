@@ -60,12 +60,26 @@ def _handler() -> MagicMock:
 
 
 def _controller(
-    engine: Any, handler: Any, state: BackendState = BackendState.SERVING
+    engine: Any,
+    handler: Any,
+    state: BackendState = BackendState.SERVING,
+    refresh_adapters: Callable[[], None] | None = None,
 ) -> tuple[BackendController, SharedBackendState]:
     shared = SharedBackendState()
     shared.set(state)
     lg = MagicMock(spec=Logger)
-    controller = BackendController(lg, engine, handler, shared, _ImmediateLoopTasks())  # type: ignore[arg-type]
+    if refresh_adapters is None:
+        # Records into the engine's calls, so tests see it relative to reacquire
+        calls = getattr(engine, "calls", [])
+        refresh_adapters = lambda: calls.append("refresh_adapters")  # noqa: E731
+    controller = BackendController(
+        lg,
+        engine,
+        handler,
+        shared,
+        _ImmediateLoopTasks(),  # type: ignore[arg-type]
+        refresh_adapters,
+    )
     return controller, shared
 
 
@@ -156,6 +170,32 @@ def test_reacquire_loads_then_serves() -> None:
     _wait_state(shared, BackendState.SERVING)
     handler.resume.assert_called_once()
     assert controller.status() == {"state": "serving", "last_error": None}
+
+
+def test_reacquire_refreshes_adapters_before_starting_backend() -> None:
+    engine = _Engine()
+    controller, shared = _controller(engine, _handler(), BackendState.RELEASED)
+
+    controller.start_reacquire()
+    _wait_state(shared, BackendState.SERVING)
+
+    assert engine.calls == ["refresh_adapters", "reacquire"]
+
+
+def test_failed_adapter_refresh_stays_released_with_error() -> None:
+    engine, handler = _Engine(), _handler()
+
+    def refresh() -> None:
+        raise OSError("adapter directory unreadable")
+
+    controller, shared = _controller(engine, handler, BackendState.RELEASED, refresh)
+
+    controller.start_reacquire()
+    _wait_state(shared, BackendState.RELEASED)
+
+    assert engine.calls == []  # Backend not started on a failed scan
+    handler.resume.assert_not_called()
+    assert controller.status()["last_error"] == "adapter directory unreadable"
 
 
 def test_reacquire_when_serving_is_a_noop() -> None:

@@ -192,23 +192,31 @@ class AdapterManager:
         Returns:
             Number of enabled adapters found.
         """
-        if not self._is_scannable():
-            self._adapters.clear()
-            self._versions.clear()
-            return 0
+        return self.apply(self.collect())
 
-        adapters_list = self._scan_and_load_adapters()
-        self._log_changes(adapters_list)
-        self._populate_indexes(adapters_list)
+    def collect(self) -> list[LoadedAdapter]:
+        """Scan base_path and return its enabled adapters, without changing this manager.
+
+        The slow half of scan(): reads every adapter's config and hashes its
+        weights. Safe to run on another thread while this manager serves lookups.
+        """
+        if not self._is_scannable():
+            return []
+        return self._scan_and_load_adapters()
+
+    def apply(self, adapters: list[LoadedAdapter]) -> int:
+        """Make adapters (from collect()) the ones this manager knows; return their count."""
+        self._log_changes(adapters)
+        self._populate_indexes(adapters)
 
         self._lg.debug(
             "adapter scan complete",
             extra={
-                "enabled_count": len(adapters_list),
+                "enabled_count": len(adapters),
                 "unique_names": len(self._versions),
             },
         )
-        return len(adapters_list)
+        return len(adapters)
 
     def _scan_and_load_adapters(self) -> list[LoadedAdapter]:
         """Scan directory and load enabled adapters."""

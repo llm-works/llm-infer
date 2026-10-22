@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from appinfra.log import Logger
@@ -39,8 +40,10 @@ class BackendController:
     release(): new inference is answered 503 (state RELEASING), the handler
     answers what's queued or running and refuses more, then the engine stops the
     backend and returns once its processes are gone (state RELEASED).
-    start_reacquire(): state LOADING, the engine starts the backend in a
-    background thread, then the handler accepts requests again (state SERVING).
+    start_reacquire(): state LOADING, refresh_adapters() rescans the adapter
+    directory and the engine starts the backend with the result, in a background
+    thread, then the handler accepts requests again (state SERVING). Adapters
+    deployed or removed while released are served or gone from then on.
     A failed reacquire leaves RELEASED, with the error in status().
 
     Transitions are checked under a lock; the long steps run outside it, the
@@ -54,12 +57,14 @@ class BackendController:
         handler: RequestHandler,
         state: SharedBackendState,
         loop_tasks: LoopTasks,
+        refresh_adapters: Callable[[], None],
     ) -> None:
         self._lg = lg
         self._engine = engine
         self._handler = handler
         self._state = state
         self._loop_tasks = loop_tasks
+        self._refresh_adapters = refresh_adapters
         self._lock = threading.Lock()
         self._last_error: str | None = None
 
@@ -121,6 +126,7 @@ class BackendController:
     def _reacquire(self) -> None:
         self._lg.info("reacquiring backend")
         try:
+            self._refresh_adapters()
             self._engine.reacquire()
         except Exception as e:
             self._last_error = str(e)

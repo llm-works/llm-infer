@@ -7,8 +7,9 @@ public API port, bound to an intranet address, with its own bearer tokens.
 * `POST /admin/release`: stop the backend, freeing its GPU memory. Returns 200
   once its processes are gone (`{"state": "released"}`); inference answers 503
   meanwhile and until reacquired.
-* `POST /admin/reacquire`: start the backend again. 202 with `{"state":
-  "loading"}`; 200 if already serving. Follow progress with status.
+* `POST /admin/reacquire`: rescan the LoRA adapter directory and start the
+  backend again with what it finds. 202 with `{"state": "loading"}`; 200 if
+  already serving. Follow progress with status.
 * `GET /admin/status`: `{"state": ..., "last_error": ...}`, state one of
   initializing, serving, releasing, released, loading.
 

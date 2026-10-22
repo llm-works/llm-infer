@@ -3,6 +3,7 @@
 
 """Unit tests for vLLM server inference engine."""
 
+import itertools
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -613,3 +614,66 @@ class TestVLLMServerRelease:
         engine.reacquire()
 
         engine._start_server.assert_not_called()
+
+
+class TestVLLMServerSetAdapters:
+    """set_adapters(): the adapters the next server start registers."""
+
+    def _engine(self) -> Any:
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+        from llm_infer.serving.dispatch.config import LoRAConfig, VLLMServerConfig
+
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._config = VLLMServerConfig(
+            model_path="/models/test", lora=LoRAConfig(enabled=True)
+        )
+        engine._model_name = "test"
+        engine._process = None
+        engine._adapter_paths = {}
+        engine._adapter_metadata = {}
+        return engine
+
+    @staticmethod
+    def _adapter(key: str) -> Any:
+        from pathlib import Path
+
+        from llm_infer.serving.adapters import LoadedAdapter
+
+        return LoadedAdapter(key=key, name=key, path=Path(f"/adapters/{key}"))
+
+    def _lora_modules(self, engine: Any) -> list[str]:
+        """The adapter specs after --lora-modules, up to the next flag."""
+        cmd = engine._build_serve_command()
+        specs = cmd[cmd.index("--lora-modules") + 1 :]
+        return list(itertools.takewhile(lambda arg: not arg.startswith("--"), specs))
+
+    def test_replaces_adapters_for_next_start(self) -> None:
+        engine = self._engine()
+        engine.set_adapters([self._adapter("old"), self._adapter("kept")])
+
+        engine.set_adapters([self._adapter("kept"), self._adapter("new")])
+
+        assert self._lora_modules(engine) == [
+            "kept=/adapters/kept",
+            "new=/adapters/new",
+        ]
+        assert set(engine._adapter_metadata) == {"kept", "new"}
+
+    def test_empty_list_registers_no_adapters(self) -> None:
+        engine = self._engine()
+        engine.set_adapters([self._adapter("old")])
+
+        engine.set_adapters([])
+
+        assert "--lora-modules" not in engine._build_serve_command()
+
+    def test_refused_while_server_runs(self) -> None:
+        engine = self._engine()
+        engine.set_adapters([self._adapter("old")])
+        engine._process = MagicMock()
+
+        with pytest.raises(RuntimeError):
+            engine.set_adapters([self._adapter("new")])
+
+        assert engine._adapter_paths == {"old": "/adapters/old"}
