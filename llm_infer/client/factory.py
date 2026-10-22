@@ -560,7 +560,7 @@ class Factory:
     ) -> LLMClient:
         """Create LLMClient for Anthropic Claude API.
 
-        Requires: pip install llm-infer[anthropic]
+        Requires: pip install 'llm-infer[anthropic]'
 
         Args:
             default_model: Claude model name.

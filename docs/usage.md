@@ -225,7 +225,7 @@ The default engine is **Ollama**. Override with `--engine`.
 - Full visibility into the inference pipeline
 - Custom implementation using PyTorch and FlashInfer
 - Best for understanding how inference works
-- **Install**: `pip install llm-infer[runtime]`
+- **Install**: `pip install 'llm-infer[runtime]'`
 
 ### Quantization
 

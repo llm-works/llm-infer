@@ -6,7 +6,7 @@
 This backend uses the official Anthropic Python SDK to interact with Claude
 models. It requires the anthropic package to be installed:
 
-    pip install llm-infer[anthropic]
+    pip install 'llm-infer[anthropic]'
 
 Key differences from OpenAI-compatible backends:
 - System messages are passed as a separate parameter, not in messages
@@ -53,7 +53,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
     This backend uses the official Anthropic SDK. It translates between
     the common Backend interface and Anthropic's native API format.
 
-    Requires: pip install llm-infer[anthropic]
+    Requires: pip install 'llm-infer[anthropic]'
 
     Example:
         # Sync usage
@@ -113,7 +113,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         except ImportError as e:
             raise ImportError(
                 "anthropic package not installed. "
-                "Install with: pip install llm-infer[anthropic]"
+                "Install with: pip install 'llm-infer[anthropic]'"
             ) from e
 
         self._anthropic = anthropic_module

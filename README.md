@@ -181,8 +181,8 @@ configuration and override patterns.
 |--------|-------------|---------|
 | `ollama` (default) | Wraps the Ollama server | [ollama.com](https://ollama.com) |
 | `vllm` / `vllm-server` | vLLM — in-process (LoRA hot-swap) or as HTTP subprocess (LoRA pinned at boot) | `pip install vllm` |
-| `native` | From-scratch torch implementation (PagedAttention + FlashInfer) | `pip install llm-infer[runtime]` |
-| `peft` | HuggingFace PEFT, incl. PROMPT_TUNING adapters | `pip install llm-infer[runtime]` |
+| `native` | From-scratch torch implementation (PagedAttention + FlashInfer) | `pip install 'llm-infer[runtime]'` |
+| `peft` | HuggingFace PEFT, incl. PROMPT_TUNING adapters | `pip install 'llm-infer[runtime]'` |
 
 ```bash
 llm-infer serve --model qwen2.5:7b                          # Ollama
@@ -213,10 +213,10 @@ library passes these through as keyword arguments on `client.chat()`.
 ## Installation
 
 ```bash
-pip install llm-infer              # Client library only
-pip install llm-infer[anthropic]   # + Anthropic support
-pip install llm-infer[saia]        # + llm-saia integration
-pip install llm-infer[runtime]     # + native engine and serve (torch)
+pip install llm-infer               # Client library only
+pip install 'llm-infer[anthropic]'  # + Anthropic support
+pip install 'llm-infer[saia]'       # + llm-saia integration
+pip install 'llm-infer[runtime]'    # + native engine and serve (torch)
 ```
 
 ## Supported Python versions
