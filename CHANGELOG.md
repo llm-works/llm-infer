@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-25
+
 ### Added
 
 - Serving: admin listener to release the vLLM server's GPU and reacquire it without restarting
@@ -19,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Dependencies: requires `appinfra>=0.12.0` (was `>=0.11.0`); the `saia` extra requires
+  `llm-saia>=0.6.0` (was `>=0.2.0`).
 - Serving: the vLLM server and Ollama engines send their warmup requests concurrently, up to
   `max_concurrent` (vLLM server: capped at `max_num_seqs`). In-process engines still warm up
   one request at a time.
@@ -527,7 +531,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/llm-works/llm-infer/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/llm-works/llm-infer/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/llm-works/llm-infer/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/llm-works/llm-infer/compare/v0.6.2...v0.6.3
