@@ -5,14 +5,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from appinfra.log import Logger
+from appinfra.service.errors import ChannelError
 
 from ....schemas.openai import AdapterInfoResponse, FinishReason, Role
+from ..cancel import send_cancel
 from .streaming import (
     create_chat_chunk,
     create_completion_chunk,
@@ -26,19 +29,13 @@ if TYPE_CHECKING:
     from ...dispatch.types import Request as InternalRequest
 
 
-def _map_finish_reason(reason: str | None) -> FinishReason:
-    """Map internal finish reason to OpenAI finish reason.
+def _map_finish_reason(reason: FinishReason | None) -> FinishReason:
+    """Map the final chunk's finish reason to the reported one (None -> STOP).
 
-    Note: Internal "error" maps to STOP since OpenAI's FinishReason enum
-    doesn't include an ERROR value. Error details are surfaced separately
-    via HTTP status codes and error responses for non-streaming requests.
+    Failed generations never reach this: their chunk's ``error`` field makes
+    the channel raise ChannelError, reported as an SSE error event.
     """
-    if reason == "length":
-        return FinishReason.LENGTH
-    if reason == "tool_calls":
-        return FinishReason.TOOL_CALLS
-    # "error" and all other cases map to STOP
-    return FinishReason.STOP
+    return reason or FinishReason.STOP
 
 
 def _extract_adapter_info(chunk: Any) -> AdapterInfoResponse | None:
@@ -96,12 +93,19 @@ class StreamingGenerator(ABC):
         """Create SSE event for the final chunk with finish reason."""
         pass
 
-    def _handle_timeout(self, e: TimeoutError) -> tuple[str, str]:
-        """Handle IPC timeout: log and return error SSE events."""
+    def _handle_ipc_error(self, e: Exception) -> tuple[str, str]:
+        """Handle an IPC failure: log and return error SSE events.
+
+        Covers timeouts and ChannelError, which appinfra's channel raises when
+        the engine side reports a failed request via the chunk's ``error`` field.
+        """
+        is_timeout = isinstance(e, TimeoutError)
         self._lg.warning(
-            "IPC timeout", extra={"request_id": self.request_id, "error": str(e)}
+            "IPC timeout" if is_timeout else "stream failed",
+            extra={"request_id": self.request_id, "exception": e},
         )
-        return format_sse_error(str(e), code="timeout"), format_sse_done()
+        code = "timeout" if is_timeout else "error"
+        return format_sse_error(str(e), code=code), format_sse_done()
 
     def _adjust_finish_reason(
         self, finish_reason: FinishReason, completion_tokens: int | None
@@ -114,30 +118,42 @@ class StreamingGenerator(ABC):
         if header := self.create_header_chunk():
             yield header
 
-        finish_reason, tool_calls, adapter, completion_tokens = (
-            FinishReason.STOP,
-            None,
-            None,
-            None,
-        )
+        final: Any = None
         try:
             async for chunk in self.ipc.submit_stream(internal_request):
                 if chunk.is_final:
-                    finish_reason = _map_finish_reason(chunk.finish_reason)
-                    completion_tokens = getattr(chunk, "completion_tokens", None)
-                    tool_calls = getattr(chunk, "tool_calls", None)
-                    adapter = _extract_adapter_info(chunk)
+                    final = chunk
                     break
                 if chunk.token and (content := self.create_content_chunk(chunk.token)):
                     yield content
-        except TimeoutError as e:
-            for event in self._handle_timeout(e):
+        except (asyncio.CancelledError, GeneratorExit):
+            # Client disconnected: Starlette cancels or closes this stream
+            send_cancel(self._lg, self.ipc, internal_request.id)
+            raise
+        except (TimeoutError, ChannelError) as e:
+            if isinstance(e, TimeoutError):
+                send_cancel(self._lg, self.ipc, internal_request.id)
+            for event in self._handle_ipc_error(e):
                 yield event
             return
 
-        finish_reason = self._adjust_finish_reason(finish_reason, completion_tokens)
-        yield self.create_final_chunk(finish_reason, tool_calls, adapter)
+        yield self._final_event(final)
         yield format_sse_done()
+
+    def _final_event(self, final: Any) -> str:
+        """Final SSE chunk from the engine's final chunk (None: stream just ended)."""
+        if final is None:
+            stop = self._adjust_finish_reason(FinishReason.STOP, None)
+            return self.create_final_chunk(stop, None, None)
+        finish_reason = self._adjust_finish_reason(
+            _map_finish_reason(final.finish_reason),
+            getattr(final, "completion_tokens", None),
+        )
+        return self.create_final_chunk(
+            finish_reason,
+            getattr(final, "tool_calls", None),
+            _extract_adapter_info(final),
+        )
 
 
 class ChatStreamingGenerator(StreamingGenerator):
@@ -166,12 +182,9 @@ class ChatStreamingGenerator(StreamingGenerator):
     ) -> FinishReason:
         """Override finish_reason if max tokens was reached.
 
-        Ensures streaming path uses same logic as non-streaming path.
-        Tool calls take precedence over length limit (matching determine_finish_reason).
+        Ensures streaming path uses same logic as non-streaming path: length
+        wins over tool_calls (matching determine_finish_reason).
         """
-        # Preserve tool_calls finish_reason (takes precedence over length)
-        if finish_reason == FinishReason.TOOL_CALLS:
-            return finish_reason
         if (
             self._effective_max_tokens is not None
             and completion_tokens is not None

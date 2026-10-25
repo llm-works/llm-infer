@@ -22,7 +22,9 @@ from typing import TYPE_CHECKING, Any, Self
 from appinfra.log import Logger
 from appinfra.size import size_str
 
+from ..schemas.openai import FinishReason
 from ..serving.dispatch.config import VLLMConfig
+from .finish import parse_finish_reason
 from .vllm_common import resolve_gpu_memory_utilization
 
 # Check for vLLM availability
@@ -52,6 +54,18 @@ def _check_vllm_available() -> None:
         )
 
 
+def _build_generate_result(outputs: Any) -> dict[str, Any]:
+    """Build the generate() result dict from vLLM RequestOutputs."""
+    if outputs and outputs[0].outputs:
+        output = outputs[0].outputs[0]
+        return {
+            "content": str(output.text),
+            "finish_reason": parse_finish_reason(output.finish_reason)
+            or FinishReason.STOP,
+        }
+    return {"content": "", "finish_reason": FinishReason.STOP}
+
+
 @dataclass
 class VLLMStreamingResult:
     """Streaming result wrapper for pre-generated vLLM output.
@@ -64,7 +78,7 @@ class VLLMStreamingResult:
     _current_idx: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    finish_reason: str | None = None
+    finish_reason: FinishReason | None = None
 
     def __iter__(self) -> Iterator[str]:
         return self
@@ -119,7 +133,7 @@ class VLLMStreamingIterator:
         # Final stats (populated when generation completes)
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
-        self.finish_reason: str | None = None
+        self.finish_reason: FinishReason | None = None
 
     def _start_generation(self) -> None:
         """Add request to the engine's scheduler."""
@@ -147,7 +161,7 @@ class VLLMStreamingIterator:
         # Check if finished
         if output.finished:
             self._finished = True
-            self.finish_reason = completion.finish_reason
+            self.finish_reason = parse_finish_reason(completion.finish_reason)
             self.completion_tokens = len(
                 self._tokenizer.encode(current_text, add_special_tokens=False)
             )
@@ -598,7 +612,7 @@ class VLLMEngine:
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -612,12 +626,12 @@ class VLLMEngine:
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> dict[str, Any]:
         """Generate text completion (blocking).
 
         Args:
             prompt: Input prompt text
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate (None: up to max_model_len)
             temperature: Sampling temperature
             top_p: Nucleus sampling parameter
             top_k: Top-k sampling parameter
@@ -632,7 +646,7 @@ class VLLMEngine:
             response_format: Structured output format (json_object or json_schema)
 
         Returns:
-            Generated text
+            Dict with "content" and "finish_reason"
         """
         # Note: tools/tool_choice are accepted but not used - vLLM doesn't support
         # native tool calling. The model may still generate tool-call-like output
@@ -660,10 +674,7 @@ class VLLMEngine:
             use_tqdm=False,
         )
 
-        # Extract text from output
-        if outputs and outputs[0].outputs:
-            return str(outputs[0].outputs[0].text)
-        return ""
+        return _build_generate_result(outputs)
 
     def _build_streaming_result(self, outputs: Any, prompt: str) -> VLLMStreamingResult:
         """Build VLLMStreamingResult from generation outputs."""
@@ -677,13 +688,13 @@ class VLLMEngine:
                 result.completion_tokens = len(
                     self._tokenizer.encode(text, add_special_tokens=False)
                 )
-            result.finish_reason = output.finish_reason
+            result.finish_reason = parse_finish_reason(output.finish_reason)
         return result
 
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -785,7 +796,7 @@ class VLLMEngine:
 
     def _create_sampling_params(
         self,
-        max_tokens: int,
+        max_tokens: int | None,
         temperature: float,
         top_p: float,
         top_k: int,

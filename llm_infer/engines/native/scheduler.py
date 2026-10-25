@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from ...schemas.openai import FinishReason
 from .kv_cache import BlockPool, SequenceKVCache
 
 if TYPE_CHECKING:
@@ -42,8 +43,8 @@ class Request:
     top_k: int = 0
     repetition_penalty: float = 1.0
     stop_token_ids: set[int] = field(default_factory=set)
-    # Guard-related fields
-    finish_reason: str | None = None
+    # Set when something other than the token loop stops generation (guards)
+    finish_reason: FinishReason | None = None
     warnings: list[str] = field(default_factory=list)
 
     @classmethod
@@ -93,12 +94,12 @@ class Request:
         """Mark the request as finished."""
         self.state = RequestState.FINISHED
 
-    def finish(self, reason: str, message: str | None = None) -> None:
+    def finish(self, reason: FinishReason, message: str | None = None) -> None:
         """Finish the request with a specific reason.
 
         Args:
-            reason: Why generation stopped (e.g., "guard", "max_tokens", "stop_token").
-            message: Optional detailed message.
+            reason: Reported finish reason (a guard stop reports STOP).
+            message: Optional detail, kept in warnings (e.g. which guard fired).
         """
         self.finish_reason = reason
         self.state = RequestState.FINISHED

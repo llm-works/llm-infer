@@ -4,14 +4,19 @@
 """Concurrent HTTP request handler for HTTP-based engines (vLLM server, Ollama)."""
 
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, wait
 from typing import TYPE_CHECKING
 
+from ....engines.protocol import AbortableEngineProtocol
 from ..handler import RequestHandler
-from ..types import Request, RequestStatus, Response
+from ..types import Request, RequestStatus, Response, StreamChunk, refusal_message
+from .daemon_executor import DaemonThreadExecutor
 
 if TYPE_CHECKING:
     from ....engines.protocol import InferenceEngineProtocol
+
+SHUTTING_DOWN_MESSAGE = "Server shutting down"
+RELEASED_MESSAGE = "Backend released"
 
 
 class ConcurrentHttpHandler(RequestHandler):
@@ -57,10 +62,18 @@ class ConcurrentHttpHandler(RequestHandler):
         self.max_concurrent = max_concurrent
         self.queue: deque[Request] = deque()
         self.in_flight: dict[str, Future[Response]] = {}
-        self._executor = ThreadPoolExecutor(
+        # Requests behind in_flight, so shutdown() can answer each in its own form
+        self._in_flight_requests: dict[str, Request] = {}
+        # In-flight requests whose caller gave up: their responses are dropped
+        self._cancelled: set[str] = set()
+        # Daemon workers: a call still blocked at shutdown (e.g. on an external
+        # vLLM server, which shutdown doesn't stop) must not hold up exit
+        self._executor = DaemonThreadExecutor(
             max_workers=max_concurrent, thread_name_prefix="http-handler"
         )
         self._shutdown = False
+        # Admin release in progress or done: refuse requests until resume()
+        self._suspended = False
 
     def submit(self, request: Request) -> bool:
         """
@@ -74,7 +87,7 @@ class ConcurrentHttpHandler(RequestHandler):
         Returns:
             True if accepted, False if rejected (at capacity).
         """
-        if self._shutdown:
+        if self._shutdown or self._suspended:
             return False
         if self.pending_count >= self.max_pending:
             return False
@@ -100,6 +113,7 @@ class ConcurrentHttpHandler(RequestHandler):
             request = self.queue.popleft()
             future = self._executor.submit(self._process_request_threadsafe, request)
             self.in_flight[request.id] = future
+            self._in_flight_requests[request.id] = request
 
     def _process_request_threadsafe(self, request: Request) -> Response:
         """Process a request in a worker thread.
@@ -118,35 +132,52 @@ class ConcurrentHttpHandler(RequestHandler):
 
     def _collect_completed(self) -> list[Response]:
         """Collect responses from completed futures without blocking."""
+        completed = [rid for rid, future in self.in_flight.items() if future.done()]
         responses: list[Response] = []
-        completed_ids: list[str] = []
-
-        for req_id, future in self.in_flight.items():
-            if future.done():
-                completed_ids.append(req_id)
-                try:
-                    response = future.result()
-                    # For streaming requests, response was sent via chunks
-                    # Only add non-streaming responses to the list
-                    if (
-                        response.status != RequestStatus.COMPLETED
-                        or response.result is not None
-                    ):
-                        responses.append(response)
-                except Exception as e:
-                    # Should not happen since _process_request_threadsafe catches exceptions
-                    responses.append(
-                        Response(
-                            id=req_id,
-                            status=RequestStatus.FAILED,
-                            error=f"Thread error: {e}",
-                        )
-                    )
-
-        for req_id in completed_ids:
-            del self.in_flight[req_id]
-
+        for req_id in completed:
+            future = self.in_flight.pop(req_id)
+            self._in_flight_requests.pop(req_id, None)
+            if req_id in self._cancelled:
+                # The caller gave up; nobody reads this response
+                self._cancelled.discard(req_id)
+                if isinstance(self._engine, AbortableEngineProtocol):
+                    self._engine.forget_abort(req_id)
+                continue
+            if (response := self._response_from(req_id, future)) is not None:
+                responses.append(response)
         return responses
+
+    @staticmethod
+    def _response_from(req_id: str, future: Future[Response]) -> Response | None:
+        """Response to send for a finished future; None if already streamed."""
+        try:
+            response = future.result()
+        except Exception as e:
+            # Should not happen since _process_request_threadsafe catches exceptions
+            return Response(
+                id=req_id, status=RequestStatus.FAILED, error=f"Thread error: {e}"
+            )
+        # A completed streaming request was answered by its chunks
+        if response.status == RequestStatus.COMPLETED and response.result is None:
+            return None
+        return response
+
+    def cancel(self, request_id: str) -> bool:
+        """Drop a queued request, or abort a running one through the engine.
+
+        Running requests need an engine that supports abort; with any other
+        engine the call runs to completion and only its response is dropped.
+        """
+        for request in self.queue:
+            if request.id == request_id:
+                self.queue.remove(request)
+                return True
+        if request_id not in self.in_flight:
+            return False
+        self._cancelled.add(request_id)
+        if isinstance(self._engine, AbortableEngineProtocol):
+            self._engine.abort(request_id)
+        return True
 
     @property
     def pending_count(self) -> int:
@@ -164,25 +195,65 @@ class ConcurrentHttpHandler(RequestHandler):
         return self._engine
 
     def shutdown(self) -> None:
-        """Graceful shutdown: fail pending requests and wait for in-flight to complete."""
+        """Answer queued and in-flight requests as unavailable; don't wait.
+
+        An in-flight HTTP call can't be interrupted from this thread: closing
+        the httpx client does not wake a read blocked in a worker. The calls end
+        when the engine stops an auto-started server; join() waits for them.
+        Calls on an external server may outlive this; the daemon workers then
+        end with the process.
+        """
         self._shutdown = True
 
-        # Fail queued requests that haven't started
-        failed_responses: list[Response] = []
-        while self.queue:
-            request = self.queue.popleft()
-            failed_responses.append(
-                Response(
-                    id=request.id,
-                    status=RequestStatus.FAILED,
-                    error="Handler shutting down",
-                )
-            )
-
-        # Put failed responses on the queue if available
+        running = [
+            r for r in self._in_flight_requests.values() if r.id not in self._cancelled
+        ]
+        unanswered = [*self.queue, *running]
+        self.queue.clear()
         if self._response_q is not None:
-            for response in failed_responses:
-                self._response_q.put(response)
+            for request in unanswered:
+                self._response_q.put(
+                    refusal_message(
+                        request, RequestStatus.UNAVAILABLE, SHUTTING_DOWN_MESSAGE
+                    )
+                )
 
-        # Shutdown executor, waiting for in-flight requests to complete
-        self._executor.shutdown(wait=True, cancel_futures=False)
+        self._executor.shutdown(cancel_futures=True)
+
+    def join(self, timeout: float) -> bool:
+        """Wait up to `timeout` seconds for in-flight calls to return."""
+        _, not_done = wait(list(self.in_flight.values()), timeout=timeout)
+        return not not_done
+
+    def rejection(self, request: Request) -> Response | StreamChunk:
+        """Answer for a request submit() refused."""
+        if self._suspended:
+            return refusal_message(request, RequestStatus.RELEASED, RELEASED_MESSAGE)
+        return super().rejection(request)
+
+    @property
+    def supports_suspend(self) -> bool:
+        return True
+
+    def suspend(self) -> None:
+        """Answer queued and running requests as released; refuse new ones.
+
+        Running requests are cancelled (aborted through the engine when it can,
+        their late responses dropped), so the backend can stop right after.
+        """
+        self._suspended = True
+        unanswered = [*self.queue]
+        self.queue.clear()
+        for request_id, request in list(self._in_flight_requests.items()):
+            if request_id not in self._cancelled:
+                unanswered.append(request)
+                self.cancel(request_id)
+        if self._response_q is not None:
+            for request in unanswered:
+                self._response_q.put(
+                    refusal_message(request, RequestStatus.RELEASED, RELEASED_MESSAGE)
+                )
+
+    def resume(self) -> None:
+        """Accept requests again after suspend()."""
+        self._suspended = False

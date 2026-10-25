@@ -12,6 +12,8 @@ These protocols define the contracts for inference engines, enabling:
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from ..schemas.openai import FinishReason
+
 if TYPE_CHECKING:
     from ..context import RequestContext
     from .native.scheduler import Request
@@ -40,8 +42,8 @@ class StreamingResultProtocol(Protocol):
         ...
 
     @property
-    def finish_reason(self) -> str:
-        """Reason generation stopped ('stop' or 'length')."""
+    def finish_reason(self) -> FinishReason | None:
+        """Reason generation stopped; None until generation finishes."""
         ...
 
     def __iter__(self) -> Iterator[str]:
@@ -142,6 +144,18 @@ class InferenceEngineProtocol(Protocol):
         """
         ...
 
+    def resolve_max_tokens(self, max_tokens: int | None, prompt_len: int) -> int:
+        """Return the generation budget for a batched request.
+
+        Args:
+            max_tokens: Requested cap, or None for the remaining context window.
+            prompt_len: Prompt length in tokens.
+
+        Returns:
+            Concrete max_tokens for the engine request.
+        """
+        ...
+
     def prefill_request(self, request: "Request") -> None:
         """Run prefill phase for a request.
 
@@ -174,7 +188,7 @@ class InferenceEngineProtocol(Protocol):
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -184,12 +198,13 @@ class InferenceEngineProtocol(Protocol):
         context: "RequestContext | None" = None,
         messages: list[dict[str, str]] | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> str | dict[str, Any]:
         """Generate text from a prompt (blocking).
 
         Args:
             prompt: Input text prompt.
-            max_tokens: Maximum tokens to generate.
+            max_tokens: Maximum tokens to generate; defaults to 100. Pass None
+                to generate up to the remaining context window.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
             top_k: Top-k sampling.
@@ -200,14 +215,15 @@ class InferenceEngineProtocol(Protocol):
             messages: Optional list of chat messages (for multi-turn/system).
 
         Returns:
-            Generated text.
+            Generated text, or a dict with "content" plus any of "tool_calls",
+            "usage", "adapter" and "finish_reason" (a FinishReason).
         """
         ...
 
     def generate_stream_sync(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         temperature: float = 1.0,
         top_p: float = 1.0,
         top_k: int = 0,
@@ -222,7 +238,8 @@ class InferenceEngineProtocol(Protocol):
 
         Args:
             prompt: Input text prompt.
-            max_tokens: Maximum tokens to generate.
+            max_tokens: Maximum tokens to generate; defaults to 100. Pass None
+                to generate up to the remaining context window.
             temperature: Sampling temperature.
             top_p: Nucleus sampling threshold.
             top_k: Top-k sampling.
@@ -257,5 +274,53 @@ class InferenceEngineProtocol(Protocol):
         - Stop any background workers
         - Release GPU memory
         - Clean up distributed process groups
+        """
+        ...
+
+
+class BackendNotManagedError(RuntimeError):
+    """The engine's backend runs outside serve, which can't stop or start it."""
+
+
+@runtime_checkable
+class ReleasableEngineProtocol(Protocol):
+    """Engine whose backend can be stopped and started again while serve runs.
+
+    Lets an admin free the GPU (e.g. for training) without restarting serve.
+    Both methods block until done and raise BackendNotManagedError when serve
+    doesn't own the backend.
+    """
+
+    @property
+    def manages_backend(self) -> bool:
+        """Whether serve started the backend, and so can stop and start it."""
+        ...
+
+    def release(self) -> None:
+        """Stop the backend; returns once its GPU memory is freed."""
+        ...
+
+    def reacquire(self) -> None:
+        """Start the backend again; returns once it can serve."""
+        ...
+
+
+@runtime_checkable
+class AbortableEngineProtocol(Protocol):
+    """Engine that can abort one in-flight request by its id.
+
+    The id is the RequestContext id passed to generate() / generate_stream_sync().
+    The aborted call raises inflight.RequestAbortedError in the thread running it.
+    """
+
+    def abort(self, request_id: str) -> None:
+        """Abort the request now, or as soon as its call starts."""
+        ...
+
+    def forget_abort(self, request_id: str) -> None:
+        """Drop abort state once the request's work has ended.
+
+        Needed when the work ended without reaching the backend (e.g. it failed
+        before its call), which would otherwise leave the abort recorded.
         """
         ...

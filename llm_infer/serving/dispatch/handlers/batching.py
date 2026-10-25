@@ -107,14 +107,18 @@ class ContinuousBatchingHandler(RequestHandler):
                 stop_sequences=running.request.stop_sequences,
                 messages=running.request.messages,
             )
+            text, _, _, _ = self._parse_generate_result(result)
             prompt_tokens = self.engine.count_tokens(running.request.prompt)
-            completion_tokens = self.engine.count_tokens(result)
+            completion_tokens = self.engine.count_tokens(text)
             return Response(
                 id=req_id,
                 status=RequestStatus.COMPLETED,
-                result=result,
+                result=text,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
+                finish_reason=(
+                    result.get("finish_reason") if isinstance(result, dict) else None
+                ),
             )
         except Exception as e:
             return Response(id=req_id, status=RequestStatus.FAILED, error=str(e))

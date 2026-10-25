@@ -3,6 +3,8 @@
 
 """Unit tests for vLLM server inference engine."""
 
+import itertools
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -204,6 +206,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
 
         engine = object.__new__(VLLMServerEngine)
         engine._lg = MagicMock()
+        engine._max_model_len = None
 
         lora_request = MagicMock()
         lora_request.lora_name = "my-adapter"
@@ -214,7 +217,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
             "usage": {"prompt_tokens": 10, "completion_tokens": 5},
         }
 
-        result = engine._parse_completion_response(data, lora_request)
+        result = engine._parse_completion_response(data, lora_request, 100)
 
         assert isinstance(result, dict)
         assert result["content"] == "Hello"
@@ -228,6 +231,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
 
         engine = object.__new__(VLLMServerEngine)
         engine._lg = MagicMock()
+        engine._max_model_len = None
         engine._adapter_metadata = {
             "my-adapter": {"mtime": "2026-01-01T00:00:00Z", "md5": "abc123def456"}
         }
@@ -240,7 +244,7 @@ class TestVLLMServerEngineAdapterResponseVerification:
             "choices": [{"message": {"content": "Hello"}}],
         }
 
-        result = engine._parse_completion_response(data, lora_request)
+        result = engine._parse_completion_response(data, lora_request, 100)
 
         # Returns dict with adapter info on success
         assert isinstance(result, dict)
@@ -250,3 +254,426 @@ class TestVLLMServerEngineAdapterResponseVerification:
         assert result["adapter"]["actual"] == "my-adapter"
         assert result["adapter"]["mtime"] == "2026-01-01T00:00:00Z"
         assert result["adapter"]["md5"] == "abc123def456"
+
+
+class TestHitTokenLimit:
+    """vLLM reports tool_calls for truncated output, so counts decide length."""
+
+    def test_cap_reached(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert _hit_token_limit(10, 100, 100, None)
+
+    def test_context_window_reached_without_cap(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert _hit_token_limit(3000, 1096, None, 4096)
+
+    def test_under_both_limits(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert not _hit_token_limit(10, 50, 100, 4096)
+
+    def test_no_limits_known(self) -> None:
+        from llm_infer.engines.vllm_server import _hit_token_limit
+
+        assert not _hit_token_limit(10, 50_000, None, None)
+
+
+def _engine_for_payload() -> object:
+    from llm_infer.engines.vllm_server import VLLMServerEngine
+
+    engine = object.__new__(VLLMServerEngine)
+    engine._lg = MagicMock()
+    engine._model_name = "m"
+    engine._config = MagicMock(chat_template_kwargs=None)
+    engine._max_model_len = 4096
+    engine._adapter_metadata = {}
+    return engine
+
+
+class TestVLLMServerMaxTokens:
+    def test_payload_omits_max_tokens_when_uncapped(self) -> None:
+        engine = _engine_for_payload()
+        payload = engine._build_payload(None, "hi", None, 1.0, 1.0, None, False)
+        assert "max_tokens" not in payload
+
+    def test_payload_keeps_explicit_max_tokens(self) -> None:
+        engine = _engine_for_payload()
+        payload = engine._build_payload(None, "hi", 50, 1.0, 1.0, None, False)
+        assert payload["max_tokens"] == 50
+
+    def test_truncated_tool_call_reports_length(self) -> None:
+        """vLLM says tool_calls; the context window says the output was cut off."""
+        engine = _engine_for_payload()
+        data = {
+            "model": "m",
+            "choices": [
+                {
+                    "message": {"content": "", "tool_calls": [{"id": "t"}]},
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 4000, "completion_tokens": 96},
+        }
+        result = engine._parse_completion_response(data, None, None)
+        assert result["finish_reason"] == "length"
+
+
+class TestVLLMServerStreamingFinishReason:
+    def _iterator(self, max_tokens: int | None, max_model_len: int | None) -> object:
+        from llm_infer.engines.vllm_server import VLLMServerStreamingIterator
+
+        payload = {} if max_tokens is None else {"max_tokens": max_tokens}
+        return VLLMServerStreamingIterator(
+            MagicMock(), MagicMock(), "/v1/chat/completions", payload, max_model_len
+        )
+
+    def _tool_call_finish(self) -> dict:
+        tc = {"index": 0, "id": "t", "function": {"name": "f", "arguments": '{"a'}}
+        return {
+            "choices": [{"delta": {"tool_calls": [tc]}, "finish_reason": "tool_calls"}]
+        }
+
+    def test_tool_call_at_cap_reports_length(self) -> None:
+        it = self._iterator(max_tokens=100, max_model_len=None)
+        it._process_choice_delta(self._tool_call_finish())
+        it._process_choice_delta(
+            {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 100}}
+        )
+        assert it.finish_reason == "length"
+        assert it.tool_calls is not None
+
+    def test_tool_call_at_context_window_reports_length(self) -> None:
+        it = self._iterator(max_tokens=None, max_model_len=4096)
+        it._process_choice_delta(self._tool_call_finish())
+        it._process_choice_delta(
+            {"choices": [], "usage": {"prompt_tokens": 4000, "completion_tokens": 96}}
+        )
+        assert it.finish_reason == "length"
+
+    def test_complete_tool_call_reports_tool_calls(self) -> None:
+        it = self._iterator(max_tokens=None, max_model_len=4096)
+        it._process_choice_delta(self._tool_call_finish())
+        it._process_choice_delta(
+            {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 20}}
+        )
+        assert it.finish_reason == "tool_calls"
+
+
+_EXTRA_ARGS = (
+    "--speculative-config",
+    '{"method": "mtp", "num_speculative_tokens": 3}',
+    "--max-num-batched-tokens",
+    "8192",
+)
+
+
+class TestBuildServeCommand:
+    """_build_serve_command() must only emit flags `vllm serve` accepts."""
+
+    def _full_command(self) -> list[str]:
+        """Serve command with every optional flag enabled."""
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+        from llm_infer.serving.dispatch.config import LoRAConfig, VLLMServerConfig
+
+        # Skip __init__: it connects to (or starts) the server
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._config = VLLMServerConfig(
+            model_path="/models/test",
+            max_model_len=4096,
+            quantization="awq",
+            enforce_eager=True,
+            reasoning_parser="qwen3",
+            chat_template_kwargs={"enable_thinking": False},
+            lora=LoRAConfig(enabled=True),
+            extra_args=list(_EXTRA_ARGS),
+        )
+        engine._model_name = "test"
+        engine._adapter_paths = {"a": "/adapters/a", "b": "/adapters/b"}
+        return engine._build_serve_command()
+
+    def test_installed_vllm_parses_command(self) -> None:
+        """The installed vLLM's own `serve` parser accepts the command."""
+        # Skip only without vllm; a moved module must fail, not skip
+        pytest.importorskip("vllm", reason="vllm not installed")
+        from vllm.entrypoints.cli.serve import ServeSubcommand
+        from vllm.utils.argparse_utils import FlexibleArgumentParser
+
+        parser = FlexibleArgumentParser(prog="vllm")
+        ServeSubcommand().subparser_init(parser.add_subparsers())
+
+        # argparse exits with code 2 on an unrecognized flag or invalid choice
+        parser.parse_args(self._full_command()[1:])
+
+    def test_optional_flags_emitted_when_set(self) -> None:
+        """Optional flags reach the command, so the parse check above covers them."""
+        cmd = self._full_command()
+
+        for flag in (
+            "--max-model-len",
+            "--quantization",
+            "--enforce-eager",
+            "--reasoning-parser",
+            "--default-chat-template-kwargs",
+            "--enable-lora",
+            "--lora-modules",
+        ):
+            assert flag in cmd
+
+    def test_extra_args_appended_last(self) -> None:
+        """Extra args come after every flag llm-infer sets, so they win."""
+        assert self._full_command()[-len(_EXTRA_ARGS) :] == list(_EXTRA_ARGS)
+
+
+class TestCheckedExtraArgs:
+    """_checked_extra_args() validates user-supplied `vllm serve` arguments."""
+
+    @pytest.mark.parametrize(
+        "arg",
+        [
+            "--port",
+            "--port=9000",
+            "--served-model-name",
+            "--served_model_name=x",
+            "--host",
+            "--host=0.0.0.0",
+            "--uds",
+            "--uds=/tmp/vllm.sock",
+            "--api-key",
+            "--api-key=secret",
+        ],
+    )
+    def test_reserved_flags_rejected(self, arg: str) -> None:
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        with pytest.raises(ValueError, match="llm-infer manages"):
+            _checked_extra_args([arg, "9000"])
+
+    def test_string_rejected(self) -> None:
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        with pytest.raises(ValueError, match="must be a list"):
+            _checked_extra_args("--enforce-eager")  # type: ignore[arg-type]
+
+    def test_values_stringified(self) -> None:
+        """YAML turns numbers into ints; argv needs strings."""
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        assert _checked_extra_args(["--max-num-batched-tokens", 8192]) == [
+            "--max-num-batched-tokens",
+            "8192",
+        ]
+
+    def test_port_lookalike_allowed(self) -> None:
+        """Only exact reserved names are rejected, not flags sharing a prefix."""
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        args = ["--port-range", "1"]
+        assert _checked_extra_args(args) == args
+
+    def test_none_returns_empty_list(self) -> None:
+        """YAML `extra_args: null` or `extra_args:` (no value) yields None."""
+        from llm_infer.engines.vllm_server import _checked_extra_args
+
+        assert _checked_extra_args(None) == []  # type: ignore[arg-type]
+
+
+class TestVLLMServerStop:
+    """_stop_server escalates to SIGKILL after stop_timeout."""
+
+    def _engine_with_process(self, proc: object, stop_timeout: float) -> object:
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._config = MagicMock(stop_timeout=stop_timeout)
+        engine._process = proc
+        return engine
+
+    def test_sigkill_after_stop_timeout_when_sigterm_ignored(self) -> None:
+        import subprocess
+        import sys
+        import time
+
+        # Ignores SIGTERM like a server stuck in its shutdown; prints once ready
+        script = (
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "print('ready', flush=True); time.sleep(60)"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+        )
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == b"ready"
+        engine = self._engine_with_process(proc, stop_timeout=0.5)
+
+        start = time.monotonic()
+        engine._stop_server()
+        elapsed = time.monotonic() - start
+
+        assert proc.poll() is not None
+        assert 0.5 <= elapsed < 5.0
+        engine._lg.warning.assert_called_once_with(
+            "vllm server did not stop gracefully, force killing"
+        )
+
+    def test_waits_for_whole_process_group(self) -> None:
+        """A grandchild that outlives the main process (as vLLM's EngineCore can)
+        is stopped too before _stop_server returns."""
+        import os
+        import subprocess
+        import sys
+
+        grandchild = (
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "time.sleep(60)"
+        )
+        # Main process: starts the grandchild, prints its pid, exits on SIGTERM
+        script = (
+            "import subprocess, sys, time; "
+            f"p = subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+            "print(p.pid, flush=True); time.sleep(60)"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+        )
+        assert proc.stdout is not None
+        grandchild_pid = int(proc.stdout.readline())
+        engine = self._engine_with_process(proc, stop_timeout=0.5)
+
+        engine._stop_server()
+
+        with pytest.raises(ProcessLookupError):
+            os.killpg(proc.pid, 0)
+        with pytest.raises(ProcessLookupError):
+            os.kill(grandchild_pid, 0)
+
+
+class TestVLLMServerRelease:
+    """release() / reacquire(): stop and start the backend while serve runs."""
+
+    def _engine(self, owns: bool) -> Any:
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._owns_process = owns
+        engine._process = None
+        return engine
+
+    def test_external_backend_is_not_managed(self) -> None:
+        from llm_infer.engines.protocol import BackendNotManagedError
+
+        engine = self._engine(owns=False)
+
+        assert engine.manages_backend is False
+        with pytest.raises(BackendNotManagedError):
+            engine.release()
+        with pytest.raises(BackendNotManagedError):
+            engine.reacquire()
+
+    def test_release_stops_server(self) -> None:
+        engine = self._engine(owns=True)
+        engine._stop_server = MagicMock()
+
+        engine.release()
+
+        engine._stop_server.assert_called_once()
+
+    def test_reacquire_starts_and_verifies(self) -> None:
+        engine = self._engine(owns=True)
+        for name in ("_start_server", "_verify_connection", "_verify_adapters"):
+            setattr(engine, name, MagicMock())
+
+        engine.reacquire()
+
+        engine._start_server.assert_called_once()
+        engine._verify_connection.assert_called_once()
+
+    def test_failed_reacquire_stops_what_it_started(self) -> None:
+        engine = self._engine(owns=True)
+        engine._start_server = MagicMock(side_effect=RuntimeError("exited"))
+        engine._stop_server = MagicMock()
+
+        with pytest.raises(RuntimeError):
+            engine.reacquire()
+
+        engine._stop_server.assert_called_once()
+
+    def test_reacquire_while_running_is_a_noop(self) -> None:
+        engine = self._engine(owns=True)
+        engine._process = MagicMock()
+        engine._start_server = MagicMock()
+
+        engine.reacquire()
+
+        engine._start_server.assert_not_called()
+
+
+class TestVLLMServerSetAdapters:
+    """set_adapters(): the adapters the next server start registers."""
+
+    def _engine(self) -> Any:
+        from llm_infer.engines.vllm_server import VLLMServerEngine
+        from llm_infer.serving.dispatch.config import LoRAConfig, VLLMServerConfig
+
+        engine = object.__new__(VLLMServerEngine)
+        engine._lg = MagicMock()
+        engine._config = VLLMServerConfig(
+            model_path="/models/test", lora=LoRAConfig(enabled=True)
+        )
+        engine._model_name = "test"
+        engine._process = None
+        engine._adapter_paths = {}
+        engine._adapter_metadata = {}
+        return engine
+
+    @staticmethod
+    def _adapter(key: str) -> Any:
+        from pathlib import Path
+
+        from llm_infer.serving.adapters import LoadedAdapter
+
+        return LoadedAdapter(key=key, name=key, path=Path(f"/adapters/{key}"))
+
+    def _lora_modules(self, engine: Any) -> list[str]:
+        """The adapter specs after --lora-modules, up to the next flag."""
+        cmd = engine._build_serve_command()
+        specs = cmd[cmd.index("--lora-modules") + 1 :]
+        return list(itertools.takewhile(lambda arg: not arg.startswith("--"), specs))
+
+    def test_replaces_adapters_for_next_start(self) -> None:
+        engine = self._engine()
+        engine.set_adapters([self._adapter("old"), self._adapter("kept")])
+
+        engine.set_adapters([self._adapter("kept"), self._adapter("new")])
+
+        assert self._lora_modules(engine) == [
+            "kept=/adapters/kept",
+            "new=/adapters/new",
+        ]
+        assert set(engine._adapter_metadata) == {"kept", "new"}
+
+    def test_empty_list_registers_no_adapters(self) -> None:
+        engine = self._engine()
+        engine.set_adapters([self._adapter("old")])
+
+        engine.set_adapters([])
+
+        assert "--lora-modules" not in engine._build_serve_command()
+
+    def test_refused_while_server_runs(self) -> None:
+        engine = self._engine()
+        engine.set_adapters([self._adapter("old")])
+        engine._process = MagicMock()
+
+        with pytest.raises(RuntimeError):
+            engine.set_adapters([self._adapter("new")])
+
+        assert engine._adapter_paths == {"old": "/adapters/old"}

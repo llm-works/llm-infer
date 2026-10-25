@@ -6,7 +6,6 @@
 import numpy as np
 import pytest
 import torch
-from appinfra.log import create_lg
 
 from llm_infer.engines.native.backends.linear.formats import QuantFormat
 from llm_infer.engines.native.backends.linear.kernels.awq_pytorch import (
@@ -15,12 +14,6 @@ from llm_infer.engines.native.backends.linear.kernels.awq_pytorch import (
 from llm_infer.engines.native.model.layers import AWQLinear
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def lg():
-    """Create a logger for tests."""
-    return create_lg("test", "debug")
 
 
 class TestPyTorchAWQBackendUnpack:

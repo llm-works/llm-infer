@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-25
+
+### Added
+
+- Serving: admin listener to release the vLLM server's GPU and reacquire it without restarting
+  serve; inference answers 503 with `Retry-After` meanwhile, and reacquire rescans the LoRA
+  adapter directory. Off by default; see the `admin` section in
+  [docs/config.md](docs/config.md#admin-listener).
+
+- vLLM server engine: pass any `vllm serve` argument through `llm-infer serve ... -- <args>`
+  or the `extra_args` config list; `--port` and `--served-model-name` are rejected.
+
+### Changed
+
+- Dependencies: requires `appinfra>=0.12.0` (was `>=0.11.0`); the `saia` extra requires
+  `llm-saia>=0.6.0` (was `>=0.2.0`).
+- Serving: the vLLM server and Ollama engines send their warmup requests concurrently, up to
+  `max_concurrent` (vLLM server: capped at `max_num_seqs`). In-process engines still warm up
+  one request at a time.
+- Serving: a chat request without `max_tokens` now generates up to the remaining context window
+  instead of 256 tokens, matching OpenAI and vLLM. Ollama uses its own default when unset.
+- Engine protocol: `max_tokens` accepts `None` (remaining context window), engines implement
+  `resolve_max_tokens`, and `finish_reason` is a `FinishReason`.
+- Dependencies: the `runtime` extra requires `transformers>=5.10.4,<6.0.0` (was `<5.0.0`), so
+  the `cuda` extra installs with vLLM 0.30. transformers 4 is no longer supported.
+- Dependencies: the `cuda` extra requires `vllm>=0.30.0` (was `>=0.7.0`).
+- Dependencies: the `runtime` extra includes `peft>=0.21.0`, so `pip install 'llm-infer[runtime]'`
+  installs everything the `peft` engine needs, as the README states.
+- **Breaking:** vLLM engine config: `swap_space` is removed (vLLM 0.30 dropped it), and
+  `speculative_model` / `num_speculative_tokens` are renamed to `spec_model` / `spec_tokens`.
+  Config loading rejects the old keys.
+
+### Fixed
+
+- vLLM engine: the in-process engine starts on vLLM 0.30; it failed at construction with
+  `unexpected keyword argument 'swap_space'`.
+- CLI: `llm-infer` puts its interpreter's bin dir on `PATH` when it is missing, so vLLM and
+  FlashInfer find the env's `ninja` when started without an activated env (e.g. from systemd).
+- Serving: a chat reply that hits `max_tokens` now reports `finish_reason: "length"` even when it
+  contains tool calls, so truncated tool-call arguments are no longer reported as `tool_calls`.
+- Serving: a streaming request whose generation fails now ends with an SSE error event and
+  `[DONE]` instead of a normal `finish_reason: "stop"`.
+- Serving: `serve` stops within a few seconds while requests are running (also on an external vLLM
+  server), instead of waiting for them; they get 503 "Server shutting down". New
+  `dispatch.in_flight_join_timeout`, `dispatch.server_stop_timeout` and vLLM server `stop_timeout`
+  (5 s, was a fixed 15 s).
+- Serving: a request rejected at capacity returns 503 again (was 500); other failed non-streaming
+  requests return 500 with the error message.
+- vLLM server engine: a request that times out (504) or whose client disconnects is aborted in
+  vLLM and frees its slot at once, instead of generating until done.
+
 ## [0.7.1] - 2026-09-08
 
 ### Changed
@@ -480,7 +531,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/llm-works/llm-infer/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/llm-works/llm-infer/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/llm-works/llm-infer/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/llm-works/llm-infer/compare/v0.6.2...v0.6.3

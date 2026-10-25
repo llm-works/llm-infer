@@ -180,7 +180,7 @@ class FlashInferBackend:
         q_squeezed = q.squeeze(1)
 
         # Run attention
-        output = wrapper.run(q_squeezed, paged_kv_cache)
+        output: Tensor = wrapper.run(q_squeezed, paged_kv_cache)
 
         # output shape: [batch, num_heads, head_dim] -> [batch, 1, num_heads, head_dim]
         return output.unsqueeze(1)
@@ -250,5 +250,5 @@ class FlashInferBackend:
             sm_scale,
         )
 
-        output = wrapper.run(q.reshape(-1, num_heads, head_dim), paged_kv_cache)
+        output: Tensor = wrapper.run(q.reshape(-1, num_heads, head_dim), paged_kv_cache)
         return output.reshape(batch_size, seq_len, num_heads, head_dim)

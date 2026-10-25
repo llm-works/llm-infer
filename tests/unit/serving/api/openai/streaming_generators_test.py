@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from appinfra.log import Logger
+from appinfra.service.errors import ChannelError, ChannelTimeoutError
 
 from llm_infer.response.parsers.think import ThinkTagNormalizer
 from llm_infer.schemas.openai import FinishReason
@@ -37,21 +39,12 @@ pytestmark = pytest.mark.unit
 
 
 class TestMapFinishReason:
-    def test_length(self) -> None:
-        assert _map_finish_reason("length") == FinishReason.LENGTH
+    def test_passes_reason_through(self) -> None:
+        assert _map_finish_reason(FinishReason.LENGTH) == FinishReason.LENGTH
+        assert _map_finish_reason(FinishReason.TOOL_CALLS) == FinishReason.TOOL_CALLS
 
-    def test_tool_calls(self) -> None:
-        assert _map_finish_reason("tool_calls") == FinishReason.TOOL_CALLS
-
-    def test_stop(self) -> None:
-        assert _map_finish_reason("stop") == FinishReason.STOP
-
-    def test_none(self) -> None:
+    def test_none_reports_stop(self) -> None:
         assert _map_finish_reason(None) == FinishReason.STOP
-
-    def test_error(self) -> None:
-        """Internal 'error' maps to STOP."""
-        assert _map_finish_reason("error") == FinishReason.STOP
 
 
 # ---------------------------------------------------------------------------
@@ -107,11 +100,18 @@ class _StubIPC:
 
 
 def _request() -> InternalRequest:
-    return InternalRequest(id="r1", prompt="hi")
+    return InternalRequest(id="r1", prompt="hi", max_tokens=100)
 
 
 async def _collect(generator: Any) -> list[str]:
     return [chunk async for chunk in generator]
+
+
+def _final_finish_reason(events: list[str]) -> str:
+    """Return finish_reason from the last data event before [DONE]."""
+    payload = json.loads(events[-2].removeprefix("data: ").strip())
+    reason: str = payload["choices"][0]["finish_reason"]
+    return reason
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +174,22 @@ class TestChatStreamingGenerator:
         assert "timeout" in result[-2]
         assert "[DONE]" in result[-1]
 
+    def test_channel_timeout_emits_timeout_event(self) -> None:
+        gen = self._make(raise_exc=ChannelTimeoutError("no chunk in 30s"))
+        result = asyncio.run(_collect(gen.stream(_request())))
+        error = json.loads(result[-2].removeprefix("data: ").strip())["error"]
+        assert error["code"] == "timeout"
+        assert "[DONE]" in result[-1]
+
+    def test_failed_generation_emits_error_event(self) -> None:
+        """A chunk with ``error`` set makes the channel raise ChannelError."""
+        gen = self._make(raise_exc=ChannelError("Request failed: bad adapter"))
+        result = asyncio.run(_collect(gen.stream(_request())))
+        error = json.loads(result[-2].removeprefix("data: ").strip())["error"]
+        assert error["code"] == "error"
+        assert "bad adapter" in error["message"]
+        assert "[DONE]" in result[-1]
+
     def test_max_tokens_overrides_finish_reason(self) -> None:
         chunks = [
             StreamChunk(id="r1", token="hello"),
@@ -192,24 +208,30 @@ class TestChatStreamingGenerator:
         full = "".join(result)
         assert "length" in full
 
-    def test_tool_calls_finish_reason_preserved(self) -> None:
-        """Tool calls finish_reason should not be overridden by max_tokens."""
-        chunks = [
+    def _tool_call_final(self, completion_tokens: int) -> list[StreamChunk]:
+        return [
             StreamChunk(
                 id="r1",
                 token="",
                 is_final=True,
                 finish_reason="tool_calls",
                 tool_calls=[
-                    {"function": {"name": "f", "arguments": "{}"}, "id": "tc1"}
+                    {"function": {"name": "f", "arguments": '{"a": '}, "id": "tc1"}
                 ],
-                completion_tokens=100,
+                completion_tokens=completion_tokens,
             ),
         ]
-        gen = self._make(chunks=chunks, max_tokens=100)
+
+    def test_tool_calls_finish_reason_preserved_under_limit(self) -> None:
+        gen = self._make(chunks=self._tool_call_final(50), max_tokens=100)
         result = asyncio.run(_collect(gen.stream(_request())))
-        full = "".join(result)
-        assert "tool_calls" in full
+        assert _final_finish_reason(result) == "tool_calls"
+
+    def test_tool_calls_at_limit_reports_length(self) -> None:
+        """Truncated tool-call arguments must not look like a complete call."""
+        gen = self._make(chunks=self._tool_call_final(100), max_tokens=100)
+        result = asyncio.run(_collect(gen.stream(_request())))
+        assert _final_finish_reason(result) == "length"
 
     def test_empty_token_chunks_ignored(self) -> None:
         chunks = [

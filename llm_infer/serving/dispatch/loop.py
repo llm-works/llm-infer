@@ -6,14 +6,19 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import queue
 import threading
+from collections.abc import Callable
+from concurrent.futures import Future
 from queue import Empty
-from typing import Any
+from typing import Any, TypeVar
 
 from appinfra.log import Logger
 
 from .handler import RequestHandler
 from .processors import RequestProcessor, create_request_processor_chain
+
+T = TypeVar("T")
 
 
 def _process_incoming_request(
@@ -26,12 +31,49 @@ def _process_incoming_request(
     processor_chain.process(request, handler, response_q)
 
 
+class LoopTasks:
+    """Run callables on the engine loop thread.
+
+    The handler is single-threaded: the loop thread owns it. Code on other
+    threads (the admin listener) hands its handler calls over through this.
+    """
+
+    def __init__(self) -> None:
+        self._tasks: queue.SimpleQueue[tuple[Callable[[], Any], Future[Any]]] = (
+            queue.SimpleQueue()
+        )
+
+    def call(self, fn: Callable[[], T], timeout: float) -> T:
+        """Run fn on the loop thread; return its result, or raise its error.
+
+        Raises TimeoutError if the loop doesn't run it within timeout.
+        """
+        future: Future[T] = Future()
+        self._tasks.put((fn, future))
+        return future.result(timeout)
+
+    def run_pending(self) -> None:
+        """Run the queued callables (loop thread only)."""
+        while True:
+            try:
+                fn, future = self._tasks.get_nowait()
+            except Empty:
+                return
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn())
+            except BaseException as e:
+                future.set_exception(e)
+
+
 def run_engine_loop(
     lg: Logger,
     handler: RequestHandler,
     request_q: mp.Queue,  # type: ignore[type-arg]
     response_q: mp.Queue,  # type: ignore[type-arg]
     shutdown: threading.Event,
+    loop_tasks: LoopTasks,
     poll_timeout: float = 0.01,
 ) -> None:
     """Main loop: read requests, process via handler, send responses."""
@@ -46,6 +88,7 @@ def run_engine_loop(
             _process_incoming_request(handler, request, response_q, processor_chain)
         except Empty:
             pass
+        loop_tasks.run_pending()
         for response in handler.step():
             lg.trace("queueing response", extra={"response_id": response.id})
             response_q.put(response)
@@ -58,6 +101,7 @@ def run_engine_loop_async(
     request_q: mp.Queue,
     response_q: mp.Queue,
     shutdown: threading.Event,
+    loop_tasks: LoopTasks,
 ) -> threading.Thread:
     """Start the engine loop in a background thread.
 
@@ -67,13 +111,14 @@ def run_engine_loop_async(
         request_q: Queue to receive requests from uvicorn.
         response_q: Queue to send responses to uvicorn.
         shutdown: Event to signal shutdown.
+        loop_tasks: Calls other threads run on the loop thread.
 
     Returns:
         The background thread running the loop.
     """
     thread = threading.Thread(
         target=run_engine_loop,
-        args=(lg, handler, request_q, response_q, shutdown),
+        args=(lg, handler, request_q, response_q, shutdown, loop_tasks),
         daemon=True,
     )
     thread.start()

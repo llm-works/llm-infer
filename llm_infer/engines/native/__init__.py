@@ -86,7 +86,7 @@ def _require_runtime_deps() -> None:
     if missing:
         raise ImportError(
             f"Local inference requires: {', '.join(missing)}. "
-            "Install with: pip install llm-infer[runtime]"
+            "Install with: pip install 'llm-infer[runtime]'"
         )
 
 

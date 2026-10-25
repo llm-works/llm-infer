@@ -16,7 +16,7 @@ backends. Built for autonomous agents and production use.
 
 **Installation:**
 - Client-only (lightweight): `pip install llm-infer`
-- With Anthropic: `pip install llm-infer[anthropic]`
+- With Anthropic: `pip install 'llm-infer[anthropic]'`
 
 **Supported Backends:**
 - **OpenAI-compatible**: OpenAI, llm-infer server, vLLM, Ollama
@@ -142,7 +142,7 @@ from llm_infer.client import Factory
 lg = Logger("my-app")
 factory = Factory(lg)
 
-# Requires: pip install llm-infer[anthropic]
+# Requires: pip install 'llm-infer[anthropic]'
 async with factory.anthropic(default_model="claude-sonnet-4-20250514") as client:
     response = await client.chat_async(
         messages=[{"role": "user", "content": "Hello!"}],

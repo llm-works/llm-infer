@@ -44,6 +44,13 @@ class EngineFactory(ABC):
         """Get max batch size for handler configuration."""
         ...
 
+    def warmup_concurrency(self, config: InferenceConfig) -> int:
+        """How many warmup requests may run at once.
+
+        Default 1: in-process engines aren't safe to call from several threads.
+        """
+        return 1
+
 
 class NativeEngineFactory(EngineFactory):
     """Factory for native inference engine."""
@@ -61,7 +68,7 @@ class NativeEngineFactory(EngineFactory):
         except ImportError as e:
             raise ImportError(
                 "Native engine requested (backends.engine=native) but torch is not installed. "
-                "Install with: pip install llm-infer[runtime]\n"
+                "Install with: pip install 'llm-infer[runtime]'\n"
                 "Or use Ollama engine: llm-infer serve --engine ollama"
             ) from e
 
@@ -200,6 +207,10 @@ class OllamaEngineFactory(EngineFactory):
         # Ollama handles batching internally
         return 1
 
+    def warmup_concurrency(self, config: InferenceConfig) -> int:
+        # HTTP engine: as many as the handler sends at once
+        return config.engines.ollama.max_concurrent
+
 
 class VLLMServerEngineFactory(EngineFactory):
     """Factory for vLLM server-backed inference engine.
@@ -273,6 +284,13 @@ class VLLMServerEngineFactory(EngineFactory):
         # Server handles batching internally
         return 1
 
+    def warmup_concurrency(self, config: InferenceConfig) -> int:
+        # As many as the handler sends at once, and vLLM can batch
+        cfg = config.engines.vllm_server
+        if cfg.max_num_seqs is None:
+            return cfg.max_concurrent
+        return min(cfg.max_concurrent, cfg.max_num_seqs)
+
 
 class PEFTEngineFactory(EngineFactory):
     """Factory for PEFT-backed inference engine.
@@ -324,7 +342,7 @@ class PEFTEngineFactory(EngineFactory):
         except ImportError as e:
             raise ImportError(
                 "PEFT engine requested (backends.engine=peft) but dependencies "
-                "not installed. Install with: pip install transformers peft"
+                "not installed. Install with: pip install 'llm-infer[runtime]'"
             ) from e
 
         self._validate_model_path(config)

@@ -456,6 +456,7 @@ class TestBuildSuccessResponse:
             _request("r1"),
             "result",
             None,
+            "stop",
             usage={"prompt_tokens": 10, "completion_tokens": 5},
         )
         assert resp.id == "r1"
@@ -467,7 +468,7 @@ class TestBuildSuccessResponse:
     def test_without_usage_falls_back_to_count_tokens(self) -> None:
         h = _handler()
         h.engine.count_tokens.side_effect = [7, 3]  # type: ignore[attr-defined]
-        resp = h._build_success_response(_request("r1"), "result", None)
+        resp = h._build_success_response(_request("r1"), "result", None, None)
         assert resp.prompt_tokens == 7
         assert resp.completion_tokens == 3
 
@@ -477,9 +478,11 @@ class TestBuildSuccessResponse:
             _request("r1"),
             "",
             [{"name": "f"}],
+            "tool_calls",
             usage={"prompt_tokens": 1, "completion_tokens": 1},
         )
         assert resp.tool_calls == [{"name": "f"}]
+        assert resp.finish_reason == "tool_calls"
 
 
 # ---------------------------------------------------------------------------
@@ -494,16 +497,19 @@ class TestProcessBlockingRequest:
         resp = h._process_blocking_request(_request("r1"))
         assert resp.status == RequestStatus.COMPLETED
         assert resp.result == "result"
+        assert resp.finish_reason is None
 
     def test_success_dict_result(self) -> None:
         h = _handler()
         h.engine.generate.return_value = {  # type: ignore[attr-defined]
             "content": "world",
             "usage": {"prompt_tokens": 2, "completion_tokens": 3},
+            "finish_reason": "length",
         }
         resp = h._process_blocking_request(_request("r1"))
         assert resp.result == "world"
         assert resp.prompt_tokens == 2
+        assert resp.finish_reason == "length"
 
     def test_adapter_error(self) -> None:
         h = _handler(lg=MagicMock(spec=Logger))
@@ -632,11 +638,11 @@ class TestProcessStreamingRequest:
         h.engine.generate_stream_sync.side_effect = AdapterError("bad")  # type: ignore[attr-defined]
         resp = h._process_streaming_request(_request("r1", stream=True))
         assert resp.status == RequestStatus.FAILED
-        # Error chunk emitted
-        assert any(
-            isinstance(item, StreamChunk) and item.finish_reason == "error"
-            for item in q.items
-        )
+        # Final error chunk carries the error, not a finish_reason
+        finals = [i for i in q.items if isinstance(i, StreamChunk) and i.is_final]
+        assert len(finals) == 1
+        assert finals[0].error == "bad"
+        assert finals[0].finish_reason is None
 
     def test_streaming_generic_exception(self) -> None:
         q = ResponseQueueFake()
@@ -645,6 +651,8 @@ class TestProcessStreamingRequest:
         resp = h._process_streaming_request(_request("r1", stream=True))
         assert resp.status == RequestStatus.FAILED
         assert "boom" in resp.error
+        finals = [i for i in q.items if isinstance(i, StreamChunk) and i.is_final]
+        assert finals[0].error == "boom"
 
 
 # ---------------------------------------------------------------------------

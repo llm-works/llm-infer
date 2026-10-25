@@ -4,9 +4,10 @@
 """Configuration loading for inference server."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Annotated, Any
 
 from appinfra.app.fastapi import ApiConfig, UvicornConfig
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from ...models import ModelsConfig
 from .config_overrides import CliOverrides, apply_standard_overrides
@@ -47,6 +48,29 @@ class DispatchConfig:
     max_pending: int = 10
     poll_timeout: float = 0.01
     batch_streaming: bool = False  # Allow streaming requests in batched decode
+    # Shutdown: wait for in-flight engine calls after the engine stopped, then
+    # for the HTTP subprocess to exit before it is terminated and killed
+    in_flight_join_timeout: float = 2.0
+    server_stop_timeout: float = 2.0
+
+
+class AdminConfig(BaseModel):
+    """Admin listener: release and reacquire the backend's GPU (config key: admin).
+
+    A listener of its own in the main process, never on the public API port,
+    bound to an intranet address, with its own bearer tokens. Unknown keys and
+    malformed values fail validation, so a bad section stops startup.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    host: str = "127.0.0.1"  # An intranet address; never the public interface
+    port: int = Field(default=8090, ge=1, le=65535)
+    # Bearer tokens; none: every call gets 401
+    tokens: list[Annotated[str, StringConstraints(min_length=1)]] = []
+    # Retry-After (s) on inference answered 503 while the backend is released
+    retry_after: int = Field(default=60, ge=0)
 
 
 @dataclass
@@ -133,6 +157,26 @@ class OllamaConfig:
         )
 
 
+# Keys that vLLM 0.30 removed or renamed. Both vLLM config parsers drop unknown
+# keys, so these are rejected explicitly instead of silently disabling a feature.
+_REMOVED_VLLM_KEYS: dict[str, str] = {
+    "swap_space": "removed in vLLM 0.30; delete it",
+    "speculative_model": "renamed to spec_model",
+    "num_speculative_tokens": "renamed to spec_tokens",
+}
+
+
+def _reject_removed_vllm_keys(data: dict[str, Any]) -> None:
+    """Raise ValueError if the vllm config section uses a removed or renamed key."""
+    found = [
+        f"{key} ({_REMOVED_VLLM_KEYS[key]})"
+        for key in data
+        if key in _REMOVED_VLLM_KEYS
+    ]
+    if found:
+        raise ValueError(f"unsupported vllm config keys: {', '.join(found)}")
+
+
 @dataclass
 class VLLMConfig:
     """vLLM engine configuration.
@@ -155,7 +199,6 @@ class VLLMConfig:
     gpu_memory_gb: float | None = None
     gpu_memory_utilization: float = 0.9
     cpu_offload_gb: float = 0.0
-    swap_space: int = 4  # GB
     max_model_len: int | None = None  # Max context length (None = use model default)
 
     # Parallelism
@@ -183,8 +226,8 @@ class VLLMConfig:
     quantization: str | None = None  # awq, gptq, fp8, etc.
 
     # Speculative decoding (advanced)
-    speculative_model: str | None = None
-    num_speculative_tokens: int | None = None
+    spec_model: str | None = None
+    spec_tokens: int | None = None
 
     # Dtype
     dtype: str = "auto"  # auto, float16, bfloat16, float32
@@ -211,6 +254,7 @@ class VLLMConfig:
         """
         from dataclasses import fields
 
+        _reject_removed_vllm_keys(data)
         kwargs: dict[str, Any] = {"model_path": model_path}
         for f in fields(cls):
             if f.name != "model_path" and f.name in data:
@@ -228,7 +272,6 @@ class VLLMConfig:
             "dtype": self.dtype,
             "gpu_memory_utilization": self.gpu_memory_utilization,
             "cpu_offload_gb": self.cpu_offload_gb,
-            "swap_space": self.swap_space,
             "tensor_parallel_size": self.tensor_parallel_size,
             "pipeline_parallel_size": self.pipeline_parallel_size,
             "max_num_seqs": self.max_num_seqs,
@@ -256,8 +299,8 @@ class VLLMConfig:
             ("max_model_len", self.max_model_len),
             ("max_num_batched_tokens", self.max_num_batched_tokens),
             ("quantization", self.quantization),
-            ("speculative_model", self.speculative_model),
-            ("num_speculative_tokens", self.num_speculative_tokens),
+            ("spec_model", self.spec_model),
+            ("spec_tokens", self.spec_tokens),
         ]
         for key, value in optional_fields:
             if value is not None:
@@ -296,6 +339,9 @@ class VLLMServerConfig:
     binary_path: str = "vllm"
     timeout: int = 300  # Request timeout in seconds
     startup_timeout: int = 300  # Server startup timeout (vllm is slow to load)
+    # Wait after SIGTERM before SIGKILL when stopping an auto-started server.
+    # Keeps the whole serve shutdown inside a service manager's stop timeout.
+    stop_timeout: float = 5.0
 
     # Served model name (alias for API requests, None = use model directory name)
     served_model_name: str | None = None
@@ -326,6 +372,10 @@ class VLLMServerConfig:
     # Chat template kwargs (passed to vLLM as --default-chat-template-kwargs)
     # e.g., {"enable_thinking": false} for Qwen 3.5 to suppress CoT output
     chat_template_kwargs: dict[str, Any] = field(default_factory=dict)
+
+    # Extra `vllm serve` arguments, appended last (CLI: `llm-infer serve ... -- <args>`)
+    # e.g., ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}']
+    extra_args: list[str] = field(default_factory=list)
 
     # Warmup
     warmup: bool = True
@@ -422,6 +472,7 @@ class InferenceConfig:
     engines: EnginesConfig = field(default_factory=EnginesConfig)
     dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
+    admin: AdminConfig = field(default_factory=AdminConfig)
     logging: ThirdPartyLoggingConfig = field(default_factory=ThirdPartyLoggingConfig)
 
     @classmethod
@@ -441,6 +492,7 @@ class InferenceConfig:
             engines=cls._parse_engines_config(data.get("engines", {}) or {}),
             dispatch=cls._parse_dispatch_config(dispatch),
             api=cls._parse_api_config(data.get("api", {}) or {}),
+            admin=AdminConfig.model_validate(data.get("admin") or {}),
             logging=ThirdPartyLoggingConfig(
                 torch=logging.get("torch", "warning"),
                 transformers=logging.get("transformers", "error"),
@@ -467,6 +519,8 @@ class InferenceConfig:
             max_pending=dispatch.get("max_pending", 10),
             poll_timeout=dispatch.get("poll_timeout", 0.01),
             batch_streaming=dispatch.get("batch_streaming", False),
+            in_flight_join_timeout=dispatch.get("in_flight_join_timeout", 2.0),
+            server_stop_timeout=dispatch.get("server_stop_timeout", 2.0),
         )
 
     @classmethod
@@ -514,12 +568,12 @@ class InferenceConfig:
     @classmethod
     def _parse_vllm_config(cls, data: dict[str, Any]) -> VLLMConfig:
         """Parse vLLM engine configuration."""
+        _reject_removed_vllm_keys(data)
         return VLLMConfig(
             task=data.get("task", "generate"),
             gpu_memory_gb=data.get("gpu_memory_gb"),
             gpu_memory_utilization=data.get("gpu_memory_utilization", 0.9),
             cpu_offload_gb=data.get("cpu_offload_gb", 0.0),
-            swap_space=data.get("swap_space", 4),
             max_model_len=data.get("max_model_len"),
             tensor_parallel_size=data.get("tensor_parallel_size", 1),
             pipeline_parallel_size=data.get("pipeline_parallel_size", 1),
@@ -533,8 +587,8 @@ class InferenceConfig:
             disable_log_stats=data.get("disable_log_stats", False),
             max_cudagraph_capture_size=data.get("max_cudagraph_capture_size"),
             quantization=data.get("quantization"),
-            speculative_model=data.get("speculative_model"),
-            num_speculative_tokens=data.get("num_speculative_tokens"),
+            spec_model=data.get("spec_model"),
+            spec_tokens=data.get("spec_tokens"),
             dtype=data.get("dtype", "auto"),
             trust_remote_code=data.get("trust_remote_code", True),
             warmup=data.get("warmup", True),

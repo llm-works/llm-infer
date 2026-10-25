@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from ...schemas.openai import FinishReason
+
 if TYPE_CHECKING:
     from ...context import RequestContext
 
@@ -42,6 +44,8 @@ class RequestStatus(Enum):
     COMPLETED = "completed"
     REJECTED = "rejected"
     FAILED = "failed"
+    UNAVAILABLE = "unavailable"  # Answered without a result: server shutting down
+    RELEASED = "released"  # Answered without a result: backend released by an admin
 
 
 @dataclass
@@ -50,8 +54,9 @@ class Request:
 
     id: str
     prompt: str
+    # None = no cap: the engine generates up to the remaining context window
+    max_tokens: int | None
     context: RequestContext | None = None  # Shared context for logging/timing
-    max_tokens: int = 100
     temperature: float = 1.0
     top_p: float = 1.0
     top_k: int = 0
@@ -87,6 +92,8 @@ class Response:
     tool_calls: list[dict[str, Any]] | None = None
     # LoRA adapter info (when adapter was requested)
     adapter: ResponseAdapterInfo | None = None
+    # Engine-reported reason; None if the engine didn't report one
+    finish_reason: FinishReason | None = None
 
 
 @dataclass
@@ -101,9 +108,8 @@ class StreamChunk:
     id: str  # Request ID this chunk belongs to
     token: str  # The token text
     is_final: bool = False  # True for the last chunk
-    finish_reason: str | None = (
-        None  # "stop", "length", "tool_calls", etc. (only on final)
-    )
+    finish_reason: FinishReason | None = None  # Only on final
+    error: str | None = None  # Set on the final chunk when generation failed
     prompt_tokens: int | None = None  # Only set on final chunk
     completion_tokens: int | None = None  # Only set on final chunk
     # Tool calling support for streaming
@@ -112,6 +118,41 @@ class StreamChunk:
     )
     # LoRA adapter info (when adapter was requested)
     adapter: ResponseAdapterInfo | None = None
+
+
+def refusal_message(
+    request: Request, status: RequestStatus, message: str
+) -> Response | StreamChunk:
+    """Build the message that answers a request without running it.
+
+    Streaming requests get a final chunk carrying `message` as its error; the
+    channel raises it as ChannelError, which the streaming generator turns into
+    an SSE error event. Blocking requests get a bare `status` response: an
+    `error` there would also become a ChannelError and lose the status, whose
+    HTTP code and message come from the API layer's status mapping instead.
+    """
+    if request.stream:
+        return StreamChunk(id=request.id, token="", is_final=True, error=message)
+    return Response(id=request.id, status=status)
+
+
+@dataclass
+class CancelRequest:
+    """Stop work on an inference request the API side gave up on (queue message).
+
+    Sent when a client's request timed out or the client disconnected.
+    """
+
+    id: str  # Id of this message (for the acknowledgement)
+    request_id: str  # Id of the inference request to cancel
+
+
+@dataclass
+class CancelResponse:
+    """Acknowledges a CancelRequest (queue message)."""
+
+    id: str
+    found: bool  # False: already finished, or unknown
 
 
 @dataclass

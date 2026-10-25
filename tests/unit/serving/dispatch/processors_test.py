@@ -13,6 +13,7 @@ import pytest
 
 from llm_infer.serving.dispatch.processors import (
     AdapterProcessor,
+    CancelProcessor,
     EmbeddingProcessor,
     InferenceProcessor,
     MetricsProcessor,
@@ -23,12 +24,13 @@ from llm_infer.serving.dispatch.types import (
     AdapterListResponse,
     AdapterRefreshRequest,
     AdapterRefreshResponse,
+    CancelRequest,
+    CancelResponse,
     EmbeddingRequest,
     EmbeddingResponse,
     MetricsRequest,
     Request,
     RequestStatus,
-    Response,
 )
 
 from ._helpers import ResponseQueueFake
@@ -249,7 +251,7 @@ def test_embedding_engine_raises() -> None:
 
 def test_inference_processor_can_process() -> None:
     p = InferenceProcessor()
-    assert p.can_process(Request(id="x", prompt="hi"))
+    assert p.can_process(Request(id="x", prompt="hi", max_tokens=100))
     assert not p.can_process(MetricsRequest(id="x"))
 
 
@@ -259,24 +261,50 @@ def test_inference_submit_accepted() -> None:
     handler.submit.return_value = True
     q = ResponseQueueFake()
 
-    InferenceProcessor().handle(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
+    InferenceProcessor().handle(
+        Request(id="r1", prompt="hi", max_tokens=100), handler, q
+    )  # type: ignore[arg-type]
 
     handler.submit.assert_called_once()
     assert q.items == []
 
 
 def test_inference_submit_rejected() -> None:
-    """If handler rejects, processor emits a REJECTED response."""
+    """If handler rejects, processor emits the handler's rejection."""
     handler = MagicMock()
     handler.submit.return_value = False
     q = ResponseQueueFake()
+    request = Request(id="r1", prompt="hi", max_tokens=100)
 
-    InferenceProcessor().handle(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
+    InferenceProcessor().handle(request, handler, q)  # type: ignore[arg-type]
 
-    assert len(q.items) == 1
-    resp = q.items[0]
-    assert isinstance(resp, Response)
-    assert resp.status == RequestStatus.REJECTED
+    handler.rejection.assert_called_once_with(request)
+    assert q.items == [handler.rejection.return_value]
+
+
+@pytest.mark.parametrize("found", [True, False])
+def test_cancel_processor_cancels_and_acknowledges(found: bool) -> None:
+    handler = MagicMock()
+    handler.cancel.return_value = found
+    q = ResponseQueueFake()
+
+    CancelProcessor().handle(CancelRequest(id="c1", request_id="r1"), handler, q)
+
+    handler.cancel.assert_called_once_with("r1")
+    assert q.items == [CancelResponse(id="c1", found=found)]
+
+
+def test_chain_routes_cancel_to_cancel_processor() -> None:
+    handler = MagicMock()
+    handler.cancel.return_value = True
+    q = ResponseQueueFake()
+
+    create_request_processor_chain().process(
+        CancelRequest(id="c1", request_id="r1"), handler, q
+    )
+
+    handler.cancel.assert_called_once_with("r1")
+    handler.submit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +345,7 @@ def test_chain_dispatches_inference_request() -> None:
     handler.submit.return_value = True
     q = ResponseQueueFake()
 
-    chain.process(Request(id="r1", prompt="hi"), handler, q)  # type: ignore[arg-type]
+    chain.process(Request(id="r1", prompt="hi", max_tokens=100), handler, q)  # type: ignore[arg-type]
 
     handler.submit.assert_called_once()
 

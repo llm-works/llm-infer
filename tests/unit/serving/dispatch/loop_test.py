@@ -14,6 +14,7 @@ import pytest
 from appinfra.log import Logger
 
 from llm_infer.serving.dispatch.loop import (
+    LoopTasks,
     _process_incoming_request,
     run_engine_loop,
     run_engine_loop_async,
@@ -68,7 +69,7 @@ class TestRunEngineLoop:
         shutdown = threading.Event()
         shutdown.set()
 
-        run_engine_loop(lg, handler, request_q, response_q, shutdown)
+        run_engine_loop(lg, handler, request_q, response_q, shutdown, LoopTasks())
         # Setters were called once
         handler.set_response_queue.assert_called_once_with(response_q)
         handler.set_logger.assert_called_once_with(lg)
@@ -81,7 +82,7 @@ class TestRunEngineLoop:
         response_q: Queue = Queue()
         shutdown = threading.Event()
 
-        request = Request(id="r1", prompt="hi")
+        request = Request(id="r1", prompt="hi", max_tokens=100)
         request_q.put(request)
 
         # Set up handler.step() to also signal shutdown after first call
@@ -96,7 +97,13 @@ class TestRunEngineLoop:
         handler.step.side_effect = step_side_effect
 
         run_engine_loop(
-            lg, handler, request_q, response_q, shutdown, poll_timeout=0.001
+            lg,
+            handler,
+            request_q,
+            response_q,
+            shutdown,
+            LoopTasks(),
+            poll_timeout=0.001,
         )
         # Submit was called by InferenceProcessor (request flowed through chain)
         handler.submit.assert_called()
@@ -123,7 +130,13 @@ class TestRunEngineLoop:
         handler.step.side_effect = step_side_effect
 
         run_engine_loop(
-            lg, handler, request_q, response_q, shutdown, poll_timeout=0.001
+            lg,
+            handler,
+            request_q,
+            response_q,
+            shutdown,
+            LoopTasks(),
+            poll_timeout=0.001,
         )
 
         # Response was put on queue
@@ -150,7 +163,13 @@ class TestRunEngineLoop:
         handler.step.side_effect = step_side_effect
 
         run_engine_loop(
-            lg, handler, request_q, response_q, shutdown, poll_timeout=0.001
+            lg,
+            handler,
+            request_q,
+            response_q,
+            shutdown,
+            LoopTasks(),
+            poll_timeout=0.001,
         )
         assert call_count[0] >= 3
 
@@ -167,7 +186,9 @@ def test_run_engine_loop_async_starts_thread() -> None:
     response_q: Queue = Queue()
     shutdown = threading.Event()
 
-    thread = run_engine_loop_async(lg, handler, request_q, response_q, shutdown)
+    thread = run_engine_loop_async(
+        lg, handler, request_q, response_q, shutdown, LoopTasks()
+    )
     assert isinstance(thread, threading.Thread)
     assert thread.is_alive()
     assert thread.daemon is True
@@ -175,3 +196,47 @@ def test_run_engine_loop_async_starts_thread() -> None:
     shutdown.set()
     thread.join(timeout=2)
     assert not thread.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# LoopTasks: other threads' calls run on the loop thread
+# ---------------------------------------------------------------------------
+
+
+def test_loop_runs_tasks_on_its_thread() -> None:
+    lg = MagicMock(spec=Logger)
+    shutdown = threading.Event()
+    tasks = LoopTasks()
+    thread = run_engine_loop_async(
+        lg, _make_handler(), Queue(), Queue(), shutdown, tasks
+    )
+    try:
+        ran_on = tasks.call(threading.current_thread, timeout=2)
+        assert ran_on is thread
+    finally:
+        shutdown.set()
+        thread.join(timeout=2)
+
+
+def test_loop_task_error_reaches_caller() -> None:
+    tasks = LoopTasks()
+    result: dict[str, Any] = {}
+
+    def caller() -> None:
+        try:
+            tasks.call(lambda: 1 / 0, timeout=2)
+        except ZeroDivisionError as e:
+            result["error"] = e
+
+    t = threading.Thread(target=caller)
+    t.start()
+    while t.is_alive() and "error" not in result:
+        tasks.run_pending()
+    t.join(timeout=2)
+
+    assert isinstance(result.get("error"), ZeroDivisionError)
+
+
+def test_loop_task_times_out_when_loop_not_running() -> None:
+    with pytest.raises(TimeoutError):
+        LoopTasks().call(lambda: None, timeout=0.05)

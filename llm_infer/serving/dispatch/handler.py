@@ -14,8 +14,17 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from ...context import Event, RequestContext
+from ...engines.inflight import RequestAbortedError
+from ...schemas.openai import FinishReason
 from ..adapters import validate_adapter_key
-from .types import Request, RequestStatus, Response, ResponseAdapterInfo, StreamChunk
+from .types import (
+    Request,
+    RequestStatus,
+    Response,
+    ResponseAdapterInfo,
+    StreamChunk,
+    refusal_message,
+)
 
 
 class AdapterError(Exception):
@@ -174,6 +183,48 @@ class RequestHandler(ABC):
     def engine(self) -> InferenceEngineProtocol:
         """The inference engine used by this handler."""
         pass
+
+    def shutdown(self) -> None:
+        """Stop accepting requests and answer pending ones. Must not block.
+
+        Default: nothing to do. Handlers that run requests in step() on the
+        engine loop thread have none running once the loop has exited.
+        """
+
+    def join(self, timeout: float) -> bool:
+        """Wait up to `timeout` seconds for work still running after shutdown().
+
+        Returns True if nothing is left running.
+        """
+        return True
+
+    def cancel(self, request_id: str) -> bool:
+        """Stop work on a request whose caller has given up. Must not block.
+
+        No response is sent for a cancelled request. Returns True if the
+        request was found queued or running. Default: not supported.
+        """
+        return False
+
+    def rejection(self, request: Request) -> Response | StreamChunk:
+        """Answer for a request submit() refused."""
+        return refusal_message(request, RequestStatus.REJECTED, "Server at capacity")
+
+    @property
+    def supports_suspend(self) -> bool:
+        """Whether suspend()/resume() are implemented (for an admin release)."""
+        return False
+
+    def suspend(self) -> None:
+        """Answer queued and running requests as released and refuse new ones.
+
+        Unlike shutdown(), the handler can resume(). Must not block.
+        """
+        raise NotImplementedError(f"{type(self).__name__} can't suspend")
+
+    def resume(self) -> None:
+        """Accept requests again after suspend()."""
+        raise NotImplementedError(f"{type(self).__name__} can't resume")
 
     # -------------------------------------------------------------------------
     # Template Method: Request Processing (shared by all handlers)
@@ -471,6 +522,7 @@ class RequestHandler(ABC):
         request: Request,
         result_text: str,
         tool_calls: list[dict[str, Any]] | None,
+        finish_reason: FinishReason | None,
         usage: dict[str, Any] | None = None,
         adapter_info: ResponseAdapterInfo | None = None,
     ) -> Response:
@@ -498,6 +550,7 @@ class RequestHandler(ABC):
             completion_tokens=completion_tokens,
             tool_calls=tool_calls,
             adapter=adapter_info,
+            finish_reason=finish_reason,
         )
 
     def _process_blocking_request(self, request: Request) -> Response:
@@ -514,8 +567,11 @@ class RequestHandler(ABC):
             adapter_info = self._build_adapter_info_from_result(
                 adapter_dict, fallback_adapter
             )
+            finish_reason = (
+                result.get("finish_reason") if isinstance(result, dict) else None
+            )
             return self._build_success_response(
-                request, result_text, tool_calls, usage, adapter_info
+                request, result_text, tool_calls, finish_reason, usage, adapter_info
             )
         except AdapterError as e:
             if self._lg:
@@ -651,14 +707,17 @@ class RequestHandler(ABC):
                 )
             if self._response_q is not None:
                 error_chunk = StreamChunk(
-                    id=request.id, token="", is_final=True, finish_reason="error"
+                    id=request.id, token="", is_final=True, error=str(e)
                 )
                 self._response_q.put(error_chunk)
+            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
+        except RequestAbortedError as e:
+            # Cancelled by the API side, which no longer reads this stream
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
         except Exception as e:
             if self._response_q is not None:
                 error_chunk = StreamChunk(
-                    id=request.id, token="", is_final=True, finish_reason="error"
+                    id=request.id, token="", is_final=True, error=str(e)
                 )
                 self._response_q.put(error_chunk)
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))

@@ -17,7 +17,12 @@ from fastapi.responses import JSONResponse
 from ..dispatch.metrics import format_metrics_for_api
 from ..dispatch.types import MetricsRequest
 from ..dispatch.types import Request as InternalRequest
-from .errors import log_for_error_status, raise_for_error_status, submit_or_timeout
+from .errors import (
+    log_for_error_status,
+    raise_for_error_status,
+    submit_inference,
+    submit_or_timeout,
+)
 from .schemas import GenerateRequest, GenerateResponse, HealthResponse
 
 
@@ -46,7 +51,7 @@ async def health_handler() -> HealthResponse:
 
 
 async def _handle_generate(
-    lg: Logger, body: GenerateRequest, ipc: Any
+    lg: Logger, body: GenerateRequest, ipc: Any, http_request: Request
 ) -> GenerateResponse | JSONResponse:
     """Handle generate request submission and response."""
     request_id = str(uuid.uuid4())
@@ -61,7 +66,7 @@ async def _handle_generate(
         use_chat_template=body.use_chat_template,
     )
 
-    response = await submit_or_timeout(lg, ipc, internal_request)
+    response = await submit_inference(lg, ipc, internal_request, http_request)
     if isinstance(response, JSONResponse):
         return response
     raise_for_error_status(response)
@@ -108,7 +113,7 @@ def create_routes(model_name: str) -> APIRouter:
     ) -> GenerateResponse | JSONResponse:
         """Generate text from a prompt."""
         lg: Logger = request.state.lg
-        return await _handle_generate(lg, body, request.app.state.ipc_channel)
+        return await _handle_generate(lg, body, request.app.state.ipc_channel, request)
 
     @router.get(
         "/metrics",

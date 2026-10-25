@@ -4,18 +4,11 @@
 """Unit tests for backend registry."""
 
 import pytest
-from appinfra.log import create_lg
 
 from llm_infer.engines.native.backends.linear.formats.base import QuantFormat
 from llm_infer.engines.native.backends.linear.registry import BackendRegistry
 
 pytestmark = pytest.mark.unit
-
-
-@pytest.fixture
-def lg():
-    """Create a logger for tests."""
-    return create_lg("test", "debug")
 
 
 @pytest.fixture
