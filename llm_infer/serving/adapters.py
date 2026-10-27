@@ -482,7 +482,3 @@ class AdapterManager:
         """
         adapter = self.resolve(key)
         return adapter.peft_type if adapter else None
-
-    def _rebuild_versions_index(self) -> None:
-        """Rebuild versions index from current adapters."""
-        self._build_versions_index(list(self._adapters.values()))

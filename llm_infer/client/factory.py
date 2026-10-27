@@ -823,9 +823,8 @@ class Factory:
             return self._embeddings_openai_from_config(
                 cfg, timeout, retry, dimensions, callbacks
             )
-        elif backend_type == "google":
+        if backend_type == "google":
             return self._embeddings_google_from_config(
                 cfg, timeout, retry, dimensions, count_tokens, callbacks
             )
-        else:
-            raise ValueError(f"Unknown embedding backend type: {backend_type}")
+        raise ValueError(f"Unknown embedding backend type: {backend_type}")

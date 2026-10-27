@@ -482,11 +482,12 @@ class TestLLMClientAsyncAPI:
         backend = MockBackend(mock_lg, "test", responses=[response])
         client = LLMClient(lg=mock_lg, backend=backend)
 
-        tokens = []
-        async for token in client.chat_stream_async(
-            messages=[{"role": "user", "content": "Hi"}]
-        ):
-            tokens.append(token)
+        tokens = [
+            token
+            async for token in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            )
+        ]
 
         assert tokens == ["H", "e", "l", "l", "o"]
 
@@ -912,11 +913,12 @@ class TestLLMClientStreamRetry:
         backend = RetryBackend(mock_lg, "test", ctx=ctx, responses=[response])
         client = LLMClient(lg=mock_lg, backend=backend)
 
-        tokens = []
-        async for token in client.chat_stream_async(
-            messages=[{"role": "user", "content": "Hi"}]
-        ):
-            tokens.append(token)
+        tokens = [
+            token
+            async for token in client.chat_stream_async(
+                messages=[{"role": "user", "content": "Hi"}]
+            )
+        ]
 
         assert "".join(tokens) == "Hello"
         assert call_count == 2
@@ -971,7 +973,7 @@ class TestLLMClientStreamRetry:
             for token in client.chat_stream(
                 messages=[{"role": "user", "content": "Hi"}]
             ):
-                received.append(token)
+                received.append(token)  # noqa: PERF402 - keeps tokens before the error
 
         assert received == ["x"]
         assert call_count == 1
@@ -1004,7 +1006,7 @@ class TestLLMClientStreamRetry:
             async for token in client.chat_stream_async(
                 messages=[{"role": "user", "content": "Hi"}]
             ):
-                received.append(token)
+                received.append(token)  # noqa: PERF401 - keeps tokens before the error
 
         assert received == ["x"]
         assert call_count == 1
@@ -1664,11 +1666,12 @@ class TestLLMClientCallbacks:
                 on_response=lambda req, resp: response_calls.append((req, resp)),
             )
         )
-        tokens = []
-        async for token in client.chat_stream_async(
-            [{"role": "user", "content": "hi"}]
-        ):
-            tokens.append(token)
+        tokens = [
+            token
+            async for token in client.chat_stream_async(
+                [{"role": "user", "content": "hi"}]
+            )
+        ]
 
         assert tokens == ["h", "e", "l", "l", "o"]
         assert len(request_calls) == 1

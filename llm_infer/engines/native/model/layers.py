@@ -168,12 +168,12 @@ class QuantizedLinear(nn.Module):
                 group_size=self.group_size,
                 bias=self.bias,
             )
-        else:  # FP8
-            return FP8Weights(
-                weight=self.weight,
-                weight_scale_inv=self.weight_scale_inv,
-                block_size=self.block_size,
-            )
+        # FP8
+        return FP8Weights(
+            weight=self.weight,
+            weight_scale_inv=self.weight_scale_inv,
+            block_size=self.block_size,
+        )
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass with backend-specific quantized matmul.
@@ -195,11 +195,10 @@ class QuantizedLinear(nn.Module):
                 f"format=AWQ, group_size={self.group_size}, "
                 f"bias={self.bias is not None}, backend={backend_name}"
             )
-        else:
-            return (
-                f"in_features={self.in_features}, out_features={self.out_features}, "
-                f"format=FP8, block_size={self.block_size}, backend={backend_name}"
-            )
+        return (
+            f"in_features={self.in_features}, out_features={self.out_features}, "
+            f"format=FP8, block_size={self.block_size}, backend={backend_name}"
+        )
 
 
 # Backward compatibility factory functions

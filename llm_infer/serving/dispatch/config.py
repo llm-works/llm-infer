@@ -294,17 +294,15 @@ class VLLMConfig:
         - Conditionally enabled (task mode, LoRA)
         """
         # Fields that vLLM auto-calculates when None
-        optional_fields = [
-            ("max_cudagraph_capture_size", self.max_cudagraph_capture_size),
-            ("max_model_len", self.max_model_len),
-            ("max_num_batched_tokens", self.max_num_batched_tokens),
-            ("quantization", self.quantization),
-            ("spec_model", self.spec_model),
-            ("spec_tokens", self.spec_tokens),
-        ]
-        for key, value in optional_fields:
-            if value is not None:
-                kwargs[key] = value
+        optional_fields = {
+            "max_cudagraph_capture_size": self.max_cudagraph_capture_size,
+            "max_model_len": self.max_model_len,
+            "max_num_batched_tokens": self.max_num_batched_tokens,
+            "quantization": self.quantization,
+            "spec_model": self.spec_model,
+            "spec_tokens": self.spec_tokens,
+        }
+        kwargs.update({k: v for k, v in optional_fields.items() if v is not None})
 
         # Task mode for embedding models (vLLM <0.14 only, now auto-detected)
         # if self.task == "embed":
@@ -511,7 +509,7 @@ class InferenceConfig:
         else:
             # Legacy string format: use as fallback, default primary to concurrent_http
             handler_primary = "concurrent_http"
-            handler_fallback = handler if handler else "bounded"
+            handler_fallback = handler or "bounded"
 
         return DispatchConfig(
             handler_primary=handler_primary,

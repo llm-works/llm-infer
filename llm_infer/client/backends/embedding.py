@@ -134,9 +134,7 @@ class Backend(ABC):
         Returns False if rate limited.
         """
         rl = self._ctx.rate_limiter
-        if rl is not None and not rl.can_proceed():
-            return False
-        return True
+        return rl is None or rl.can_proceed()
 
     def _wait_rate_limit(self) -> None:
         """Wait for rate limiter (sync)."""
@@ -327,7 +325,6 @@ class Backend(ABC):
 
         Override to close sync HTTP clients. Called by __exit__.
         """
-        pass
 
     async def aclose(self) -> None:
         """Close all resources (sync and async).
@@ -335,7 +332,6 @@ class Backend(ABC):
         Override to close both sync and async HTTP clients.
         Called by __aexit__.
         """
-        pass
 
     def __enter__(self) -> Self:
         """Enter sync context manager."""

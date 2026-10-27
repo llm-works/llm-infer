@@ -144,7 +144,7 @@ def _convert_tool_calls(
                 ),
             )
         )
-    return result if result else None
+    return result or None
 
 
 def _build_chat_response(
@@ -263,7 +263,7 @@ async def _handle_chat_non_streaming(
     chat_response = _build_chat_response(
         request_id,
         model_name,
-        content if content else None,
+        content or None,
         thinking,
         finish_reason,
         response,

@@ -261,7 +261,7 @@ class TestArchitectureRegistry:
 
     def test_registry_values_are_classes(self) -> None:
         """Test that registry values are architecture classes."""
-        for name, arch_cls in ARCHITECTURES.items():
+        for arch_cls in ARCHITECTURES.values():
             assert issubclass(arch_cls, LlamaArchitecture)
 
 

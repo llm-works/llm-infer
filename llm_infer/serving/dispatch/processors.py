@@ -64,7 +64,6 @@ class RequestProcessor(ABC):
     @abstractmethod
     def can_process(self, request: Any) -> bool:
         """Check if this processor can handle the request."""
-        pass
 
     @abstractmethod
     def handle(
@@ -74,7 +73,6 @@ class RequestProcessor(ABC):
         response_q: mp.Queue[Any],
     ) -> None:
         """Handle the request."""
-        pass
 
     def process(
         self,

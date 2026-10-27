@@ -164,9 +164,11 @@ class TestTransformerConfigFromHfConfig:
 
     def test_missing_config_raises(self) -> None:
         """Test that missing config.json raises ValueError."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with pytest.raises(ValueError, match="No config.json found"):
-                TransformerConfig.from_hf_config(tmpdir)
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            pytest.raises(ValueError, match="No config.json found"),
+        ):
+            TransformerConfig.from_hf_config(tmpdir)
 
     def test_head_dim_computed(self) -> None:
         """Test head_dim is computed from hidden_size when not provided."""

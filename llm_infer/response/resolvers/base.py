@@ -128,7 +128,7 @@ class BaseResolver:
         Args:
             event: The unknown event.
         """
-        pass  # Ignore unknown events by default
+        # Ignore unknown events by default
 
     def finish(self) -> None:
         """Called when the stream is complete.
@@ -142,7 +142,6 @@ class BaseResolver:
 
         Override to perform finalization (flush output, cleanup, etc.).
         """
-        pass
 
     def reset(self) -> None:
         """Reset resolver state for reuse."""

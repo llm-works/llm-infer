@@ -281,7 +281,7 @@ class TestOllamaFormatExtraction:
         fmt_type = response_format.get("type")
         if fmt_type == "json_object":
             return "json"
-        elif fmt_type == "json_schema":
+        if fmt_type == "json_schema":
             schema = response_format.get("json_schema", {}).get("schema", {})
             if schema:
                 # Workaround: add additionalProperties=false for strict compliance
@@ -381,11 +381,11 @@ class TestVLLMGuidedJsonExtraction:
         fmt_type = response_format.get("type")
         if fmt_type == "json_object":
             return {"type": "object"}
-        elif fmt_type == "json_schema":
+        if fmt_type == "json_schema":
             json_schema = response_format.get("json_schema", {})
             schema = json_schema.get("schema", {})
             # Fall back to basic object schema for empty schema (consistent with Ollama)
-            return schema if schema else {"type": "object"}
+            return schema or {"type": "object"}
         return None
 
     def test_none_returns_none(self) -> None:

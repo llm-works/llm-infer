@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import threading
 from typing import Any
@@ -74,7 +75,6 @@ class InFlightConnections:
 
 
 def _shutdown(sock: socket.socket) -> None:
-    try:
+    # OSError: already closed, the call has finished on its own
+    with contextlib.suppress(OSError):
         sock.shutdown(socket.SHUT_RDWR)
-    except OSError:
-        pass  # Already closed: the call has finished on its own

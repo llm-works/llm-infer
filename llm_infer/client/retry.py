@@ -56,9 +56,7 @@ class RetryBase:
         """Check if error should be retried (transient + within timeout)."""
         if not self.is_transient(exc):
             return False
-        if timeout > 0 and (time.monotonic() - start_time) >= timeout:
-            return False
-        return True
+        return timeout <= 0 or (time.monotonic() - start_time) < timeout
 
     def create_backoff(self, retry: RetryConfig) -> Backoff:
         """Create a fresh Backoff instance from RetryConfig."""
@@ -85,6 +83,18 @@ class RetryBase:
 T = TypeVar("T")
 
 
+def fire_callback(
+    lg: Logger, name: str, callback: Callable[..., Any] | None, *args: Any
+) -> None:
+    """Call a lifecycle callback if set; what it raises is logged, not raised."""
+    if callback is None:
+        return
+    try:
+        callback(*args)
+    except Exception as e:
+        lg.warning(f"{name} callback failed", extra={"exception": e})
+
+
 def _fire_request(
     lg: Logger,
     callbacks: LLMCallbacks | None,
@@ -92,11 +102,8 @@ def _fire_request(
     retry: int,
 ) -> None:
     """Fire on_request callback if configured."""
-    if callbacks and callbacks.on_request and request:
-        try:
-            callbacks.on_request(request, retry)
-        except Exception as e:
-            lg.warning("on_request callback failed", extra={"exception": e})
+    if callbacks and request:
+        fire_callback(lg, "on_request", callbacks.on_request, request, retry)
 
 
 def _fire_response(
@@ -108,11 +115,8 @@ def _fire_response(
     """Fire on_response callback if configured."""
     if request and hasattr(response, "request"):
         response.request = request
-    if callbacks and callbacks.on_response and request:
-        try:
-            callbacks.on_response(request, response)
-        except Exception as e:
-            lg.warning("on_response callback failed", extra={"exception": e})
+    if callbacks and request:
+        fire_callback(lg, "on_response", callbacks.on_response, request, response)
 
 
 def _fire_error(
@@ -122,11 +126,8 @@ def _fire_error(
     error: Exception,
 ) -> None:
     """Fire on_error callback if configured."""
-    if callbacks and callbacks.on_error and request:
-        try:
-            callbacks.on_error(request, error)
-        except Exception as e:
-            lg.warning("on_error callback failed", extra={"exception": e})
+    if callbacks and request:
+        fire_callback(lg, "on_error", callbacks.on_error, request, error)
 
 
 def _fire_retry(
@@ -138,11 +139,10 @@ def _fire_retry(
     delay_seconds: float,
 ) -> None:
     """Fire on_retry callback if configured (before backoff sleep)."""
-    if callbacks and callbacks.on_retry and request:
-        try:
-            callbacks.on_retry(request, error, attempt, delay_seconds)
-        except Exception as e:
-            lg.warning("on_retry callback failed", extra={"exception": e})
+    if callbacks and request:
+        fire_callback(
+            lg, "on_retry", callbacks.on_retry, request, error, attempt, delay_seconds
+        )
 
 
 def _fire_on_before_send(
@@ -151,11 +151,8 @@ def _fire_on_before_send(
     ctx: SendContext,
 ) -> None:
     """Fire on_before_send callback if configured."""
-    if callbacks and callbacks.on_before_send:
-        try:
-            callbacks.on_before_send(ctx)
-        except Exception as e:
-            lg.warning("on_before_send callback failed", extra={"exception": e})
+    if callbacks:
+        fire_callback(lg, "on_before_send", callbacks.on_before_send, ctx)
 
 
 def _fire_on_after_send(
@@ -165,11 +162,8 @@ def _fire_on_after_send(
     result: SendResult,
 ) -> None:
     """Fire on_after_send callback if configured."""
-    if callbacks and callbacks.on_after_send:
-        try:
-            callbacks.on_after_send(ctx, result)
-        except Exception as e:
-            lg.warning("on_after_send callback failed", extra={"exception": e})
+    if callbacks:
+        fire_callback(lg, "on_after_send", callbacks.on_after_send, ctx, result)
 
 
 def _retry_reason(error: BackendUnavailableError | BackendRequestError) -> str:

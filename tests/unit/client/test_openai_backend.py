@@ -440,11 +440,13 @@ class TestOpenAICompatibleBackendChat:
         backend = OpenAICompatibleBackend(mock_lg, "test")
 
         request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
-        with patch.object(
-            backend._client, "post", side_effect=httpx.ConnectError("refused")
+        with (
+            patch.object(
+                backend._client, "post", side_effect=httpx.ConnectError("refused")
+            ),
+            pytest.raises(BackendUnavailableError, match="Failed to connect"),
         ):
-            with pytest.raises(BackendUnavailableError, match="Failed to connect"):
-                backend.chat(request)
+            backend.chat(request)
 
         backend.close()
 
@@ -453,11 +455,13 @@ class TestOpenAICompatibleBackendChat:
         backend = OpenAICompatibleBackend(mock_lg, "test")
 
         request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
-        with patch.object(
-            backend._client, "post", side_effect=httpx.TimeoutException("timeout")
+        with (
+            patch.object(
+                backend._client, "post", side_effect=httpx.TimeoutException("timeout")
+            ),
+            pytest.raises(BackendTimeoutError, match="timed out"),
         ):
-            with pytest.raises(BackendTimeoutError, match="timed out"):
-                backend.chat(request)
+            backend.chat(request)
 
         backend.close()
 
@@ -473,9 +477,11 @@ class TestOpenAICompatibleBackendChat:
         )
 
         request = ChatRequest(messages=[{"role": "user", "content": "Hi"}])
-        with patch.object(backend._client, "post", side_effect=http_error):
-            with pytest.raises(BackendRequestError) as exc_info:
-                backend.chat(request)
+        with (
+            patch.object(backend._client, "post", side_effect=http_error),
+            pytest.raises(BackendRequestError) as exc_info,
+        ):
+            backend.chat(request)
 
         assert exc_info.value.status_code == 400
         backend.close()

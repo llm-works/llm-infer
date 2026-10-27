@@ -424,17 +424,18 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         self._add_optional_params(payload, request)
         # Add extra params, filtering out reserved keys to prevent override
         if request.extra:
-            # Extract extra_body contents as top-level keys (OpenAI SDK convention)
-            extra_body = request.extra.get("extra_body")
-            if extra_body:
-                for key, value in extra_body.items():
-                    if value is not None and key not in self._RESERVED_KEYS:
-                        payload[key] = value
-            for key, value in request.extra.items():
-                if key == "extra_body":
-                    continue
-                if value is not None and key not in self._RESERVED_KEYS:
-                    payload[key] = value
+            # Extract extra_body contents as top-level keys (OpenAI SDK convention);
+            # the other extra keys are applied after, so they win on a clash
+            extra_body = request.extra.get("extra_body") or {}
+            others = {k: v for k, v in request.extra.items() if k != "extra_body"}
+            for source in (extra_body, others):
+                payload.update(
+                    {
+                        k: v
+                        for k, v in source.items()
+                        if v is not None and k not in self._RESERVED_KEYS
+                    }
+                )
         return payload
 
     def _add_optional_params(
@@ -535,8 +536,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             return False
         # Per SSE spec, space after colon is optional and stripped if present
         data = line[5:]
-        if data.startswith(" "):
-            data = data[1:]
+        data = data.removeprefix(" ")
         if data == "[DONE]":
             return None
         try:

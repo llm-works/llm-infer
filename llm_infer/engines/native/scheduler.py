@@ -80,15 +80,14 @@ class Request:
     @property
     def is_finished(self) -> bool:
         """Check if request is complete."""
-        if self.state == RequestState.FINISHED:
-            return True
-        if self.finish_reason is not None:
-            return True
-        if len(self.output_tokens) >= self.max_tokens:
-            return True
-        if self.output_tokens and self.output_tokens[-1] in self.stop_token_ids:
-            return True
-        return False
+        return (
+            self.state == RequestState.FINISHED
+            or self.finish_reason is not None
+            or len(self.output_tokens) >= self.max_tokens
+            or bool(
+                self.output_tokens and self.output_tokens[-1] in self.stop_token_ids
+            )
+        )
 
     def mark_finished(self) -> None:
         """Mark the request as finished."""
@@ -137,7 +136,6 @@ class Scheduler:
             Tuple of (prefill_requests, decode_requests)
         """
         prefill = []
-        decode = []
 
         # Promote waiting requests to running
         while self.waiting and len(self.running) < self.max_batch_size:
@@ -147,9 +145,7 @@ class Scheduler:
             prefill.append(request)
 
         # Existing running requests continue decoding
-        for request in self.running.values():
-            if request.state == RequestState.DECODE:
-                decode.append(request)
+        decode = [r for r in self.running.values() if r.state == RequestState.DECODE]
 
         return prefill, decode
 

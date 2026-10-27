@@ -39,17 +39,16 @@ def get_attention_backend(preference: str = "auto") -> AttentionBackend:
                 "Install with: pip install flashinfer"
             )
         return FlashInferBackend()
-    elif preference == "naive":
+    if preference == "naive":
         return NaiveAttentionBackend()
-    elif preference == "auto":
+    if preference == "auto":
         if FLASHINFER_AVAILABLE:
             return FlashInferBackend()
         return NaiveAttentionBackend()
-    else:
-        raise ValueError(
-            f"Unknown attention backend: {preference}. "
-            f"Valid options: auto, flashinfer, naive"
-        )
+    raise ValueError(
+        f"Unknown attention backend: {preference}. "
+        f"Valid options: auto, flashinfer, naive"
+    )
 
 
 def paged_attention(

@@ -181,6 +181,8 @@ def test_start_raises_on_bind_failure() -> None:
     mock_server = MagicMock()
     mock_server.start.side_effect = SystemExit("Address already in use")
 
-    with patch("llm_infer.serving.admin.api._build_server", return_value=mock_server):
-        with pytest.raises(AdminStartupError, match="failed to bind"):
-            start(lg, controller, cfg)
+    with (
+        patch("llm_infer.serving.admin.api._build_server", return_value=mock_server),
+        pytest.raises(AdminStartupError, match="failed to bind"),
+    ):
+        start(lg, controller, cfg)

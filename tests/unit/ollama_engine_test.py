@@ -88,7 +88,7 @@ class TestOllamaConfigFromDict:
 
 
 class TestOllamaStreamingIteratorProcessLine:
-    """Test OllamaStreamingIterator._process_stream_line method."""
+    """Test OllamaStreamingIterator._process_line method."""
 
     def _create_iterator(self) -> OllamaStreamingIterator:
         """Create iterator with mocked dependencies."""
@@ -104,20 +104,20 @@ class TestOllamaStreamingIteratorProcessLine:
     def test_empty_line_returns_none(self) -> None:
         """Test empty lines are skipped."""
         iterator = self._create_iterator()
-        assert iterator._process_stream_line("") is None
-        assert iterator._process_stream_line("   ") is None
-        assert iterator._process_stream_line("\n") is None
+        assert iterator._process_line("") is None
+        assert iterator._process_line("   ") is None
+        assert iterator._process_line("\n") is None
 
     def test_generate_format_extracts_response(self) -> None:
         """Test parsing /api/generate response format."""
         iterator = self._create_iterator()
-        result = iterator._process_stream_line('{"response": "Hello", "done": false}')
+        result = iterator._process_line('{"response": "Hello", "done": false}')
         assert result == "Hello"
 
     def test_chat_format_extracts_content(self) -> None:
         """Test parsing /api/chat response format."""
         iterator = self._create_iterator()
-        result = iterator._process_stream_line(
+        result = iterator._process_line(
             '{"message": {"content": "World"}, "done": false}'
         )
         assert result == "World"
@@ -125,14 +125,14 @@ class TestOllamaStreamingIteratorProcessLine:
     def test_empty_response_returns_none(self) -> None:
         """Test empty response text returns None."""
         iterator = self._create_iterator()
-        result = iterator._process_stream_line('{"response": "", "done": false}')
+        result = iterator._process_line('{"response": "", "done": false}')
         assert result is None
 
     def test_done_true_sets_finished(self) -> None:
         """Test done=true sets finish state and raises StopIteration."""
         iterator = self._create_iterator()
         with pytest.raises(StopIteration):
-            iterator._process_stream_line(
+            iterator._process_line(
                 '{"done": true, "prompt_eval_count": 10, "eval_count": 20}'
             )
         assert iterator._finished is True
@@ -144,7 +144,7 @@ class TestOllamaStreamingIteratorProcessLine:
         """Test done_reason=length sets finish_reason correctly."""
         iterator = self._create_iterator()
         with pytest.raises(StopIteration):
-            iterator._process_stream_line(
+            iterator._process_line(
                 '{"done": true, "done_reason": "length", "eval_count": 100}'
             )
         assert iterator.finish_reason == "length"
@@ -153,7 +153,7 @@ class TestOllamaStreamingIteratorProcessLine:
         """Test done=true with final content returns that content."""
         iterator = self._create_iterator()
         # When done=true has final response text, it should return it before stopping
-        result = iterator._process_stream_line(
+        result = iterator._process_line(
             '{"response": "final", "done": true, "eval_count": 1}'
         )
         assert result == "final"
@@ -165,7 +165,7 @@ class TestOllamaStreamingIteratorProcessLine:
 
         iterator = self._create_iterator()
         with pytest.raises(json.JSONDecodeError):
-            iterator._process_stream_line("{malformed json")
+            iterator._process_line("{malformed json")
 
 
 class TestOllamaStreamingIteratorNext:

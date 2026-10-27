@@ -50,8 +50,7 @@ def mock_lg() -> Logger:
 
 
 def _backend(mock_lg: Logger, **kwargs: Any) -> OpenAICompatibleBackend:
-    backend = OpenAICompatibleBackend(mock_lg, "test", **kwargs)
-    return backend
+    return OpenAICompatibleBackend(mock_lg, "test", **kwargs)
 
 
 # ---------------------------------------------------------------------------

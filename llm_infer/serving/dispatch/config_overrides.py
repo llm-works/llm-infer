@@ -141,7 +141,6 @@ class ConfigOverride(ABC):
     @abstractmethod
     def apply(self, config: InferenceConfig) -> None:
         """Apply overrides to the configuration in-place."""
-        pass
 
 
 class EnvConfigOverride(ConfigOverride):

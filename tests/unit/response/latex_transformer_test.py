@@ -80,7 +80,7 @@ class TestLatexTransformerStructured:
         transformer = LatexTransformer()
         events = collect_events(transformer, r"\sqrt{x}")
         content = get_content(events)
-        assert "\u221ax" == content
+        assert content == "\u221ax"
 
     def test_boxed(self) -> None:
         """Test boxed conversion."""

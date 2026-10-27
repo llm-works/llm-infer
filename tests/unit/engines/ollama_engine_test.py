@@ -617,12 +617,6 @@ class TestEmbed:
 
 
 class TestMemoryStats:
-    def test_default_stats(self) -> None:
-        engine = _make_engine()
-        stats = engine._default_memory_stats()
-        assert stats["allocated"] == 0
-        assert stats["kv_blocks_total"] == 0
-
     def test_memory_stats_success(self) -> None:
         engine = _make_engine(model="qwen-7b")
         mock_resp = MagicMock()
