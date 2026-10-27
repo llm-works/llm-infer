@@ -151,24 +151,28 @@ class LineStream:
                     if self._finished:
                         self._cleanup()
                     return result
-        except StopIteration:
-            self._finished = True
-            self._cleanup()
-            raise
         except json.JSONDecodeError as e:
             self._lg.warning(
                 self._malformed_message, extra={"line": line[:100], "exception": e}
             )
-            self._finished = True
-            self._cleanup()
+            self._finish()
             raise RuntimeError(
                 f"{self._server_name} returned malformed JSON: {e}"
             ) from e
         except httpx.HTTPError as e:
             self._fail_transport(e)
+        except Exception:
+            # StopIteration at the end of the stream, or a line that parses
+            # as JSON but has an unexpected shape
+            self._finish()
+            raise
+
+    def _finish(self) -> None:
+        """Mark the stream finished and close the response."""
+        self._finished = True
+        self._cleanup()
 
     def _fail_transport(self, e: httpx.HTTPError) -> NoReturn:
         """End the stream after a transport error and raise it."""
-        self._finished = True
-        self._cleanup()
+        self._finish()
         raise e

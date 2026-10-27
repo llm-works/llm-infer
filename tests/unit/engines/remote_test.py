@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator
+from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
@@ -51,15 +52,24 @@ class TestRemoteEngine:
 
 
 class _EchoStream(LineStream):
-    """Yields each line; an empty line ends the stream."""
+    """Yields each line; an empty line ends the stream, "bad" fails to parse."""
 
     _server_name = "Echo"
     _malformed_message = "malformed JSON in echo stream"
 
+    def __init__(self, *args: Any) -> None:
+        super().__init__(*args)
+        self.closed = 0
+
     def _process_line(self, line: str) -> str | None:
         if not line:
             raise StopIteration
+        if line == "bad":
+            raise KeyError("choices")
         return line
+
+    def _on_closed(self) -> None:
+        self.closed += 1
 
 
 def _stream(lines: Iterator[str]) -> tuple[_EchoStream, MagicMock]:
@@ -89,5 +99,15 @@ class TestLineStream:
         with pytest.raises(httpx.ReadError):
             next(stream)
         stream_ctx.__exit__.assert_called_once()
+        with pytest.raises(StopIteration):
+            next(stream)
+
+    def test_parse_error_closes_and_reraises(self) -> None:
+        stream, stream_ctx = _stream(iter(["a", "bad", "b"]))
+        assert next(stream) == "a"
+        with pytest.raises(KeyError, match="choices"):
+            next(stream)
+        stream_ctx.__exit__.assert_called_once()
+        assert stream.closed == 1
         with pytest.raises(StopIteration):
             next(stream)

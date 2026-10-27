@@ -18,13 +18,19 @@ def get_json(
 
     Returns None after logging why the request failed: "server not running"
     when the connection is refused, else the failure message with the error.
+    A body that is not a JSON object counts as a failure.
     """
     url = f"http://{host}:{port}{path}"
     try:
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=5) as resp:
-            data: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
+        if isinstance(data, dict):
             return data
+        lg.error(
+            failure,
+            extra={"error": f"expected a JSON object, got {type(data).__name__}"},
+        )
     except urllib.error.URLError as e:
         if "Connection refused" in str(e):
             lg.error("server not running", extra={"host": host, "port": port})
