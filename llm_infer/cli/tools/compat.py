@@ -75,12 +75,11 @@ class CompatTool(Tool):
     def run(self, **kwargs: Any) -> int:
         if self.args.command in ("generate", "gen"):
             return self._generate()
-        elif self.args.command == "check":
+        if self.args.command == "check":
             return self._check()
-        else:
-            # No subcommand - show help
-            self.lg.error("no command specified, use 'generate' or 'check'")
-            return 1
+        # No subcommand - show help
+        self.lg.error("no command specified, use 'generate' or 'check'")
+        return 1
 
     def _serialize_spec(self, spec: dict) -> str:
         """Serialize spec to JSON or YAML."""
@@ -126,8 +125,7 @@ class CompatTool(Tool):
             target = spec_file or "template"
             self.lg.info(f"spec {target} is accurate")
             return 0
-        else:
-            self.lg.error("spec has discrepancies")
-            for issue in issues:
-                self.lg.warning(f"  - {issue}")
-            return 1
+        self.lg.error("spec has discrepancies")
+        for issue in issues:
+            self.lg.warning(f"  - {issue}")
+        return 1

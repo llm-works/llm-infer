@@ -22,6 +22,7 @@ Requires: pip install 'llm-infer[saia]'
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import TYPE_CHECKING, Any, Self
 
@@ -218,11 +219,9 @@ class SAIAAdapter(Backend):
     async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
         for task in tasks:
             task.cancel()
-            try:
+            # Suppress all exceptions during cleanup to avoid masking PauseRequested
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await task
-            except (Exception, asyncio.CancelledError):
-                # Suppress all exceptions during cleanup to avoid masking PauseRequested
-                pass
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert SAIA messages to llm-infer message dicts."""

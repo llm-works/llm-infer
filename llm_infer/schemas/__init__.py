@@ -31,7 +31,7 @@ from .openai import (
     Role,
 )
 
-__all__ = [
+__all__ = [  # cq: keep - llm_infer.api repeats these exports on purpose
     # Enums
     "Role",
     "FinishReason",

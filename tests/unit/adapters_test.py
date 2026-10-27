@@ -102,7 +102,7 @@ class TestAdapterManagerVersions:
         manager = AdapterManager(lg, base_path=None)
         for adapter in adapters:
             manager._adapters[adapter.key] = adapter
-        manager._rebuild_versions_index()
+        manager._build_versions_index(adapters)
         return manager
 
     def test_resolve_exact_match(self) -> None:

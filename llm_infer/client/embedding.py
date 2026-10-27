@@ -48,7 +48,7 @@ from appinfra.time import since, start
 from .backends import RetryConfig
 from .backends.embedding import Backend, BatchEmbeddingResult, EmbeddingResult
 from .errors import BackendRequestError, BackendUnavailableError
-from .retry import RetryBase
+from .retry import RetryBase, fire_callback
 from .types import _gen_req_id
 
 
@@ -203,12 +203,8 @@ class EmbeddingClient:
 
     def _fire_on_request(self, request: EmbeddingRequest, retry: int) -> None:
         """Fire on_request callback with error handling."""
-        cb = self._callbacks
-        if cb and cb.on_request:
-            try:
-                cb.on_request(request, retry)
-            except Exception as e:
-                self._lg.warning("on_request callback failed", extra={"exception": e})
+        if cb := self._callbacks:
+            fire_callback(self._lg, "on_request", cb.on_request, request, retry)
 
     def _fire_on_response(
         self,
@@ -216,23 +212,13 @@ class EmbeddingClient:
         response: EmbeddingResult | BatchEmbeddingResult,
     ) -> None:
         """Fire on_response callback with error handling."""
-        cb = self._callbacks
-        if cb and cb.on_response:
-            try:
-                cb.on_response(request, response)
-            except Exception as e:
-                self._lg.warning("on_response callback failed", extra={"exception": e})
+        if cb := self._callbacks:
+            fire_callback(self._lg, "on_response", cb.on_response, request, response)
 
     def _fire_on_error(self, request: EmbeddingRequest, error: Exception) -> None:
         """Fire on_error callback with error handling."""
-        cb = self._callbacks
-        if cb and cb.on_error:
-            try:
-                cb.on_error(request, error)
-            except Exception as cb_err:
-                self._lg.warning(
-                    "on_error callback failed", extra={"exception": cb_err}
-                )
+        if cb := self._callbacks:
+            fire_callback(self._lg, "on_error", cb.on_error, request, error)
 
     def _fire_on_retry(
         self,
@@ -242,14 +228,16 @@ class EmbeddingClient:
         delay_seconds: float,
     ) -> None:
         """Fire on_retry callback (before backoff sleep) with error handling."""
-        cb = self._callbacks
-        if cb and cb.on_retry:
-            try:
-                cb.on_retry(request, error, attempt, delay_seconds)
-            except Exception as cb_err:
-                self._lg.warning(
-                    "on_retry callback failed", extra={"exception": cb_err}
-                )
+        if cb := self._callbacks:
+            fire_callback(
+                self._lg,
+                "on_retry",
+                cb.on_retry,
+                request,
+                error,
+                attempt,
+                delay_seconds,
+            )
 
     # =========================================================================
     # Retry wrappers

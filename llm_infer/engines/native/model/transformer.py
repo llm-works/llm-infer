@@ -255,7 +255,7 @@ class TransformerModel(nn.Module):
         loaded = 0
         for sf_path in files:
             with safe_open(sf_path, framework="pt", device="cpu") as f:
-                for key in f.keys():
+                for key in f.keys():  # noqa: SIM118 - safe_open handle, not a dict
                     tensor = f.get_tensor(key)
                     # Quantized tensors should not have dtype converted:
                     # - AWQ: qweight, qzeros are int32
@@ -298,12 +298,12 @@ class TransformerModel(nn.Module):
             "up_proj",
             "down_proj",
         ]
-        for proj in fp8_projs:
-            if key.endswith(f".{proj}.weight") or key.endswith(
-                f".{proj}.weight_scale_inv"
-            ):
-                return True
-        return False
+        suffixes = tuple(
+            f".{proj}.{name}"
+            for proj in fp8_projs
+            for name in ("weight", "weight_scale_inv")
+        )
+        return key.endswith(suffixes)
 
     def _load_weights(
         self, weights_path: str, on_progress: Callable | None = None
@@ -473,8 +473,7 @@ class TransformerModel(nn.Module):
             )
 
         hidden = self.norm(hidden)
-        logits: Tensor = self.lm_head(hidden[:, -1, :])
-        logits = self.arch.scale_logits(logits)
+        logits: Tensor = self.arch.scale_logits(self.lm_head(hidden[:, -1, :]))
         return logits
 
     def _compute_qkv(

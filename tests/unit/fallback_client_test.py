@@ -456,7 +456,7 @@ class TestFallbackOnRateLimitAllPaths:
         tokens = []
         with pytest.raises(BackendRequestError) as exc_info:
             for token in stream:
-                tokens.append(token)
+                tokens.append(token)  # noqa: PERF402 - keeps tokens before the error
 
         assert tokens == ["partial"]
         assert exc_info.value.status_code == 429

@@ -46,7 +46,7 @@ from ..schemas.openai import (
     Role,
 )
 
-__all__ = [
+__all__ = [  # cq: keep - public facade repeats the schemas package's exports
     # Enums
     "Role",
     "FinishReason",

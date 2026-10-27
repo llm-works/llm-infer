@@ -36,7 +36,6 @@ class CodeBlockParser:
     def __init__(self) -> None:
         """Initialize the code block parser."""
         self._in_code: bool = False
-        self._language: str = ""
         self._buffer: str = ""
 
     def _try_match_open_fence(self) -> tuple[int, int, str] | None:
@@ -74,18 +73,8 @@ class CodeBlockParser:
             else:
                 break
 
-        if trailing_backticks == 0:
-            # No backticks at end - safe to emit everything
-            return len(self._buffer)
-
-        if trailing_backticks >= 3:
-            # We have 3+ backticks - could be incomplete fence with language
-            # Keep all the backticks plus potential language chars
-            backtick_start = len(self._buffer) - trailing_backticks
-            # Check if there's content after the backticks (shouldn't be, since they're trailing)
-            return backtick_start
-
-        # 1-2 trailing backticks - keep them buffered
+        # Keep trailing backticks buffered: 1-2 may grow into a fence, 3+ may be
+        # a fence still waiting for its language identifier
         return len(self._buffer) - trailing_backticks
 
     def _try_match_close_fence(self) -> int | None:
@@ -128,7 +117,6 @@ class CodeBlockParser:
         yield StreamEvent(EventType.CODE_END)
         self._buffer = self._buffer[close_pos:]
         self._in_code = False
-        self._language = ""
 
     def _process_outside_code(self) -> Iterator[StreamEvent]:
         """Process buffer when outside code block."""
@@ -149,7 +137,6 @@ class CodeBlockParser:
         yield StreamEvent(EventType.CODE_START, metadata={"language": language})
         self._buffer = self._buffer[end_idx:]
         self._in_code = True
-        self._language = language
 
     def feed(self, token: str) -> Iterator[StreamEvent]:
         """Process a token and yield events.
@@ -192,5 +179,4 @@ class CodeBlockParser:
     def reset(self) -> None:
         """Reset parser state for reuse."""
         self._in_code = False
-        self._language = ""
         self._buffer = ""

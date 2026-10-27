@@ -163,14 +163,15 @@ async def _async_iter(items: list[str]) -> AsyncIterator[str]:
 
 @pytest.mark.asyncio
 async def test_stream_chat_completion_full() -> None:
-    chunks = []
-    async for chunk in stream_chat_completion(
-        "r1",
-        "model",
-        _async_iter(["hi", " there"]),
-        get_finish_reason=lambda: FinishReason.STOP,
-    ):
-        chunks.append(chunk)
+    chunks = [
+        chunk
+        async for chunk in stream_chat_completion(
+            "r1",
+            "model",
+            _async_iter(["hi", " there"]),
+            get_finish_reason=lambda: FinishReason.STOP,
+        )
+    ]
     # First chunk: role
     # Then 2 content chunks
     # Then final chunk with finish_reason
@@ -183,11 +184,12 @@ async def test_stream_chat_completion_full() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_chat_completion_no_tokens() -> None:
-    chunks = []
-    async for chunk in stream_chat_completion(
-        "r1", "model", _async_iter([]), get_finish_reason=lambda: FinishReason.STOP
-    ):
-        chunks.append(chunk)
+    chunks = [
+        chunk
+        async for chunk in stream_chat_completion(
+            "r1", "model", _async_iter([]), get_finish_reason=lambda: FinishReason.STOP
+        )
+    ]
     # role + final + [DONE]
     assert len(chunks) == 3
 

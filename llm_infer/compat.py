@@ -204,9 +204,8 @@ def _validate_spec(lg: Logger, spec: dict) -> list[str]:
         issues.append(f"Extra model_types: {sorted(extra)}")
 
     # Check required sections
-    for section in ["version", "engine", "architecture", "format", "unsupported_tags"]:
-        if section not in spec:
-            issues.append(f"Missing section: {section}")
+    sections = ["version", "engine", "architecture", "format", "unsupported_tags"]
+    issues.extend(f"Missing section: {s}" for s in sections if s not in spec)
 
     return issues
 

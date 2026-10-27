@@ -92,21 +92,22 @@ class BoundChatClient(ChatClient):
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Merge bound kwargs with call-time kwargs."""
-        call_kwargs: dict[str, Any] = {**self._bound_kwargs, "messages": messages}
-        for name, value in [
-            ("model", model),
-            ("system", system),
-            ("temperature", temperature),
-            ("max_tokens", max_tokens),
-            ("tools", tools),
-            ("tool_choice", tool_choice),
-            ("think", think),
-            ("adapter", adapter),
-        ]:
-            if value is not _UNSET:
-                call_kwargs[name] = value
-        call_kwargs.update(kwargs)
-        return call_kwargs
+        explicit = {
+            "model": model,
+            "system": system,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "think": think,
+            "adapter": adapter,
+        }
+        return {
+            **self._bound_kwargs,
+            "messages": messages,
+            **{name: value for name, value in explicit.items() if value is not _UNSET},
+            **kwargs,
+        }
 
     def chat(
         self,
@@ -123,7 +124,7 @@ class BoundChatClient(ChatClient):
     ) -> ChatResponse:
         """Send a chat completion request with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,
@@ -151,7 +152,7 @@ class BoundChatClient(ChatClient):
     ) -> ChatStreamSync:
         """Stream chat completion tokens with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,
@@ -179,7 +180,7 @@ class BoundChatClient(ChatClient):
     ) -> ChatResponse:
         """Send a chat completion request (async) with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,
@@ -207,7 +208,7 @@ class BoundChatClient(ChatClient):
     ) -> ChatStream:
         """Stream chat completion tokens (async) with bound kwargs merged."""
         call_kwargs = self._merge_kwargs(
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,

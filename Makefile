@@ -15,6 +15,13 @@ INFRA_DEV_CQ_STRICT := true
 # SPDX license header enforcement
 INFRA_DEV_CQ_SPDX := true
 
+# No ruff rules reported as warnings only: they are enforced in pyproject's select
+INFRA_DEV_CQ_LINT_SELECT :=
+
+# Fail on duplicated code blocks and unused private definitions
+INFRA_DEV_CQ_DUP := strict
+INFRA_DEV_CQ_DEAD := strict
+
 # Docstring coverage threshold (percentage)
 INFRA_DEV_DOCSTRING_THRESHOLD := 90
 

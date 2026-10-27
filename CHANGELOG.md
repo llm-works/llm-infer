@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Development: `make check` and CI fail on duplicated code blocks, unused private definitions,
+  and the ruff rule groups C90, SIM, RET, PIE, PERF, FURB and C4.
+
 ## [0.8.0] - 2026-10-25
 
 ### Added

@@ -69,14 +69,16 @@ def test_timeout_cancels_upstream_request(serve: Serve, stream: bool) -> None:
 def test_client_disconnect_cancels_upstream_request(serve: Serve, stream: bool) -> None:
     # The client gives up (read timeout 1 s) before serve's RESPONSE_TIMEOUT,
     # so only the disconnect can trigger the cancel
-    with pytest.raises(httpx.ReadTimeout):
-        with httpx.Client(timeout=httpx.Timeout(10.0, read=1.0)) as client:
-            r = client.post(
-                f"{serve.base_url}/v1/chat/completions",
-                json=chat_body("hold", stream),
-            )
-            for _ in r.iter_bytes():  # streaming: headers arrive, then nothing
-                pass
+    with (
+        pytest.raises(httpx.ReadTimeout),
+        httpx.Client(timeout=httpx.Timeout(10.0, read=1.0)) as client,
+    ):
+        r = client.post(
+            f"{serve.base_url}/v1/chat/completions",
+            json=chat_body("hold", stream),
+        )
+        for _ in r.iter_bytes():  # streaming: headers arrive, then nothing
+            pass
 
     assert serve.marker("request.received").exists()
     _assert_upstream_closed_and_slot_free(serve)

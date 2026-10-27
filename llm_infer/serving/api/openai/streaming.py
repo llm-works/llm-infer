@@ -78,7 +78,7 @@ def _convert_tool_calls_to_deltas(
                 ),
             )
         )
-    return result if result else None
+    return result or None
 
 
 def create_chat_chunk(

@@ -3,14 +3,13 @@
 
 """Bounded queue request handler - reject when at capacity."""
 
-from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ....context import Event
 from ....schemas.openai import FinishReason
-from ..handler import RequestHandler
 from ..types import Request, RequestStatus, Response, StreamChunk
+from .sequential import SequentialHandler
 
 if TYPE_CHECKING:
     from ....engines.native.scheduler import Request as EngineRequest
@@ -30,7 +29,7 @@ class RunningRequest:
     )
 
 
-class BoundedQueueHandler(RequestHandler):
+class BoundedQueueHandler(SequentialHandler):
     """
     Accept up to max_pending requests, reject beyond.
 
@@ -38,7 +37,8 @@ class BoundedQueueHandler(RequestHandler):
     - Bounded memory usage
     - Explicit backpressure (rejects when full)
     - Fair FIFO queuing
-    - Supports batched decode when max_batch_size > 1
+    - Supports batched decode when max_batch_size > 1; with 1, processes
+      requests one at a time like SequentialHandler
     - Supports streaming via response queue (single-request mode only)
 
     Use for: production with latency SLOs, memory-constrained environments.
@@ -62,13 +62,10 @@ class BoundedQueueHandler(RequestHandler):
             batch_streaming: Allow streaming requests to join batched decode.
                 When True, streaming requests batch with others for better throughput.
         """
-        super().__init__()
-        self._engine = engine
+        super().__init__(engine)
         self.max_pending = max_pending
         self.max_batch_size = max_batch_size
         self.batch_streaming = batch_streaming
-        self.queue: deque[Request] = deque()
-        self.current: Request | None = None
         # For batched mode: track in-flight requests
         self.running: dict[str, RunningRequest] = {}
 
@@ -94,24 +91,7 @@ class BoundedQueueHandler(RequestHandler):
         # Use batched mode for non-streaming when batch_size > 1
         if self.max_batch_size > 1:
             return self._step_batched()
-        return self._step_single()
-
-    def _step_single(self) -> list[Response]:
-        """Process one request at a time (original behavior)."""
-        if self.current is None and self.queue:
-            self.current = self.queue.popleft()
-
-        if self.current is None:
-            return []
-
-        request = self.current
-        response = self._process_request(request)
-        self.current = None
-
-        # For streaming requests, don't return the response - it was sent via chunks
-        if request.stream:
-            return []
-        return [response]
+        return super().step()
 
     def _promote_queue_to_running(self) -> list[Response] | None:
         """Promote queued requests to running. Returns early response if streaming handled."""
@@ -384,8 +364,3 @@ class BoundedQueueHandler(RequestHandler):
             for r in self.running.values()
         )
         return {"active": active, "total_tokens": total_tokens}
-
-    @property
-    def engine(self) -> "InferenceEngineProtocol":
-        """The inference engine used by this handler."""
-        return self._engine

@@ -13,10 +13,10 @@ will raise ImportError with a helpful message.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Self
 
 from appinfra.log import Logger
@@ -64,31 +64,6 @@ def _build_generate_result(outputs: Any) -> dict[str, Any]:
             or FinishReason.STOP,
         }
     return {"content": "", "finish_reason": FinishReason.STOP}
-
-
-@dataclass
-class VLLMStreamingResult:
-    """Streaming result wrapper for pre-generated vLLM output.
-
-    Used for non-streaming generation that needs to conform to the
-    StreamingResultProtocol interface.
-    """
-
-    _tokens: list[str] = field(default_factory=list)
-    _current_idx: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    finish_reason: FinishReason | None = None
-
-    def __iter__(self) -> Iterator[str]:
-        return self
-
-    def __next__(self) -> str:
-        if self._current_idx >= len(self._tokens):
-            raise StopIteration
-        token = self._tokens[self._current_idx]
-        self._current_idx += 1
-        return token
 
 
 class VLLMStreamingIterator:
@@ -166,7 +141,7 @@ class VLLMStreamingIterator:
                 self._tokenizer.encode(current_text, add_special_tokens=False)
             )
 
-        return delta if delta else None
+        return delta or None
 
     def __iter__(self) -> Iterator[str]:
         return self
@@ -676,21 +651,6 @@ class VLLMEngine:
 
         return _build_generate_result(outputs)
 
-    def _build_streaming_result(self, outputs: Any, prompt: str) -> VLLMStreamingResult:
-        """Build VLLMStreamingResult from generation outputs."""
-        result = VLLMStreamingResult()
-        result.prompt_tokens = len(self._tokenizer.encode(prompt))
-        if outputs and outputs[0].outputs:
-            output = outputs[0].outputs[0]
-            if text := output.text:
-                # Stream char-by-char for simulated streaming (avoids multi-byte char issues)
-                result._tokens.extend(text)
-                result.completion_tokens = len(
-                    self._tokenizer.encode(text, add_special_tokens=False)
-                )
-            result.finish_reason = parse_finish_reason(output.finish_reason)
-        return result
-
     def generate_stream_sync(
         self,
         prompt: str,
@@ -768,7 +728,7 @@ class VLLMEngine:
                     chat_messages, tokenize=False, add_generation_prompt=True
                 )
             )
-        elif use_chat_template:
+        if use_chat_template:
             # Wrap prompt in user message - tokenize=False returns str
             chat_messages = [{"role": "user", "content": prompt}]
             return str(
@@ -776,8 +736,7 @@ class VLLMEngine:
                     chat_messages, tokenize=False, add_generation_prompt=True
                 )
             )
-        else:
-            return prompt
+        return prompt
 
     def _extract_guided_json(
         self, response_format: dict[str, Any] | None
@@ -788,10 +747,10 @@ class VLLMEngine:
         fmt_type = response_format.get("type")
         if fmt_type == "json_object":
             return {"type": "object"}
-        elif fmt_type == "json_schema":
+        if fmt_type == "json_schema":
             schema = response_format.get("json_schema", {}).get("schema", {})
             # Fall back to basic object schema for empty schema (consistent with Ollama)
-            return schema if schema else {"type": "object"}
+            return schema or {"type": "object"}
         return None
 
     def _create_sampling_params(
@@ -891,7 +850,6 @@ class VLLMEngine:
         This method is a no-op placeholder for protocol compatibility.
         """
         # vLLM handles prefill internally during generation
-        pass
 
     def step_decode(self, requests: list[Any]) -> list[int | None]:
         """Batched decode step.
@@ -911,7 +869,6 @@ class VLLMEngine:
         This method can abort an in-flight request if needed.
         """
         # vLLM manages cleanup automatically
-        pass
 
     # -------------------------------------------------------------------------
     # InferenceEngineProtocol: Utility methods
@@ -1004,10 +961,8 @@ class VLLMEngine:
 
         # Destroy distributed process groups (fixes NCCL warning)
         if torch.distributed.is_initialized():
-            try:
+            with contextlib.suppress(Exception):
                 torch.distributed.destroy_process_group()
-            except Exception:
-                pass
 
         # vLLM model parallel cleanup
         try:

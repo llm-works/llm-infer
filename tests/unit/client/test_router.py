@@ -228,11 +228,12 @@ class TestLLMRouterAsync:
         client = make_client(mock_lg, "main", [response])
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
-        tokens = []
-        async for token in router.chat_stream_async(
-            [{"role": "user", "content": "Hi"}]
-        ):
-            tokens.append(token)
+        tokens = [
+            token
+            async for token in router.chat_stream_async(
+                [{"role": "user", "content": "Hi"}]
+            )
+        ]
 
         assert tokens == ["X", "Y", "Z"]
 

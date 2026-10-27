@@ -58,15 +58,14 @@ class BackendFactory:
 
         if backend_type in ("openai_compatible", "openai"):
             return self._create_openai(name, ctx, default_model, config)
-        elif backend_type == "anthropic":
+        if backend_type == "anthropic":
             return self._create_anthropic(name, ctx, default_model, config)
-        elif backend_type in NON_CHAT_BACKEND_TYPES:
+        if backend_type in NON_CHAT_BACKEND_TYPES:
             raise ValueError(
                 f"Backend {name!r} has non-chat type {backend_type!r}; "
                 f"use Factory.vertex_natives_from_config() to build these entries"
             )
-        else:
-            raise ValueError(f"Unknown backend type: {backend_type}")
+        raise ValueError(f"Unknown backend type: {backend_type}")
 
     def create_vertex_native(
         self,
