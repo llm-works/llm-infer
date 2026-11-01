@@ -6,7 +6,6 @@
 import math
 from unittest.mock import MagicMock
 
-import pytest
 import torch
 
 from llm_infer.engines.native.model.architecture import (
@@ -19,8 +18,6 @@ from llm_infer.engines.native.model.architecture import (
     get_config_defaults,
 )
 from llm_infer.engines.native.model.config import TransformerConfig
-
-pytestmark = pytest.mark.unit
 
 
 def make_config(**overrides) -> TransformerConfig:

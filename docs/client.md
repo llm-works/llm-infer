@@ -221,8 +221,8 @@ config. Requires a `Logger` instance. Every constructor accepts an optional
 `callbacks=` argument (see [Callbacks](#callbacks)).
 
 ```python
+from appinfra import Envelope
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 from llm_infer.client import Factory, LLMCallbacks, EmbeddingCallbacks
 
 lg = Logger("my-app")
@@ -233,7 +233,7 @@ factory = Factory(lg)
 def openai(
     base_url: str = "http://localhost:8000/v1",
     default_model: str | None = None,
-    api_key: str | SecretStr | None = None,
+    api_key: str | Envelope | None = None,
     timeout: float = 120.0,
     rate_limit: dict[str, Any] | None = None,
     callbacks: LLMCallbacks | None = None,
@@ -243,7 +243,7 @@ def openai(
 # Anthropic Claude API
 def anthropic(
     default_model: str = "claude-sonnet-4-20250514",
-    api_key: str | SecretStr | None = None,
+    api_key: str | Envelope | None = None,
     max_tokens: int = 4096,
     timeout: float = 120.0,
     rate_limit: dict[str, Any] | None = None,
@@ -255,7 +255,7 @@ def anthropic(
 def embeddings(
     base_url: str = "http://localhost:8001/v1",
     model: str = "default",
-    api_key: str | SecretStr | None = None,
+    api_key: str | Envelope | None = None,
     timeout: float = 120.0,
     retry: RetryConfig | None = None,
     rate_limit: dict[str, Any] | None = None,
@@ -266,7 +266,7 @@ def embeddings(
 
 # Google Generative AI / Vertex embeddings
 def embeddings_google(
-    api_key: str | SecretStr | None = None,
+    api_key: str | Envelope | None = None,
     model: str = "gemini-embedding-001",
     task_type: str = "RETRIEVAL_DOCUMENT",
     *,

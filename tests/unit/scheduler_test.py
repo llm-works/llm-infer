@@ -3,13 +3,9 @@
 
 """Unit tests for scheduler and request management."""
 
-import pytest
-
 from llm_infer.engines.native.kv_cache.pool import BlockPool
 from llm_infer.engines.native.scheduler import Request, RequestState, Scheduler
 from llm_infer.schemas.openai import FinishReason
-
-pytestmark = pytest.mark.unit
 
 
 def make_pool() -> BlockPool:

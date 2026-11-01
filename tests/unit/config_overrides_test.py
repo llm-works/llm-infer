@@ -14,8 +14,6 @@ from llm_infer.serving.dispatch.config_overrides import (
     parse_override_args,
 )
 
-pytestmark = pytest.mark.unit
-
 
 # Test fixtures for nested config structure
 @dataclass

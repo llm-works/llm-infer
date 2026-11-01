@@ -3,10 +3,6 @@
 
 """Unit tests for module imports and exports."""
 
-import pytest
-
-pytestmark = pytest.mark.unit
-
 
 class TestNativeEngineImports:
     """Test native engine module imports."""

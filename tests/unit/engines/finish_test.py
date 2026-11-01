@@ -5,12 +5,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from llm_infer.engines.finish import parse_finish_reason
 from llm_infer.schemas.openai import FinishReason
-
-pytestmark = pytest.mark.unit
 
 
 class TestParseFinishReason:

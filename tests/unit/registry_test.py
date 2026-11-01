@@ -8,8 +8,6 @@ import pytest
 from llm_infer.engines.native.backends.linear.formats.base import QuantFormat
 from llm_infer.engines.native.backends.linear.registry import BackendRegistry
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def registry(lg):

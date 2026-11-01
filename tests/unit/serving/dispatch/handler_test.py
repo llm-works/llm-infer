@@ -30,9 +30,6 @@ from llm_infer.serving.dispatch.types import (
 from ._helpers import ResponseQueueFake
 from ._helpers import make_request as _request
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

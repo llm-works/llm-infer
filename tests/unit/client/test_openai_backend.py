@@ -23,8 +23,6 @@ from llm_infer.client.backends.providers.openai import (
 )
 from llm_infer.schemas.openai import FinishReason
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_lg() -> Logger:

@@ -24,8 +24,6 @@ import pytest
 
 from ._serve_harness import Serve, chat_body, running_serve, wait_for
 
-pytestmark = pytest.mark.integration
-
 RESPONSE_TIMEOUT = 2.0
 CANCEL_WITHIN = 5.0  # From the API giving up to the backend seeing the close
 

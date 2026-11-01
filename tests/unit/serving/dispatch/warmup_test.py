@@ -23,8 +23,6 @@ from llm_infer.serving.dispatch.warmup import (
     warmup_base_model,
 )
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def lg() -> Logger:

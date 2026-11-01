@@ -13,8 +13,6 @@ from fastapi.responses import JSONResponse
 
 from llm_infer.serving.dispatch.errors import ExceptionHandler
 
-pytestmark = pytest.mark.unit
-
 
 def _handler() -> ExceptionHandler:
     return ExceptionHandler(lg=MagicMock(spec=Logger))

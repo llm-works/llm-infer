@@ -23,13 +23,10 @@ from __future__ import annotations
 
 import multiprocessing as mp
 
-import pytest
 from appinfra.subprocess import Lazy
 
 from llm_infer.serving.admin.state import SharedBackendState
 from llm_infer.serving.api.openai.router import OpenAIRouterConfig
-
-pytestmark = pytest.mark.integration
 
 
 def _resolve_all(payload: list[Lazy]) -> None:

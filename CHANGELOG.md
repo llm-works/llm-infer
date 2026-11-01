@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** client `api_key` parameters take `str | appinfra.Envelope`; appinfra 0.14 removes
+  `appinfra.yaml.SecretStr`, which they accepted before.
 - Development: `make check` and CI fail on duplicated code blocks, unused private definitions,
   and the ruff rule groups C90, SIM, RET, PIE, PERF, FURB and C4.
+- Development: the Makefile uses appinfra 0.14's `APPINFRA_*` settings, the dev extra requires
+  mypy 2, and `make check` fails on tests outside their suite or leaking process-wide state.
 
 ## [0.8.0] - 2026-10-25
 

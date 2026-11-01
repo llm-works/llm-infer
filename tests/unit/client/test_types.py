@@ -3,8 +3,6 @@
 
 """Unit tests for client types."""
 
-import pytest
-
 from llm_infer.client import ChatResponse
 from llm_infer.schemas.openai import (
     ChatCompletionUsage,
@@ -12,8 +10,6 @@ from llm_infer.schemas.openai import (
     FunctionCall,
     ToolCall,
 )
-
-pytestmark = pytest.mark.unit
 
 
 class TestChatResponse:

@@ -4,5 +4,6 @@
 """Shared pytest setup for all test suites."""
 
 # appinfra.testing destroys the loggers each test leaves registered, so the next
-# test in the same worker can create the same names again.
-pytest_plugins = ["appinfra.testing"]
+# test in the same worker can create the same names again. appinfra.pytest_suites
+# assigns each test its suite from its directory or marker.
+pytest_plugins = ["appinfra.testing", "appinfra.pytest_suites"]

@@ -18,8 +18,6 @@ from llm_infer.client.fallback_helper import detect_cycles, parse_fallback_key
 from llm_infer.client.router import ResolvedTarget
 from llm_infer.client.types import ChatResponse
 
-pytestmark = pytest.mark.unit
-
 
 class TestDetectCycles:
     """Tests for detect_cycles helper."""

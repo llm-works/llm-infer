@@ -8,12 +8,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from appinfra import Envelope
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from ..types import LLMCallbacks
-from .auth import AuthProvider, auth_from_config
+from .auth import AuthProvider, auth_from_config, envelope_or_none
 from .base import Backend
 from .context import BackendContext, context_from_config
 from .provider import Provider, ProviderDetector
@@ -173,7 +173,7 @@ class BackendFactory:
         provider has one (e.g. GeminiBackend for Google).
         """
         base_url = config.get("base_url", "http://localhost:8000/v1")
-        api_key = SecretStr.ensure(config.get("api_key"))
+        api_key = envelope_or_none(config.get("api_key"))
         auth = self._create_auth(config, api_key=api_key)
         # Provider detection uses the raw prefix; reveal into a local only.
         detect_key = api_key.reveal() if api_key is not None else None
@@ -205,7 +205,7 @@ class BackendFactory:
         self,
         config: DotDict,
         *,
-        api_key: str | SecretStr | None,
+        api_key: str | Envelope | None,
         api_key_header: str = "Authorization",
     ) -> AuthProvider | None:
         """Build an AuthProvider from the ``auth:`` block, or wrap ``api_key``."""
@@ -232,7 +232,7 @@ class BackendFactory:
             "name": name,
             "ctx": ctx,
             "default_model": default_model,
-            "api_key": SecretStr.ensure(config.get("api_key")),
+            "api_key": envelope_or_none(config.get("api_key")),
             "base_url": config.get("base_url"),
         }
         if config.get("max_tokens") is not None:

@@ -3,12 +3,8 @@
 
 """Unit tests for generation guards."""
 
-import pytest
-
 from llm_infer.engines.native.guards.protocol import GuardResult
 from llm_infer.engines.native.guards.repetition import RepetitionGuard
-
-pytestmark = pytest.mark.unit
 
 
 class TestGuardResult:

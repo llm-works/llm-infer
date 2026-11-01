@@ -23,8 +23,6 @@ from llm_infer.client.backends.embedding import (
     OpenAIBackend,
 )
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_lg() -> Logger:

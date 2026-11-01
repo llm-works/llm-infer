@@ -5,11 +5,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from llm_infer.models.config import ModelsConfig
-
-pytestmark = pytest.mark.unit
 
 
 def test_from_dict_default_absent_yields_none() -> None:

@@ -11,8 +11,6 @@ import torch
 from llm_infer.engines.native.config import EngineConfig
 from llm_infer.engines.native.model.config import TransformerConfig
 
-pytestmark = pytest.mark.unit
-
 
 def make_model_config() -> TransformerConfig:
     """Create a test TransformerConfig."""

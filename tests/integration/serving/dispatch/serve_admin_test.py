@@ -31,8 +31,6 @@ from ._serve_harness import (
     wait_for,
 )
 
-pytestmark = pytest.mark.integration
-
 TOKEN = "admin-test-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 

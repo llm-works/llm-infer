@@ -3,7 +3,6 @@
 
 """Unit tests for Rotary Position Embeddings (RoPE)."""
 
-import pytest
 import torch
 
 from llm_infer.engines.native.attention.rope import (
@@ -11,8 +10,6 @@ from llm_infer.engines.native.attention.rope import (
     precompute_rope_freqs,
     rotate_half,
 )
-
-pytestmark = pytest.mark.unit
 
 
 class TestPrecomputeRopeFreqs:

@@ -3,12 +3,8 @@
 
 """Unit tests for SequenceKVCache."""
 
-import pytest
-
 from llm_infer.engines.native.kv_cache.pool import BlockPool
 from llm_infer.engines.native.kv_cache.sequence import SequenceKVCache
-
-pytestmark = pytest.mark.unit
 
 
 def make_pool(num_blocks: int = 10, block_size: int = 4) -> BlockPool:

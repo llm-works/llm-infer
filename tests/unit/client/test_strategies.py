@@ -28,8 +28,6 @@ from llm_infer.client.strategy import (
 )
 from llm_infer.client.types import ChatRequest
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_router() -> MagicMock:

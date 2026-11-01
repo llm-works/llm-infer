@@ -29,9 +29,6 @@ from llm_infer.serving.api.openai.streaming import (
     stream_completion_sync,
 )
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # format_sse_*
 # ---------------------------------------------------------------------------

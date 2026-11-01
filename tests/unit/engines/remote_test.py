@@ -15,8 +15,6 @@ import pytest
 
 from llm_infer.engines.remote import LineStream, RemoteEngine, truncate_embedding
 
-pytestmark = pytest.mark.unit
-
 
 class TestTruncateEmbedding:
     def test_no_dimensions_returns_input(self) -> None:

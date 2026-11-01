@@ -35,8 +35,6 @@ from ._serve_harness import (
     wait_for,
 )
 
-pytestmark = pytest.mark.integration
-
 STOP_BUDGET = 12.0  # Leaves margin under the smallest systemd TimeoutStopSec (15 s)
 
 

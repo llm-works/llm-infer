@@ -28,8 +28,6 @@ from llm_infer.serving.dispatch.types import (
     StreamChunk,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class _IPC:
     """IPC stub: inference behaves as `on_submit` says; cancels are recorded."""

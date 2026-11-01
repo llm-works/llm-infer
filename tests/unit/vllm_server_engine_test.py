@@ -9,8 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 
 class TestVLLMServerEngineVerifyAdapters:
     """Test VLLMServerEngine._verify_adapters method."""

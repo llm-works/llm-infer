@@ -42,8 +42,6 @@ from llm_infer.client.backends.vertex_native import NativeVertexBackend
 from llm_infer.client.errors import BackendError, BackendRequestError
 from llm_infer.client.types import ChatResponse
 
-pytestmark = pytest.mark.unit
-
 
 class _StubAuth:
     """Stub AuthProvider — every call returns a constant bearer header."""

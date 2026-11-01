@@ -13,8 +13,6 @@ from llm_infer.cli.tools.serve import ServeTool
 from llm_infer.models.config import ModelConfig, ModelsConfig
 from llm_infer.serving.dispatch.config import OllamaConfig, VLLMConfig, VLLMServerConfig
 
-pytestmark = pytest.mark.unit
-
 
 @dataclass
 class MockEnginesConfig:

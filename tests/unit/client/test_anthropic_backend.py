@@ -7,12 +7,10 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from appinfra import Envelope
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from llm_infer.client import ChatRequest
-
-pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -64,39 +62,39 @@ class TestAnthropicBackendMocked:
 
         return mock_module
 
-    def test_secret_str_revealed_at_sdk_ctor(
+    def test_envelope_revealed_at_sdk_ctor(
         self, mock_lg: Logger, mock_anthropic: Any
     ) -> None:
-        """SecretStr api_key is revealed only inside the anthropic SDK call,
-        stored as SecretStr on the instance."""
+        """Envelope api_key is revealed only inside the anthropic SDK call,
+        stored as Envelope on the instance."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend(
-                mock_lg, "anthropic", api_key=SecretStr("sk-ant-secret")
+                mock_lg, "anthropic", api_key=Envelope("sk-ant-secret")
             )
             try:
                 # Reveal happens at Anthropic() ctor — verify the mock saw the
-                # plain string, not the SecretStr wrapper.
+                # plain string, not the Envelope wrapper.
                 assert mock_anthropic.Anthropic.call_args.kwargs["api_key"] == (
                     "sk-ant-secret"
                 )
-                # Storage stays SecretStr — no plain str retained on the instance.
-                assert isinstance(backend._api_key, SecretStr)
+                # Storage stays Envelope — no plain str retained on the instance.
+                assert isinstance(backend._api_key, Envelope)
                 assert "sk-ant-secret" not in repr(backend._api_key)
             finally:
                 backend.close()
 
-    def test_plain_str_api_key_stored_as_secret_str(
+    def test_plain_str_api_key_stored_as_envelope(
         self, mock_lg: Logger, mock_anthropic: Any
     ) -> None:
-        """Backwards compat: plain str is coerced to SecretStr on the instance."""
+        """Backwards compat: plain str is coerced to Envelope on the instance."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend(mock_lg, "anthropic", api_key="sk-ant-plain")
             try:
-                assert isinstance(backend._api_key, SecretStr)
+                assert isinstance(backend._api_key, Envelope)
                 assert mock_anthropic.Anthropic.call_args.kwargs["api_key"] == (
                     "sk-ant-plain"
                 )
@@ -117,15 +115,15 @@ class TestAnthropicBackendMocked:
             finally:
                 backend.close()
 
-    def test_secret_str_revealed_at_async_sdk_ctor(
+    def test_envelope_revealed_at_async_sdk_ctor(
         self, mock_lg: Logger, mock_anthropic: Any
     ) -> None:
-        """SecretStr api_key is revealed inside the async anthropic SDK call."""
+        """Envelope api_key is revealed inside the async anthropic SDK call."""
         with patch.dict("sys.modules", {"anthropic": mock_anthropic}):
             from llm_infer.client.backends.providers.anthropic import AnthropicBackend
 
             backend = AnthropicBackend(
-                mock_lg, "anthropic", api_key=SecretStr("sk-ant-async-secret")
+                mock_lg, "anthropic", api_key=Envelope("sk-ant-async-secret")
             )
             try:
                 backend._get_async_client()

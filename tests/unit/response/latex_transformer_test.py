@@ -3,11 +3,7 @@
 
 """Unit tests for LatexTransformer."""
 
-import pytest
-
 from llm_infer.response import LatexTransformer, StreamEvent
-
-pytestmark = pytest.mark.unit
 
 
 def collect_events(transformer: LatexTransformer, text: str) -> list[StreamEvent]:

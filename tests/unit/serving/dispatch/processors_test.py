@@ -35,8 +35,6 @@ from llm_infer.serving.dispatch.types import (
 
 from ._helpers import ResponseQueueFake
 
-pytestmark = pytest.mark.unit
-
 
 def _adapter(key: str = "k1", name: str = "n1") -> MagicMock:
     a = MagicMock()

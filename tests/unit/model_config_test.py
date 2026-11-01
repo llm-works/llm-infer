@@ -11,8 +11,6 @@ import pytest
 
 from llm_infer.engines.native.model.config import TransformerConfig
 
-pytestmark = pytest.mark.unit
-
 
 class TestTransformerConfigFromName:
     """Test TransformerConfig.from_name factory."""

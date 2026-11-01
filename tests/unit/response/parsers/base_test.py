@@ -7,12 +7,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-import pytest
-
 from llm_infer.response.events import EventType, StreamEvent
 from llm_infer.response.parsers.base import BaseParser
-
-pytestmark = pytest.mark.unit
 
 
 class _PassthroughParser:

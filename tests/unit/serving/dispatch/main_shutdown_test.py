@@ -7,12 +7,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, call
 
-import pytest
-
 from llm_infer.serving.dispatch.config import InferenceConfig
 from llm_infer.serving.dispatch.main import BootSequence
-
-pytestmark = pytest.mark.unit
 
 
 def _boot_with_mocks() -> tuple[BootSequence, MagicMock]:

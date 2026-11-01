@@ -11,8 +11,6 @@ from llm_infer.engines.native.attention import (
     get_attention_backend,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestGetAttentionBackend:
     """Test get_attention_backend function."""

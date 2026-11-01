@@ -9,8 +9,6 @@ coverage of mapper functions, focusing on the missing branches.
 
 from __future__ import annotations
 
-import pytest
-
 from llm_infer.models.config import ModelConfig, ThinkConfig
 from llm_infer.schemas.openai import (
     ChatCompletionRequest,
@@ -41,8 +39,6 @@ from llm_infer.serving.api.openai.mappers import (
     tool_choice_to_dict,
     tools_to_dict,
 )
-
-pytestmark = pytest.mark.unit
 
 
 def _msg(role: str, content: str = "") -> ChatMessage:

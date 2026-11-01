@@ -5,8 +5,6 @@
 
 from typing import Any
 
-import pytest
-
 from llm_infer.schemas.openai import (
     ChatCompletionRequest,
     ChatMessage,
@@ -19,8 +17,6 @@ from llm_infer.schemas.openai import (
 )
 from llm_infer.serving.api.openai.mappers import response_format_to_dict
 from llm_infer.serving.dispatch.types import Request
-
-pytestmark = pytest.mark.unit
 
 
 class TestResponseFormatSchemas:

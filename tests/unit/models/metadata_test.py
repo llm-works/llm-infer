@@ -14,8 +14,6 @@ import pytest
 
 from llm_infer.models import ModelMetadata, get_model_metadata
 
-pytestmark = pytest.mark.unit
-
 
 class TestModelMetadataProperties:
     """Test ModelMetadata dataclass properties."""

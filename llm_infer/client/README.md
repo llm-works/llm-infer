@@ -68,7 +68,7 @@ backends:
     enabled: true                   # Optional, default true
     type: openai_compatible         # or: openai, anthropic
     base_url: http://localhost:8000/v1
-    api_key: sk-...                 # Optional; str or SecretStr
+    api_key: sk-...                 # Optional; str or Envelope
     # provider: openai              # Optional; overrides URL-based auto-detect.
                                     # Valid: openai, anthropic, xai, google, local, unknown.
                                     # Mismatch with URL-detected value logs a WARN.

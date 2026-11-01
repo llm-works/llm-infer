@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from llm_infer.serving.dispatch.handlers.batching import (
     ContinuousBatchingHandler,
     RunningRequest,
@@ -17,9 +15,6 @@ from llm_infer.serving.dispatch.types import RequestStatus
 
 from .._helpers import make_engine as _engine
 from .._helpers import make_request as _request
-
-pytestmark = pytest.mark.unit
-
 
 # ---------------------------------------------------------------------------
 # RunningRequest

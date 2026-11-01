@@ -12,8 +12,6 @@ from llm_infer.engines.vllm_common import (
     resolve_gpu_memory_utilization,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestGetGpuTotalMemoryGb:
     """Test get_gpu_total_memory_gb function."""

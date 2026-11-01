@@ -9,8 +9,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from appinfra import Envelope
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from llm_infer.client import (
     ChatRequest,
@@ -31,8 +31,6 @@ from llm_infer.client.backends import (
 from llm_infer.client.backends.auth import StaticAPIKeyAuth
 from llm_infer.client.errors import ConfigError
 from llm_infer.schemas.openai import ChatCompletionUsage, FinishReason
-
-pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -157,11 +155,11 @@ class TestFactory:
         router.close()
 
     def test_from_config_accepts_secret_api_key(self, mock_lg: Logger) -> None:
-        """from_config accepts SecretStr in nested backends[].api_key.
+        """from_config accepts Envelope in nested backends[].api_key.
 
         The reveal must happen at the outbound header build, not at parse
         time. This guards the xray → llm_infer wiring where LLMConfig
-        already stores keys as SecretStr.
+        already stores keys as Envelope.
         """
         factory = Factory(mock_lg)
         config = {
@@ -170,7 +168,7 @@ class TestFactory:
                 "openai": {
                     "type": "openai_compatible",
                     "base_url": "https://api.openai.com/v1",
-                    "api_key": SecretStr("sk-from-xray"),
+                    "api_key": Envelope("sk-from-xray"),
                 },
             },
         }
@@ -186,13 +184,13 @@ class TestFactory:
     def test_embeddings_from_config_accepts_secret_api_key(
         self, mock_lg: Logger
     ) -> None:
-        """embeddings_from_config accepts SecretStr for embedding.api_key."""
+        """embeddings_from_config accepts Envelope for embedding.api_key."""
         factory = Factory(mock_lg)
         config = {
             "type": "openai",
             "base_url": "https://api.openai.com/v1",
             "model": "text-embedding-3-small",
-            "api_key": SecretStr("sk-embed-secret"),
+            "api_key": Envelope("sk-embed-secret"),
         }
         emb_client = factory.embeddings_from_config(config)
         try:
