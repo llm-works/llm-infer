@@ -43,7 +43,7 @@ from ...errors import (
     BackendUnavailableError,
 )
 from ...types import AdapterInfo, ChatRequest, ChatResponse, ResponseHolder
-from ..auth import AuthProvider, StaticAPIKeyAuth, envelope_or_none
+from ..auth import AuthProvider, StaticAPIKeyAuth
 from ..base import Backend
 from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
@@ -85,7 +85,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """
         super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
-        ensured_key = envelope_or_none(api_key)
+        ensured_key = Envelope.optional(api_key)
         if auth is None and ensured_key is not None:
             auth = StaticAPIKeyAuth(ensured_key)
         self._auth = auth

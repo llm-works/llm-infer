@@ -47,11 +47,6 @@ _DEFAULT_SCOPES = ("https://www.googleapis.com/auth/cloud-platform",)
 _DEFAULT_REFRESH_SKEW_S = 300
 
 
-def envelope_or_none(value: str | Envelope | None) -> Envelope | None:
-    """Wrap an optional secret in an Envelope; None stays None."""
-    return None if value is None else Envelope(value)
-
-
 @runtime_checkable
 class AuthProvider(Protocol):
     """Supplies HTTP auth headers, refreshing credentials when needed."""
@@ -270,5 +265,4 @@ __all__ = [
     "StaticAPIKeyAuth",
     "auth_from_api_key",
     "auth_from_config",
-    "envelope_or_none",
 ]

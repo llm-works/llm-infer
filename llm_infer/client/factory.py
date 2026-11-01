@@ -43,7 +43,7 @@ from appinfra.log import Logger
 from appinfra.rate_limit import RateLimiter
 
 from .backends import Backend, BackendContext, BackendFactory, RetryConfig
-from .backends.auth import AuthProvider, auth_from_config, envelope_or_none
+from .backends.auth import AuthProvider, auth_from_config
 from .backends.factory import NON_CHAT_BACKEND_TYPES
 from .backends.vertex_native import NativeVertexBackend
 from .client import LLMClient
@@ -542,7 +542,7 @@ class Factory:
             "type": "openai_compatible",
             "base_url": base_url,
             "model": default_model,
-            "api_key": envelope_or_none(api_key),
+            "api_key": Envelope.optional(api_key),
             "timeout": timeout,
         }
         if rate_limit:
@@ -580,7 +580,7 @@ class Factory:
         config: dict[str, Any] = {
             "type": "anthropic",
             "model": default_model,
-            "api_key": envelope_or_none(api_key),
+            "api_key": Envelope.optional(api_key),
             "max_tokens": max_tokens,
             "timeout": timeout,
         }
@@ -626,7 +626,7 @@ class Factory:
             self._lg,
             base_url=base_url,
             model=model,
-            api_key=envelope_or_none(api_key),
+            api_key=Envelope.optional(api_key),
             ctx=ctx,
         )
         return EmbeddingClient(
@@ -683,7 +683,7 @@ class Factory:
         ctx = BackendContext(rate_limiter=rate_limiter, request_timeout=timeout)
         backend = GoogleBackend(
             self._lg,
-            api_key=envelope_or_none(api_key),
+            api_key=Envelope.optional(api_key),
             model=model,
             task_type=GoogleEmbeddingTaskType(task_type),
             ctx=ctx,
@@ -737,7 +737,7 @@ class Factory:
         return self.embeddings(
             base_url=cfg.base_url,
             model=cfg.get("model", "default"),
-            api_key=envelope_or_none(cfg.get("api_key")),
+            api_key=Envelope.optional(cfg.get("api_key")),
             timeout=timeout,
             retry=retry,
             rate_limit=cfg.get("rate_limit"),
@@ -756,7 +756,7 @@ class Factory:
     ) -> EmbeddingClient:
         """Create Google embedding client from config."""
         auth_cfg = cfg.get("auth")
-        api_key = envelope_or_none(cfg.get("api_key"))
+        api_key = Envelope.optional(cfg.get("api_key"))
         auth = auth_from_config(
             self._lg,
             dict(auth_cfg) if auth_cfg else None,

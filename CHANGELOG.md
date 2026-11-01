@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `appinfra.yaml.SecretStr`, which they accepted before.
 - Development: `make check` and CI fail on duplicated code blocks, unused private definitions,
   and the ruff rule groups C90, SIM, RET, PIE, PERF, FURB and C4.
-- Development: the Makefile uses appinfra 0.14's `APPINFRA_*` settings, the dev extra requires
-  mypy 2, and `make check` fails on tests outside their suite or leaking process-wide state.
+- Development: the Makefile uses appinfra 0.14's `APPINFRA_*` settings, and `make check` warns on
+  tests outside their suite or leaking process-wide state.
+- Dependencies: requires `appinfra>=0.14.0` (was `>=0.12.0`); pydantic comes from
+  `appinfra[validation]` and the `dev` extra is `appinfra[dev]`, so their ranges follow appinfra's.
+  The base install no longer declares aiohttp, filelock, urllib3 or werkzeug, which llm-infer
+  does not import.
 
 ## [0.8.0] - 2026-10-25
 

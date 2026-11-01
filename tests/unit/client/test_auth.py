@@ -22,7 +22,6 @@ from llm_infer.client.backends.auth import (
     StaticAPIKeyAuth,
     auth_from_api_key,
     auth_from_config,
-    envelope_or_none,
 )
 
 
@@ -111,20 +110,6 @@ class TestAuthFromAPIKey:
         auth = auth_from_api_key(Envelope("AIza-abc"), header="x-goog-api-key")
         assert isinstance(auth, GoogleAPIKeyHeaderAuth)
         assert auth.headers() == {"x-goog-api-key": "AIza-abc"}
-
-
-class TestEnvelopeOrNone:
-    def test_none_stays_none(self) -> None:
-        assert envelope_or_none(None) is None
-
-    def test_wraps_str(self) -> None:
-        wrapped = envelope_or_none("sk-abc")
-        assert isinstance(wrapped, Envelope)
-        assert wrapped.reveal() == "sk-abc"
-
-    def test_envelope_passes_through(self) -> None:
-        envelope = Envelope("sk-abc")
-        assert envelope_or_none(envelope) is envelope
 
 
 def _mock_creds(token: str = "tok-1", expiry_offset_s: int = 3600) -> MagicMock:

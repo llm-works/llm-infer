@@ -13,7 +13,7 @@ from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
 
 from ..types import LLMCallbacks
-from .auth import AuthProvider, auth_from_config, envelope_or_none
+from .auth import AuthProvider, auth_from_config
 from .base import Backend
 from .context import BackendContext, context_from_config
 from .provider import Provider, ProviderDetector
@@ -173,7 +173,7 @@ class BackendFactory:
         provider has one (e.g. GeminiBackend for Google).
         """
         base_url = config.get("base_url", "http://localhost:8000/v1")
-        api_key = envelope_or_none(config.get("api_key"))
+        api_key = Envelope.optional(config.get("api_key"))
         auth = self._create_auth(config, api_key=api_key)
         # Provider detection uses the raw prefix; reveal into a local only.
         detect_key = api_key.reveal() if api_key is not None else None
@@ -232,7 +232,7 @@ class BackendFactory:
             "name": name,
             "ctx": ctx,
             "default_model": default_model,
-            "api_key": envelope_or_none(config.get("api_key")),
+            "api_key": Envelope.optional(config.get("api_key")),
             "base_url": config.get("base_url"),
         }
         if config.get("max_tokens") is not None:

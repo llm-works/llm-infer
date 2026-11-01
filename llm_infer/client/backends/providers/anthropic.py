@@ -38,7 +38,6 @@ from ...errors import (
     BackendUnavailableError,
 )
 from ...types import ChatRequest, ChatResponse, ResponseHolder
-from ..auth import envelope_or_none
 from ..base import Backend
 from ..context import BackendContext
 from ..mixins import AsyncRequestTrackingMixin
@@ -120,7 +119,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         self._anthropic = anthropic_module
         self._max_tokens = max_tokens
         self._last_response: ChatResponse | None = None
-        self._api_key = envelope_or_none(api_key)
+        self._api_key = Envelope.optional(api_key)
         self._base_url = base_url
 
         # Sync client created eagerly. Reveal only at the SDK ctor call.
