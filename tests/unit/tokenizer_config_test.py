@@ -3,11 +3,7 @@
 
 """Unit tests for TokenizerConfig."""
 
-import pytest
-
 from llm_infer.engines.native.tokenizer.config import TokenizerConfig
-
-pytestmark = pytest.mark.unit
 
 
 class TestTokenizerConfig:

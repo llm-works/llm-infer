@@ -3,11 +3,7 @@
 
 """Unit tests for BaseResolver."""
 
-import pytest
-
 from llm_infer.response import BaseResolver, EventType, StreamEvent
-
-pytestmark = pytest.mark.unit
 
 
 class TestBaseResolverDispatch:

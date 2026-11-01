@@ -24,9 +24,6 @@ from .._helpers import ResponseQueueFake as _ResponseQueue
 from .._helpers import make_engine as _engine
 from .._helpers import make_request as _request
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # submit()
 # ---------------------------------------------------------------------------

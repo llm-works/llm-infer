@@ -16,8 +16,6 @@ from starlette.responses import StreamingResponse
 
 from llm_infer.serving.api.trace import TraceMiddleware
 
-pytestmark = pytest.mark.unit
-
 
 def _make_app(lg: Logger | None = None) -> FastAPI:
     app = FastAPI()

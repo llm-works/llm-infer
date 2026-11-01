@@ -3,12 +3,9 @@
 
 """Unit tests for generation helper functions."""
 
-import pytest
 import torch
 
 from llm_infer.engines.native.guards import GuardResult, RepetitionGuard
-
-pytestmark = pytest.mark.unit
 
 
 class TestGuardResultDataclass:

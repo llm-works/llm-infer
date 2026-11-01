@@ -9,8 +9,6 @@ import pytest
 
 from llm_infer.serving.dispatch.config import InferenceConfig, LoRAConfig, VLLMConfig
 
-pytestmark = pytest.mark.unit
-
 
 def _full_config() -> VLLMConfig:
     """Config with every optional field set, so every kwarg is emitted."""

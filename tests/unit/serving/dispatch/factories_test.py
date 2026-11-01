@@ -42,8 +42,6 @@ from llm_infer.serving.dispatch.handlers.bounded import BoundedQueueHandler
 from llm_infer.serving.dispatch.handlers.concurrent_http import ConcurrentHttpHandler
 from llm_infer.serving.dispatch.handlers.sequential import SequentialHandler
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def lg() -> Logger:

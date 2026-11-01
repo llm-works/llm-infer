@@ -3,12 +3,9 @@
 
 """Unit tests for RMSNorm layer."""
 
-import pytest
 import torch
 
 from llm_infer.engines.native.model.layers import RMSNorm
-
-pytestmark = pytest.mark.unit
 
 
 class TestRMSNormInit:

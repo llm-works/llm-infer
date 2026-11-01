@@ -3,12 +3,9 @@
 
 """Unit tests for ThinkTagNormalizer."""
 
-import pytest
-
 from llm_infer.response.parsers.think import ThinkTagNormalizer
 
 # pytest convention: module-level marker applies to all tests in file
-pytestmark = pytest.mark.unit
 
 
 class TestThinkTagNormalizerBasic:

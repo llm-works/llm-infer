@@ -14,8 +14,6 @@ import pytest
 
 from llm_infer.cli.tools.metrics import MetricsTool
 
-pytestmark = pytest.mark.unit
-
 
 def _make_tool(**args_overrides: Any) -> MetricsTool:
     """Create a MetricsTool with mocked args + lg."""

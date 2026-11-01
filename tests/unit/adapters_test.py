@@ -6,11 +6,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from llm_infer.serving.adapters import AdapterManager, LoadedAdapter, parse_adapter_key
-
-pytestmark = pytest.mark.unit
 
 
 class TestParseAdapterKey:

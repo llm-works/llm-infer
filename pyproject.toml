@@ -76,14 +76,14 @@ all = [
     "llm-infer[cuda]",
 ]
 dev = [
-    "coverage>=7.0.0,<8.0.0",
+    "coverage>=7.4.0,<8.0.0",
     "ruff>=0.16.0,<1.0.0",  # 0.16 formats code blocks in Markdown, as CI's format check does
-    "mypy>=1.0.0,<2.0.0",
-    "types-PyYAML>=6.0.0",
-    "pytest>=7.0.0,<10.0.0",
-    "pytest-asyncio>=0.21.0,<2.0.0",
+    "mypy>=2.0.0,<3.0.0",
+    "types-PyYAML>=6.0.0,<7.0.0",
+    "pytest>=8.3.0,<10.0.0",  # 8.3 adds MarkMatcher.from_markers, which appinfra.pytest_suites uses
+    "pytest-asyncio>=0.24.0,<2.0.0",  # 0.24 adds asyncio_default_fixture_loop_scope
     "pytest-cov>=4.0.0,<8.0.0",
-    "pytest-xdist>=3.0.0,<4.0.0",
+    "pytest-xdist>=3.2.0,<4.0.0",
 ]
 
 [tool.ruff]
@@ -150,13 +150,17 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 pythonpath = ["."]
-markers = [
-    "unit: Unit tests (fast, isolated, mocked dependencies)",
-    "integration: Integration tests (real dependencies)",
-    "e2e: End-to-end tests (full system workflows)",
-    "perf: Performance tests (benchmarks, load tests)",
-    "security: Security tests (injection, validation, XSS)",
+asyncio_default_fixture_loop_scope = "function"
+# Deprecated APIs called inside the ML stack at import, at versions vLLM pins:
+# torch/utils/mkldnn.py decorates with torch.jit.script_method (reached through
+# vLLM's marlin_utils -> deep_gemm -> torch.compile), and flashinfer's
+# cute_dsl/availability.py imports cutlass's deprecated Arch
+filterwarnings = [
+    "ignore:`torch.jit.script_method` is deprecated:DeprecationWarning:torch.jit._script",
+    "ignore:Arch from arch.py is deprecated:DeprecationWarning:flashinfer.cute_dsl.availability",
 ]
+# Suite markers (unit, integration, e2e, security, performance) are registered by
+# the appinfra.pytest_suites plugin loaded in tests/conftest.py
 
 [tool.coverage.run]
 source = ["llm_infer"]

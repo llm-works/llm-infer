@@ -19,8 +19,6 @@ from llm_infer.engines.native.model.layers import (
     QuantizedLinear,
 )
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def awq_backend(lg):

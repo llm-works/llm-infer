@@ -5,8 +5,6 @@
 
 from io import StringIO
 
-import pytest
-
 from llm_infer.response import (
     BaseResolver,
     EventType,
@@ -15,8 +13,6 @@ from llm_infer.response import (
     TerminalResolver,
     ThinkTagParser,
 )
-
-pytestmark = pytest.mark.unit
 
 
 class TestResponseProcessorDefaults:

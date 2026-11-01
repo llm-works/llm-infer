@@ -9,16 +9,11 @@ covers the other classes/functions in the same module.
 
 from __future__ import annotations
 
-import pytest
-
 from llm_infer.response.parsers.think import (
     ThinkStreamSeparator,
     ThinkTagNormalizer,
     extract_thinking,
 )
-
-pytestmark = pytest.mark.unit
-
 
 # ---------------------------------------------------------------------------
 # ThinkTagNormalizer

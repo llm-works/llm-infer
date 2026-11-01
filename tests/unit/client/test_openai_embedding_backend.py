@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from appinfra import Envelope
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from llm_infer.client import (
     BackendRequestError,
@@ -19,8 +19,6 @@ from llm_infer.client import (
 from llm_infer.client.backends import BackendContext
 from llm_infer.client.backends.embedding import EmbeddingResult
 from llm_infer.client.backends.providers import OpenAIEmbeddingBackend
-
-pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -78,12 +76,12 @@ class TestOpenAIEmbeddingBackendInit:
         backend.close()
 
     def test_secret_api_key_sets_auth_header(self, mock_lg: Logger) -> None:
-        """SecretStr api_key is revealed only at header construction."""
+        """Envelope api_key is revealed only at header construction."""
         backend = OpenAIEmbeddingBackend(
             mock_lg,
             base_url="http://localhost:8001/v1",
             model="model",
-            api_key=SecretStr("sk-secret-emb"),
+            api_key=Envelope("sk-secret-emb"),
         )
         assert backend._build_headers()["Authorization"] == "Bearer sk-secret-emb"
         backend.close()
@@ -288,13 +286,13 @@ class TestOpenAIEmbeddingBackendAsync:
     """Test async methods."""
 
     @pytest.mark.asyncio
-    async def test_embed_async_secret_str_header(self, mock_lg: Logger) -> None:
-        """SecretStr api_key is revealed in async request headers."""
+    async def test_embed_async_envelope_header(self, mock_lg: Logger) -> None:
+        """Envelope api_key is revealed in async request headers."""
         backend = OpenAIEmbeddingBackend(
             mock_lg,
             base_url="http://localhost:8001/v1",
             model="model",
-            api_key=SecretStr("sk-async-secret"),
+            api_key=Envelope("sk-async-secret"),
         )
 
         response = make_embedding_response([[0.1, 0.2]])

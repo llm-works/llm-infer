@@ -19,8 +19,6 @@ from llm_infer.compat import (
     load_template,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestGetVersion:
     """Test get_version function."""

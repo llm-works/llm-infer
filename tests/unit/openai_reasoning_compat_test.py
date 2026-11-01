@@ -24,8 +24,6 @@ from llm_infer.serving.api.openai.mappers import (
     format_messages_as_prompt,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestDeveloperRole:
     """Test developer role support for reasoning models."""

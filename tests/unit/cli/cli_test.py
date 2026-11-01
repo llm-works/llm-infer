@@ -9,8 +9,6 @@ import pytest
 
 from llm_infer.cli import cli
 
-pytestmark = pytest.mark.unit
-
 _PYTHON = "/opt/envs/ml/bin/python"
 _BIN = "/opt/envs/ml/bin"
 

@@ -17,8 +17,6 @@ import pytest
 from llm_infer.engines.native.engine import InferenceEngine
 from llm_infer.engines.peft import PEFTEngine, PEFTStreamingIterator
 
-pytestmark = pytest.mark.unit
-
 
 def _native_engine(context_len: int) -> InferenceEngine:
     engine = object.__new__(InferenceEngine)

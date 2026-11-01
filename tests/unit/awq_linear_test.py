@@ -13,8 +13,6 @@ from llm_infer.engines.native.backends.linear.kernels.awq_pytorch import (
 )
 from llm_infer.engines.native.model.layers import AWQLinear
 
-pytestmark = pytest.mark.unit
-
 
 class TestPyTorchAWQBackendUnpack:
     """Test INT4 unpacking in PyTorch backend."""

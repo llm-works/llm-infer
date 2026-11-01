@@ -14,8 +14,6 @@ from appinfra.log import Logger
 from llm_infer.models.config import ModelsConfig
 from llm_infer.models.resolver import ModelResolver, create_resolver
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def lg() -> Logger:

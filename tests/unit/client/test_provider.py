@@ -3,11 +3,7 @@
 
 """Unit tests for provider detection."""
 
-import pytest
-
 from llm_infer.client.backends.provider import Provider, ProviderDetector
-
-pytestmark = pytest.mark.unit
 
 
 class TestProviderDetector:

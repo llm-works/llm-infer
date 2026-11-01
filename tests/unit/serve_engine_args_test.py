@@ -13,8 +13,6 @@ import pytest
 from llm_infer.cli.tools.serve import ServeTool
 from llm_infer.serving.dispatch.config import VLLMServerConfig
 
-pytestmark = pytest.mark.unit
-
 
 def _parse(argv: list[str]) -> argparse.Namespace:
     """Parse `llm-infer <argv>` with the parser shape appinfra builds for tools."""

@@ -20,8 +20,6 @@ from llm_infer.client import (
 from llm_infer.client.backends import Backend, BackendContext
 from llm_infer.client.discovery import ModelDiscovery
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_lg() -> Logger:

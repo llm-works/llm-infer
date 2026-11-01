@@ -8,8 +8,6 @@ import torch
 
 from llm_infer.engines.native.kv_cache.pool import BlockPool
 
-pytestmark = pytest.mark.unit
-
 
 class TestBlockPoolInit:
     """Test BlockPool initialization."""

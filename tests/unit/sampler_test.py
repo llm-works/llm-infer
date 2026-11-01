@@ -3,7 +3,6 @@
 
 """Unit tests for token sampling."""
 
-import pytest
 import torch
 
 from llm_infer.engines.native.sampler.sampler import (
@@ -12,8 +11,6 @@ from llm_infer.engines.native.sampler.sampler import (
     _apply_top_p,
     sample,
 )
-
-pytestmark = pytest.mark.unit
 
 
 class TestSampleGreedy:

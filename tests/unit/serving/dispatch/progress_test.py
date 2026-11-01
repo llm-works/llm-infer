@@ -12,8 +12,6 @@ from appinfra.log import Logger
 
 from llm_infer.serving.dispatch.progress import ProgressTracker
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def lg() -> Logger:

@@ -12,8 +12,6 @@ from fastapi.testclient import TestClient
 from llm_infer.serving.admin.gate import BackendGateMiddleware
 from llm_infer.serving.admin.state import BackendState, SharedBackendState
 
-pytestmark = pytest.mark.unit
-
 
 def _client(state: SharedBackendState) -> TestClient:
     app = FastAPI()

@@ -3,8 +3,6 @@
 
 """Unit tests for OpenAI-compatible tool/function calling support."""
 
-import pytest
-
 from llm_infer.schemas.openai import (
     ChatCompletionRequest,
     ChatMessage,
@@ -33,9 +31,6 @@ from llm_infer.serving.dispatch.types import (
     Response,
     StreamChunk,
 )
-
-pytestmark = pytest.mark.unit
-
 
 # =============================================================================
 # Schema Tests

@@ -28,9 +28,6 @@ from llm_infer.engines.ollama import (
 )
 from llm_infer.serving.dispatch.config import OllamaConfig
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------

@@ -22,8 +22,6 @@ from llm_infer.serving.admin.controller import (
 from llm_infer.serving.admin.state import BackendState
 from llm_infer.serving.dispatch.config import AdminConfig, InferenceConfig
 
-pytestmark = pytest.mark.unit
-
 TOKEN = "secret-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
