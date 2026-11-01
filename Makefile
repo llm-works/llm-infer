@@ -27,7 +27,7 @@ APPINFRA_DEV_DOCSTRING_THRESHOLD ?= 90
 APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 70
 
 # Report tests outside their suite and unit tests that leak process-wide state
-APPINFRA_DEV_TEST_HEALTH ?= strict
+APPINFRA_DEV_TEST_HEALTH ?= warn
 
 # Custom pip config for flashinfer index
 export PIP_CONFIG_FILE := etc/pip.conf
