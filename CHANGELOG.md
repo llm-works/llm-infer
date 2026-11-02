@@ -7,18 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-01
+
 ### Changed
 
-- **Breaking:** client `api_key` parameters take `str | appinfra.Envelope`; appinfra 0.14 removes
-  `appinfra.yaml.SecretStr`, which they accepted before.
-- Development: `make check` and CI fail on duplicated code blocks, unused private definitions,
-  and the ruff rule groups C90, SIM, RET, PIE, PERF, FURB and C4.
-- Development: the Makefile uses appinfra 0.14's `APPINFRA_*` settings, and `make check` warns on
-  tests outside their suite or leaking process-wide state.
 - Dependencies: requires `appinfra>=0.14.0` (was `>=0.12.0`); pydantic comes from
   `appinfra[validation]` and the `dev` extra is `appinfra[dev]`, so their ranges follow appinfra's.
   The base install no longer declares aiohttp, filelock, urllib3 or werkzeug, which llm-infer
   does not import.
+- Development: `make check` and CI fail on duplicated code blocks, unused private definitions,
+  and the ruff rule groups C90, SIM, RET, PIE, PERF, FURB and C4.
+- Development: the Makefile uses appinfra 0.14's `APPINFRA_*` settings, and `make check` warns on
+  tests outside their suite or leaking process-wide state.
+
+### Fixed
+
+- `import llm_infer` works with appinfra 0.14, which removes `appinfra.yaml.SecretStr`; client
+  `api_key` parameters take `str` or `appinfra.Envelope`.
 
 ## [0.8.0] - 2026-10-25
 
@@ -544,7 +549,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/llm-works/llm-infer/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/llm-works/llm-infer/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/llm-works/llm-infer/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/llm-works/llm-infer/compare/v0.6.3...v0.7.0
