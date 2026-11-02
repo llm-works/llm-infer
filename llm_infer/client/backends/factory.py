@@ -8,9 +8,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from appinfra import Envelope
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from ..types import LLMCallbacks
 from .auth import AuthProvider, auth_from_config
@@ -58,15 +58,14 @@ class BackendFactory:
 
         if backend_type in ("openai_compatible", "openai"):
             return self._create_openai(name, ctx, default_model, config)
-        elif backend_type == "anthropic":
+        if backend_type == "anthropic":
             return self._create_anthropic(name, ctx, default_model, config)
-        elif backend_type in NON_CHAT_BACKEND_TYPES:
+        if backend_type in NON_CHAT_BACKEND_TYPES:
             raise ValueError(
                 f"Backend {name!r} has non-chat type {backend_type!r}; "
                 f"use Factory.vertex_natives_from_config() to build these entries"
             )
-        else:
-            raise ValueError(f"Unknown backend type: {backend_type}")
+        raise ValueError(f"Unknown backend type: {backend_type}")
 
     def create_vertex_native(
         self,
@@ -174,7 +173,7 @@ class BackendFactory:
         provider has one (e.g. GeminiBackend for Google).
         """
         base_url = config.get("base_url", "http://localhost:8000/v1")
-        api_key = SecretStr.ensure(config.get("api_key"))
+        api_key = Envelope.optional(config.get("api_key"))
         auth = self._create_auth(config, api_key=api_key)
         # Provider detection uses the raw prefix; reveal into a local only.
         detect_key = api_key.reveal() if api_key is not None else None
@@ -206,7 +205,7 @@ class BackendFactory:
         self,
         config: DotDict,
         *,
-        api_key: str | SecretStr | None,
+        api_key: str | Envelope | None,
         api_key_header: str = "Authorization",
     ) -> AuthProvider | None:
         """Build an AuthProvider from the ``auth:`` block, or wrap ``api_key``."""
@@ -233,7 +232,7 @@ class BackendFactory:
             "name": name,
             "ctx": ctx,
             "default_model": default_model,
-            "api_key": SecretStr.ensure(config.get("api_key")),
+            "api_key": Envelope.optional(config.get("api_key")),
             "base_url": config.get("base_url"),
         }
         if config.get("max_tokens") is not None:

@@ -41,7 +41,7 @@ from ..schemas.openai import ChatCompletionUsage
 from .backends import Backend
 from .base import ChatClient
 from .discovery import ModelDiscovery
-from .retry import RetryHelper
+from .retry import RetryHelper, fire_callback
 from .types import (
     ChatRequest,
     ChatResponse,
@@ -241,7 +241,7 @@ class LLMClient(ChatClient):
             think=think,
             adapter=adapter,
             extra=kwargs or None,
-            context=context,
+            context=context,  # cq: keep - the chat parameters are forwarded explicitly
         )
         return self._chat(request)
 
@@ -425,32 +425,18 @@ class LLMClient(ChatClient):
 
     def _fire_on_request(self, request: ChatRequest) -> None:
         """Fire on_request callback with error handling."""
-        cb = self._callbacks
-        if cb and cb.on_request:
-            try:
-                cb.on_request(request, 0)
-            except Exception as e:
-                self._lg.warning("on_request callback failed", extra={"exception": e})
+        if cb := self._callbacks:
+            fire_callback(self._lg, "on_request", cb.on_request, request, 0)
 
     def _fire_on_response(self, request: ChatRequest, response: ChatResponse) -> None:
         """Fire on_response callback with error handling."""
-        cb = self._callbacks
-        if cb and cb.on_response:
-            try:
-                cb.on_response(request, response)
-            except Exception as e:
-                self._lg.warning("on_response callback failed", extra={"exception": e})
+        if cb := self._callbacks:
+            fire_callback(self._lg, "on_response", cb.on_response, request, response)
 
     def _fire_on_error(self, request: ChatRequest, error: Exception) -> None:
         """Fire on_error callback with error handling."""
-        cb = self._callbacks
-        if cb and cb.on_error:
-            try:
-                cb.on_error(request, error)
-            except Exception as cb_err:
-                self._lg.warning(
-                    "on_error callback failed", extra={"exception": cb_err}
-                )
+        if cb := self._callbacks:
+            fire_callback(self._lg, "on_error", cb.on_error, request, error)
 
     def _log_stream_response(
         self, request: ChatRequest, start_t: float, response: ChatResponse | None

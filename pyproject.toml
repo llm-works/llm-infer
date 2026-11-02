@@ -21,14 +21,8 @@ classifiers = [
 dependencies = [
     # Minimal base for LLMClient with OpenAI-compatible backends
     # Use [client] for all backends, [runtime]/[cuda] for serving
-    "appinfra>=0.12.0",
+    "appinfra[validation]>=0.14.0",  # validation: pydantic
     "httpx>=0.27.0,<1.0.0",
-    "pydantic>=2.0.0,<3.0.0",
-    # Security: explicitly pin transitive dependencies for CVE fixes
-    "aiohttp>=3.13.3,<4.0.0",
-    "filelock>=3.20.1,<4.0.0",
-    "urllib3>=2.6.3,<3.0.0",
-    "werkzeug>=3.1.5,<4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -57,7 +51,7 @@ client = [
 ]
 # Runtime: CPU serving (includes FastAPI)
 runtime = [
-    "appinfra[fastapi]>=0.12.0",
+    "appinfra[fastapi]>=0.14.0",
     "torch>=2.0.0,<3.0.0",
     "transformers>=5.10.4,<6.0.0",
     "safetensors>=0.4.0,<1.0.0",
@@ -75,15 +69,9 @@ all = [
     "llm-infer[client]",
     "llm-infer[cuda]",
 ]
+# Dev: appinfra's toolchain (ruff, mypy, pylint, pytest and its plugins, stubs)
 dev = [
-    "coverage>=7.0.0,<8.0.0",
-    "ruff>=0.1.0,<1.0.0",
-    "mypy>=1.0.0,<2.0.0",
-    "types-PyYAML>=6.0.0",
-    "pytest>=7.0.0,<10.0.0",
-    "pytest-asyncio>=0.21.0,<2.0.0",
-    "pytest-cov>=4.0.0,<8.0.0",
-    "pytest-xdist>=3.0.0,<4.0.0",
+    "appinfra[dev]>=0.14.0",
 ]
 
 [tool.ruff]
@@ -92,16 +80,26 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "N",   # pep8-naming
-    "UP",  # pyupgrade
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "C90",   # mccabe complexity
+    "SIM",   # flake8-simplify
+    "RET",   # flake8-return
+    "PIE",   # flake8-pie
+    "PERF",  # perflint
+    "FURB",  # refurb
+    "C4",    # flake8-comprehensions
 ]
 ignore = [
     "E501",  # line too long (handled by black)
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.ruff.lint.isort]
 known-first-party = ["llm_infer"]
@@ -140,13 +138,17 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 addopts = "-v --tb=short"
 pythonpath = ["."]
-markers = [
-    "unit: Unit tests (fast, isolated, mocked dependencies)",
-    "integration: Integration tests (real dependencies)",
-    "e2e: End-to-end tests (full system workflows)",
-    "perf: Performance tests (benchmarks, load tests)",
-    "security: Security tests (injection, validation, XSS)",
+asyncio_default_fixture_loop_scope = "function"
+# Deprecated APIs called inside the ML stack at import, at versions vLLM pins:
+# torch/utils/mkldnn.py decorates with torch.jit.script_method (reached through
+# vLLM's marlin_utils -> deep_gemm -> torch.compile), and flashinfer's
+# cute_dsl/availability.py imports cutlass's deprecated Arch
+filterwarnings = [
+    "ignore:`torch.jit.script_method` is deprecated:DeprecationWarning:torch.jit._script",
+    "ignore:Arch from arch.py is deprecated:DeprecationWarning:flashinfer.cute_dsl.availability",
 ]
+# Suite markers (unit, integration, e2e, security, performance) are registered by
+# the appinfra.pytest_suites plugin loaded in tests/conftest.py
 
 [tool.coverage.run]
 source = ["llm_infer"]

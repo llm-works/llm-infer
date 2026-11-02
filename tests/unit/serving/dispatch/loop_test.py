@@ -25,8 +25,6 @@ from llm_infer.serving.dispatch.types import (
     Response,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _make_handler(step_returns: list[list[Response]] | None = None) -> Any:
     """Create a mock handler with submit/step/setters."""

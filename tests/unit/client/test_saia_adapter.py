@@ -29,8 +29,6 @@ from llm_infer.schemas.openai import (
     ToolCall,
 )
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_client() -> MagicMock:

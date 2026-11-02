@@ -12,8 +12,6 @@ from llm_infer.engines.native.backends.linear.kernels.fp8_pytorch import (
     PyTorchFP8Backend,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestPyTorchFP8BackendAvailability:
     """Test backend availability."""

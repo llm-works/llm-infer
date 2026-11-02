@@ -13,8 +13,6 @@ from llm_infer.client import ModelConflictError, ModelDiscovery
 from llm_infer.client.backends import Backend, BackendContext
 from llm_infer.client.types import ChatRequest, ChatResponse, ResponseHolder
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_lg() -> Logger:

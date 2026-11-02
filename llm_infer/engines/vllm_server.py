@@ -22,13 +22,11 @@ LoRA Limitation:
 from __future__ import annotations
 
 import json
-import math
 import os
 import signal
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -39,6 +37,7 @@ from ..schemas.openai import FinishReason
 from .finish import parse_finish_reason
 from .inflight import InFlightConnections, RequestAbortedError
 from .protocol import BackendNotManagedError
+from .remote import LineStream, RemoteEngine, truncate_embedding
 from .vllm_common import resolve_gpu_memory_utilization
 
 if TYPE_CHECKING:
@@ -131,12 +130,15 @@ def _hit_token_limit(
     )
 
 
-class VLLMServerStreamingIterator:
+class VLLMServerStreamingIterator(LineStream):
     """Streaming iterator for vLLM server's OpenAI-compatible SSE stream.
 
     Parses Server-Sent Events (SSE) format from the /v1/chat/completions
     streaming endpoint. Yields text deltas and collects tool calls.
     """
+
+    _server_name = "vLLM server"
+    _malformed_message = "malformed JSON in SSE stream"
 
     def __init__(
         self,
@@ -149,31 +151,13 @@ class VLLMServerStreamingIterator:
         adapter_metadata: dict[str, str] | None = None,
         abort_scope: tuple[InFlightConnections, str] | None = None,
     ) -> None:
-        self._lg = lg
-        self._client = client
-        self._url = url
-        self._payload = payload
+        super().__init__(lg, client, url, payload)
         self._max_model_len = max_model_len
         self._lora_request = lora_request
         self._adapter_metadata = adapter_metadata or {}
         # (connections, request_id): makes the stream abortable; None: not abortable
         self._abort_scope = abort_scope
-        self._init_state()
-
-    def _init_state(self) -> None:
-        """Initialize streaming state and tracking fields."""
-        # Stream state
-        self._stream_context: Any = None
-        self._response: httpx.Response | None = None
-        self._line_iter: Iterator[str] | None = None
-        self._finished = False
-
-        # Final stats (populated when generation completes)
-        self.prompt_tokens: int = 0
-        self.completion_tokens: int = 0
-        self.finish_reason: FinishReason | None = None
         self._tool_call_chunks: dict[int, dict[str, Any]] = {}
-        self.tool_calls: list[dict[str, Any]] | None = None
 
         # Reasoning content bridging (vLLM reasoning_parser streams reasoning_content
         # separately; we wrap it in <think> tags for the ThinkTagParser pipeline)
@@ -202,30 +186,11 @@ class VLLMServerStreamingIterator:
             raise
         self._line_iter = self._response.iter_lines()
 
-    def __iter__(self) -> Iterator[str]:
-        return self
-
-    def __enter__(self) -> VLLMServerStreamingIterator:
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self._cleanup()
-
-    def _cleanup(self) -> None:
-        """Clean up the streaming response."""
-        if self._stream_context is not None:
-            try:
-                self._stream_context.__exit__(None, None, None)
-            except Exception as e:
-                self._lg.debug("cleanup exception suppressed", extra={"exception": e})
-            self._stream_context = None
-            self._response = None
-            if self._abort_scope is not None:
-                connections, request_id = self._abort_scope
-                connections.release(request_id)
-
-    def __del__(self) -> None:
-        self._cleanup()
+    def _on_closed(self) -> None:
+        """Release the request's abort registration."""
+        if self._abort_scope is not None:
+            connections, request_id = self._abort_scope
+            connections.release(request_id)
 
     def _accumulate_tool_call_delta(self, delta_tc: dict[str, Any]) -> None:
         """Accumulate a tool call delta chunk.
@@ -355,9 +320,9 @@ class VLLMServerStreamingIterator:
                 self._in_reasoning = False
             self._handle_completion(data)
 
-        return result if result else None
+        return result or None
 
-    def _process_sse_line(self, line: str) -> str | None:
+    def _process_line(self, line: str) -> str | None:
         """Process a single SSE line, returning text chunk if present."""
         if not line.startswith("data: "):
             return None
@@ -376,35 +341,6 @@ class VLLMServerStreamingIterator:
 
         return self._process_choice_delta(data)
 
-    def __next__(self) -> str:
-        if self._finished:
-            raise StopIteration
-        if self._line_iter is None:
-            self._start_stream()
-            assert self._line_iter is not None
-        line = ""  # Initialize before try block for exception handler
-        try:
-            while True:
-                line = next(self._line_iter)
-                if result := self._process_sse_line(line):
-                    if self._finished:
-                        self._cleanup()
-                    return result
-        except StopIteration:
-            self._finished = True
-            self._cleanup()
-            raise
-        except json.JSONDecodeError as e:
-            self._lg.warning(
-                "malformed JSON in SSE stream",
-                extra={"line": line[:100], "exception": e},
-            )
-            self._finished = True
-            self._cleanup()
-            raise RuntimeError(f"vLLM server returned malformed JSON: {e}") from e
-        except httpx.HTTPError as e:
-            self._fail_transport(e)
-
     def _fail_transport(self, e: httpx.HTTPError) -> NoReturn:
         """End the stream after a transport error.
 
@@ -421,7 +357,7 @@ class VLLMServerStreamingIterator:
         raise e
 
 
-class VLLMServerEngine:
+class VLLMServerEngine(RemoteEngine):
     """vLLM server-backed inference engine implementing InferenceEngineProtocol.
 
     Connects to a `vllm serve` process via its OpenAI-compatible HTTP API.
@@ -1200,56 +1136,17 @@ class VLLMServerEngine:
             raise RuntimeError(f"vLLM server embedding failed: {e}") from e
 
         data = response.json()
-        embeddings: list[list[float]] = []
-        for item in data.get("data", []):
-            embedding = item.get("embedding", [])
-            if dimensions is not None and len(embedding) > dimensions:
-                embedding = embedding[:dimensions]
-                norm = math.sqrt(sum(x * x for x in embedding))
-                if norm > 0:
-                    embedding = [x / norm for x in embedding]
-            embeddings.append(embedding)
-
+        embeddings = [
+            truncate_embedding(item.get("embedding", []), dimensions)
+            for item in data.get("data", [])
+        ]
         total_tokens = data.get("usage", {}).get("total_tokens", 0)
         return embeddings, total_tokens
 
     # -------------------------------------------------------------------------
-    # InferenceEngineProtocol: Batched processing (no-ops, server handles it)
+    # InferenceEngineProtocol: Utility methods (the batched processing and
+    # memory methods are RemoteEngine's no-ops)
     # -------------------------------------------------------------------------
-
-    def prefill_request(self, request: Any) -> None:
-        """No-op — server handles prefill internally."""
-
-    def step_decode(self, requests: list[Any]) -> list[int | None]:
-        """No-op — server handles decoding internally."""
-        return [None] * len(requests)
-
-    def free_request(self, request: Any) -> None:
-        """No-op — server manages resources internally."""
-
-    # -------------------------------------------------------------------------
-    # InferenceEngineProtocol: Utility methods
-    # -------------------------------------------------------------------------
-
-    def memory_stats(self) -> dict[str, int | float]:
-        """Return empty memory statistics (server manages GPU memory)."""
-        return {
-            "allocated": 0,
-            "reserved": 0,
-            "peak": 0,
-            "model_memory": 0,
-            "kv_cache_bytes": 0,
-            "kv_blocks_used": 0,
-            "kv_blocks_total": 0,
-            "kv_block_size": 0,
-            "device_used": 0,
-            "device_total": 0,
-            "device_free": 0,
-            "kv_cache_usage_perc": 0.0,
-        }
-
-    def reset_peak_memory(self) -> None:
-        """No-op — server manages memory tracking."""
 
     def shutdown(self) -> None:
         """Shutdown the engine and stop the vLLM server if we started it."""

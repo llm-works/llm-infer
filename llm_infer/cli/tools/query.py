@@ -16,6 +16,7 @@ from appinfra.app.tools import Tool, ToolConfig
 
 from ...response import ResponseProcessor, TerminalResolver
 from ...response.utf8 import Utf8StreamBuffer
+from .http_get import get_json
 
 
 class QueryTool(Tool):
@@ -347,22 +348,10 @@ class QueryTool(Tool):
 
     def _check_health(self) -> int:
         """Check server health."""
-        url = f"http://{self.args.host}:{self.args.port}/health"
-        try:
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.URLError as e:
-            if "Connection refused" in str(e):
-                self.lg.error(
-                    "server not running",
-                    extra={"host": self.args.host, "port": self.args.port},
-                )
-            else:
-                self.lg.error("health check failed", extra={"error": str(e)})
-            return 1
-        except Exception as e:
-            self.lg.error("health check failed", extra={"error": str(e)})
+        data = get_json(
+            self.lg, self.args.host, self.args.port, "/health", "health check failed"
+        )
+        if data is None:
             return 1
 
         if self.args.json:

@@ -5,11 +5,7 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from llm_infer.serving.dispatch.handlers import SequentialHandler
-
-pytestmark = pytest.mark.unit
 
 
 class TestResolveEffectiveAdapter:

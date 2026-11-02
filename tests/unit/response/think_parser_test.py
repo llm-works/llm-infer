@@ -3,11 +3,7 @@
 
 """Unit tests for ThinkTagParser."""
 
-import pytest
-
 from llm_infer.response import EventType, StreamEvent, ThinkTagParser
-
-pytestmark = pytest.mark.unit
 
 
 def collect_events(parser: ThinkTagParser, text: str) -> list[StreamEvent]:

@@ -5,11 +5,11 @@
 
 import argparse
 import json
-import urllib.error
-import urllib.request
 from typing import Any
 
 from appinfra.app.tools import Tool, ToolConfig
+
+from .http_get import get_json
 
 
 class MetricsTool(Tool):
@@ -34,25 +34,9 @@ class MetricsTool(Tool):
         parser.add_argument("--json", "-j", action="store_true", help="Output raw JSON")
 
     def run(self, **kwargs: Any) -> int:
-        url = f"http://{self.args.host}:{self.args.port}/metrics"
-        if self.args.reset_peak:
-            url += "?reset_peak=true"
-
-        try:
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.URLError as e:
-            if "Connection refused" in str(e):
-                self.lg.error(
-                    "server not running",
-                    extra={"host": self.args.host, "port": self.args.port},
-                )
-            else:
-                self.lg.error("request failed", extra={"error": str(e)})
-            return 1
-        except Exception as e:
-            self.lg.error("request failed", extra={"error": str(e)})
+        path = "/metrics?reset_peak=true" if self.args.reset_peak else "/metrics"
+        data = get_json(self.lg, self.args.host, self.args.port, path, "request failed")
+        if data is None:
             return 1
 
         if self.args.json:

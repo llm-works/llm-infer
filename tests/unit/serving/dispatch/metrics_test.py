@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from llm_infer.serving.dispatch.metrics import (
     GPUStats,
     KVCacheStats,
@@ -17,9 +15,6 @@ from llm_infer.serving.dispatch.metrics import (
     format_metrics_for_api,
 )
 from llm_infer.serving.dispatch.types import MetricsResponse
-
-pytestmark = pytest.mark.unit
-
 
 # ---------------------------------------------------------------------------
 # GPUStats / KVCacheStats / SequenceStats - dataclass + properties

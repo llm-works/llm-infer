@@ -54,7 +54,6 @@ class TerminalResolver(BaseResolver):
         self._output = output or sys.stdout
         self._think_style_start = think_style_start
         self._think_style_end = think_style_end
-        self._convert_latex = convert_latex
         self._latex_formatter: LatexConverter | None = None
         if convert_latex:
             self._latex_formatter = LatexConverter()

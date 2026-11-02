@@ -7,8 +7,6 @@ import pytest
 
 from llm_infer.response import EventType, StreamEvent
 
-pytestmark = pytest.mark.unit
-
 
 class TestEventType:
     """Test EventType enum."""

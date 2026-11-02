@@ -12,6 +12,7 @@ when multiple engines (vLLM + PEFT) coexist.
 
 from __future__ import annotations
 
+import contextlib
 from collections import OrderedDict
 from collections.abc import Iterator
 from threading import Lock, Thread
@@ -105,11 +106,10 @@ class _StopOnSequences:
         self.stop_ids = stop_ids
 
     def __call__(self, input_ids: Any, scores: Any, **kwargs: Any) -> bool:
-        for stop_id_seq in self.stop_ids:
-            if len(stop_id_seq) <= input_ids.shape[1]:
-                if input_ids[0, -len(stop_id_seq) :].tolist() == stop_id_seq:
-                    return True
-        return False
+        return any(
+            len(seq) <= input_ids.shape[1] and input_ids[0, -len(seq) :].tolist() == seq
+            for seq in self.stop_ids
+        )
 
 
 class AdapterRegistry:
@@ -888,10 +888,8 @@ class PEFTEngine:
         adapter_names = self._adapter_registry.clear()
         if self._peft_model is not None:
             for name in adapter_names:
-                try:
+                with contextlib.suppress(Exception):
                     self._peft_model.delete_adapter(name)
-                except Exception:
-                    pass
             del self._peft_model
             self._peft_model = None
 

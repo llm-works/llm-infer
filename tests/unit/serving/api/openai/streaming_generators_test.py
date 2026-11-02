@@ -10,7 +10,6 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from appinfra.log import Logger
 from appinfra.service.errors import ChannelError, ChannelTimeoutError
 
@@ -29,9 +28,6 @@ from llm_infer.serving.dispatch.types import (
     ResponseAdapterInfo,
     StreamChunk,
 )
-
-pytestmark = pytest.mark.unit
-
 
 # ---------------------------------------------------------------------------
 # _map_finish_reason

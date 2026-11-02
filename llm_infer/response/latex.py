@@ -134,11 +134,8 @@ class LatexConverter:
         text = text.replace(" $ ", " ")
         text = text.replace("$ ", " ")
         text = text.replace(" $", " ")
-        if text.startswith("$"):
-            text = text[1:]
-        if text.endswith("$"):
-            text = text[:-1]
-        return text
+        text = text.removeprefix("$")
+        return text.removesuffix("$")
 
     def _convert(self, text: str) -> str:
         """Apply all LaTeX conversions."""
@@ -147,8 +144,7 @@ class LatexConverter:
         text = self._process_sqrt(text)
         text = self._process_boxed(text)
         text = self._process_text(text)
-        text = self._apply_replacements(text)
-        return text
+        return self._apply_replacements(text)
 
     def _check_known_command(
         self, suffix: str, last_bs: int, text_len: int

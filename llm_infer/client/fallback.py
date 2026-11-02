@@ -330,7 +330,7 @@ class FallbackClient(ChatClient):
             tools=tools,
             tool_choice=tool_choice,
             think=think,
-            adapter=adapter,
+            adapter=adapter,  # cq: keep - the chat parameters are forwarded explicitly
             context=context,
             extra=kwargs or None,
         )

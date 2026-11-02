@@ -13,8 +13,6 @@ from llm_infer.serving.dispatch import main
 from llm_infer.serving.dispatch.config import InferenceConfig
 from llm_infer.serving.dispatch.main import BootSequence
 
-pytestmark = pytest.mark.unit
-
 
 def _boot(engine: str) -> BootSequence:
     config = InferenceConfig()

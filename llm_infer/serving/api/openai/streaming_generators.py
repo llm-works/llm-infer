@@ -81,7 +81,6 @@ class StreamingGenerator(ABC):
         Returns SSE-formatted string, or empty string if content is buffered
         (e.g., by a normalizer waiting for complete tags).
         """
-        pass
 
     @abstractmethod
     def create_final_chunk(
@@ -91,7 +90,6 @@ class StreamingGenerator(ABC):
         adapter: AdapterInfoResponse | None = None,
     ) -> str:
         """Create SSE event for the final chunk with finish reason."""
-        pass
 
     def _handle_ipc_error(self, e: Exception) -> tuple[str, str]:
         """Handle an IPC failure: log and return error SSE events.
@@ -233,7 +231,7 @@ class ChatStreamingGenerator(StreamingGenerator):
             request_id=self.request_id,
             model=self.model,
             created=self.created,
-            content=flushed if flushed else None,
+            content=flushed or None,
             finish_reason=finish_reason,
             tool_calls=tool_calls,
             adapter=adapter,

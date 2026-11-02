@@ -3,11 +3,7 @@
 
 """Unit tests for CodeBlockParser."""
 
-import pytest
-
 from llm_infer.response import CodeBlockParser, EventType, StreamEvent
-
-pytestmark = pytest.mark.unit
 
 
 def collect_events(parser: CodeBlockParser, text: str) -> list[StreamEvent]:

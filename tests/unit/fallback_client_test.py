@@ -18,8 +18,6 @@ from llm_infer.client.fallback_helper import detect_cycles, parse_fallback_key
 from llm_infer.client.router import ResolvedTarget
 from llm_infer.client.types import ChatResponse
 
-pytestmark = pytest.mark.unit
-
 
 class TestDetectCycles:
     """Tests for detect_cycles helper."""
@@ -456,7 +454,7 @@ class TestFallbackOnRateLimitAllPaths:
         tokens = []
         with pytest.raises(BackendRequestError) as exc_info:
             for token in stream:
-                tokens.append(token)
+                tokens.append(token)  # noqa: PERF402 - keeps tokens before the error
 
         assert tokens == ["partial"]
         assert exc_info.value.status_code == 429

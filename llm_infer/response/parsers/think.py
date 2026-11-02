@@ -363,10 +363,7 @@ class ThinkStreamSeparator:
         if not self._buffer:
             return "", ""
 
-        if self._in_think:
-            result = (self._buffer, "")
-        else:
-            result = ("", self._buffer)
+        result = (self._buffer, "") if self._in_think else ("", self._buffer)
         self._buffer = ""
         return result
 

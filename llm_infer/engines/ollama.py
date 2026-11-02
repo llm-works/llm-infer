@@ -12,19 +12,20 @@ configured models_path, or connect to an already-running server.
 
 from __future__ import annotations
 
+import contextlib
 import json
-import math
 import os
 import signal
 import subprocess
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from appinfra.log import Logger
 
 from ..schemas.openai import FinishReason
+from .remote import LineStream, RemoteEngine, truncate_embedding
 
 if TYPE_CHECKING:
     from ..context import RequestContext
@@ -128,68 +129,15 @@ def _convert_messages_to_ollama_format(
     return [_convert_single_message(msg, id_to_name) for msg in messages]
 
 
-class OllamaStreamingIterator:
+class OllamaStreamingIterator(LineStream):
     """True streaming iterator using Ollama's streaming API.
 
     Yields text chunks as they arrive from Ollama's newline-delimited
     JSON stream.
     """
 
-    def __init__(
-        self,
-        lg: Logger,
-        client: httpx.Client,
-        url: str,
-        payload: dict[str, Any],
-    ) -> None:
-        self._lg = lg
-        self._client = client
-        self._url = url
-        self._payload = payload
-
-        # State tracking
-        self._stream_context: Any = None  # Must hold reference to prevent GC
-        self._response: httpx.Response | None = None
-        self._line_iter: Iterator[str] | None = None
-        self._finished = False
-
-        # Final stats (populated when generation completes)
-        self.prompt_tokens: int = 0
-        self.completion_tokens: int = 0
-        self.finish_reason: FinishReason | None = None
-        # Tool calls (populated on completion if model made tool calls)
-        self.tool_calls: list[dict[str, Any]] | None = None
-
-    def _start_stream(self) -> None:
-        """Start the streaming request."""
-        # Must keep reference to context manager to prevent stream from closing
-        self._stream_context = self._client.stream(
-            "POST", self._url, json=self._payload
-        )
-        self._response = self._stream_context.__enter__()
-        self._line_iter = self._response.iter_lines()
-
-    def __iter__(self) -> Iterator[str]:
-        return self
-
-    def __enter__(self) -> OllamaStreamingIterator:
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self._cleanup()
-
-    def _cleanup(self) -> None:
-        """Clean up the streaming response."""
-        if self._stream_context is not None:
-            try:
-                self._stream_context.__exit__(None, None, None)
-            except Exception as e:
-                self._lg.debug("cleanup exception suppressed", extra={"exception": e})
-            self._stream_context = None
-            self._response = None
-
-    def __del__(self) -> None:
-        self._cleanup()
+    _server_name = "Ollama"
+    _malformed_message = "malformed JSON in stream response"
 
     def _handle_completion(self, data: dict[str, Any]) -> str | None:
         """Handle stream completion, returning final chunk if present."""
@@ -208,9 +156,9 @@ class OllamaStreamingIterator:
             self.tool_calls = message["tool_calls"]
         self.finish_reason = _ollama_finish_reason(data, has_tool_calls)
 
-        return response if response else None
+        return response or None
 
-    def _process_stream_line(self, line: str) -> str | None:
+    def _process_line(self, line: str) -> str | None:
         """Process a single stream line, returning text chunk if present.
 
         Handles both /api/generate and /api/chat response formats:
@@ -235,37 +183,10 @@ class OllamaStreamingIterator:
             response_text = (
                 message.get("content", "") if isinstance(message, dict) else ""
             )
-        return response_text if response_text else None
-
-    def __next__(self) -> str:
-        if self._finished:
-            raise StopIteration
-        if self._line_iter is None:
-            self._start_stream()
-            assert self._line_iter is not None
-        try:
-            while True:
-                line = next(self._line_iter)
-                if result := self._process_stream_line(line):
-                    # Clean up if this was the final chunk (done=true with content)
-                    if self._finished:
-                        self._cleanup()
-                    return result
-        except StopIteration:
-            self._finished = True
-            self._cleanup()
-            raise
-        except json.JSONDecodeError as e:
-            self._lg.warning(
-                "malformed JSON in stream response",
-                extra={"line": line[:100], "exception": e},
-            )
-            self._finished = True
-            self._cleanup()
-            raise RuntimeError(f"Ollama returned malformed JSON: {e}") from e
+        return response_text or None
 
 
-class OllamaEngine:
+class OllamaEngine(RemoteEngine):
     """Ollama-backed inference engine implementing InferenceEngineProtocol.
 
     This engine connects to an Ollama server and proxies requests through
@@ -374,10 +295,8 @@ class OllamaEngine:
         self._lg.info("stopping ollama server")
 
         # Send SIGTERM to the process group
-        try:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
 
         # Wait for graceful shutdown
         try:
@@ -385,10 +304,8 @@ class OllamaEngine:
         except subprocess.TimeoutExpired:
             # Force kill if it doesn't stop
             self._lg.warning("ollama server did not stop gracefully, force killing")
-            try:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(os.getpgid(self._process.pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
 
         self._process = None
 
@@ -794,7 +711,7 @@ class OllamaEngine:
         fmt_type = response_format.get("type")
         if fmt_type == "json_object":
             return "json"
-        elif fmt_type == "json_schema":
+        if fmt_type == "json_schema":
             raw_schema = response_format.get("json_schema", {}).get("schema", {})
             if isinstance(raw_schema, Mapping) and raw_schema:
                 # Workaround for Ollama structured output issues:
@@ -914,61 +831,20 @@ class OllamaEngine:
         for text in inputs:
             payload = {"model": self._config.model, "prompt": text}
             data = self._post_json("/api/embeddings", payload, "embedding")
-            embedding = data.get("embedding", [])
-
-            if dimensions is not None and len(embedding) > dimensions:
-                # Truncate and renormalize for Matryoshka
-                embedding = embedding[:dimensions]
-                norm = math.sqrt(sum(x * x for x in embedding))
-                if norm > 0:
-                    embedding = [x / norm for x in embedding]
-
-            embeddings.append(embedding)
+            embeddings.append(truncate_embedding(data.get("embedding", []), dimensions))
             # Estimate tokens (Ollama doesn't return token count for embeddings)
             total_tokens += len(text) // 4
 
         return embeddings, total_tokens
 
     # -------------------------------------------------------------------------
-    # InferenceEngineProtocol: Batched processing methods (no-ops for Ollama)
+    # InferenceEngineProtocol: Utility methods (the batched processing
+    # methods are RemoteEngine's no-ops)
     # -------------------------------------------------------------------------
-
-    def prefill_request(self, request: Any) -> None:
-        """No-op - Ollama handles prefill internally."""
-        pass
-
-    def step_decode(self, requests: list[Any]) -> list[int | None]:
-        """No-op - Ollama handles decoding internally."""
-        return [None] * len(requests)
-
-    def free_request(self, request: Any) -> None:
-        """No-op - Ollama manages resources internally."""
-        pass
-
-    # -------------------------------------------------------------------------
-    # InferenceEngineProtocol: Utility methods
-    # -------------------------------------------------------------------------
-
-    def _default_memory_stats(self) -> dict[str, int | float]:
-        """Return default (zero) memory statistics."""
-        return {
-            "allocated": 0,
-            "reserved": 0,
-            "peak": 0,
-            "model_memory": 0,
-            "kv_cache_bytes": 0,
-            "kv_blocks_used": 0,
-            "kv_blocks_total": 0,
-            "kv_block_size": 0,
-            "device_used": 0,
-            "device_total": 0,
-            "device_free": 0,
-            "kv_cache_usage_perc": 0.0,
-        }
 
     def memory_stats(self) -> dict[str, int | float]:
         """Return memory statistics from Ollama."""
-        stats = self._default_memory_stats()
+        stats = super().memory_stats()
         try:
             response = self._client.get("/api/ps")
             response.raise_for_status()
@@ -981,10 +857,6 @@ class OllamaEngine:
         except httpx.HTTPError as e:
             self._lg.warning("failed to fetch memory stats", extra={"exception": e})
         return stats
-
-    def reset_peak_memory(self) -> None:
-        """No-op - Ollama doesn't expose peak memory tracking."""
-        pass
 
     def shutdown(self) -> None:
         """Shutdown the engine and stop the Ollama server if we started it."""

@@ -135,7 +135,6 @@ class RequestHandler(ABC):
         Returns:
             True if accepted, False if rejected (at capacity).
         """
-        pass
 
     @abstractmethod
     def step(self) -> list[Response]:
@@ -154,19 +153,16 @@ class RequestHandler(ABC):
         Returns:
             List of completed or rejected responses (may be empty).
         """
-        pass
 
     @property
     @abstractmethod
     def pending_count(self) -> int:
         """Number of requests waiting or in progress."""
-        pass
 
     @property
     @abstractmethod
     def is_saturated(self) -> bool:
         """True if handler cannot accept more requests."""
-        pass
 
     def sequence_stats(self) -> dict[str, int]:
         """Return active sequence statistics.
@@ -182,7 +178,6 @@ class RequestHandler(ABC):
     @abstractmethod
     def engine(self) -> InferenceEngineProtocol:
         """The inference engine used by this handler."""
-        pass
 
     def shutdown(self) -> None:
         """Stop accepting requests and answer pending ones. Must not block.
@@ -448,11 +443,14 @@ class RequestHandler(ABC):
 
         # Fallback: check if model field matches a known adapter
         # Skip reserved names like "auto" and "default"
-        if request.model and self._adapter_manager:
-            if request.model not in self._RESERVED_MODEL_NAMES:
-                resolved = self._adapter_manager.resolve(request.model)
-                if resolved:
-                    return resolved.key
+        if (
+            request.model
+            and self._adapter_manager
+            and request.model not in self._RESERVED_MODEL_NAMES
+        ):
+            resolved = self._adapter_manager.resolve(request.model)
+            if resolved:
+                return resolved.key
         return None
 
     def _add_request_extensions(self, params: dict[str, Any], request: Request) -> None:

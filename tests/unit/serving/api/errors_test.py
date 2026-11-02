@@ -22,8 +22,6 @@ from fastapi.responses import JSONResponse
 from llm_infer.serving.api.errors import raise_for_error_status, submit_or_timeout
 from llm_infer.serving.dispatch.types import RequestStatus, Response
 
-pytestmark = pytest.mark.unit
-
 
 class _RaisingIPC:
     """IPC stub whose submit() raises the given exception."""

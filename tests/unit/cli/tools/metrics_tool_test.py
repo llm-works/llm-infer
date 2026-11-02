@@ -14,8 +14,6 @@ import pytest
 
 from llm_infer.cli.tools.metrics import MetricsTool
 
-pytestmark = pytest.mark.unit
-
 
 def _make_tool(**args_overrides: Any) -> MetricsTool:
     """Create a MetricsTool with mocked args + lg."""
@@ -62,7 +60,7 @@ def _metrics_response() -> dict:
 class _FakeResponse:
     """Fake urlopen response context manager."""
 
-    def __init__(self, payload: dict) -> None:
+    def __init__(self, payload: Any) -> None:
         self._payload = payload
 
     def __enter__(self) -> _FakeResponse:
@@ -143,6 +141,15 @@ class TestMetricsTool:
         with patch("urllib.request.urlopen", side_effect=ValueError("oops")):
             result = tool.run()
         assert result == 1
+
+    def test_run_non_object_body(self) -> None:
+        tool = _make_tool()
+        with patch("urllib.request.urlopen", return_value=_FakeResponse([])):
+            result = tool.run()
+        assert result == 1
+        tool.lg.error.assert_called_once_with(
+            "request failed", extra={"error": "expected a JSON object, got list"}
+        )
 
 
 def test_metrics_tool_init() -> None:

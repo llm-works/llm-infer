@@ -3,14 +3,11 @@
 
 """Unit tests for NaiveAttentionBackend."""
 
-import pytest
 import torch
 
 from llm_infer.engines.native.attention.backends.naive import NaiveAttentionBackend
 from llm_infer.engines.native.kv_cache.pool import BlockPool
 from llm_infer.engines.native.kv_cache.sequence import SequenceKVCache
-
-pytestmark = pytest.mark.unit
 
 
 class TestNaiveAttentionBackend:

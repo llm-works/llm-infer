@@ -22,8 +22,8 @@ from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, Any
 
+from appinfra import Envelope
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from ....schemas.openai import (
     ChatCompletionUsage,
@@ -79,7 +79,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         name: str,
         ctx: BackendContext | None = None,
         default_model: str | None = None,
-        api_key: str | SecretStr | None = None,
+        api_key: str | Envelope | None = None,
         base_url: str | None = None,
         max_tokens: int = 4096,
         thinking_budget: float = 0.8,
@@ -91,8 +91,8 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             name: Backend name (for discovery/routing).
             ctx: Backend context with rate limiter, backoff, and timeouts.
             default_model: Default model if not specified per-request.
-            api_key: API key (``str`` or ``SecretStr``) for authentication.
-                Stored internally as ``SecretStr`` and revealed only when
+            api_key: API key (``str`` or ``Envelope``) for authentication.
+                Stored internally as ``Envelope`` and revealed only when
                 constructing the underlying Anthropic SDK client. ``None``
                 lets the SDK fall back to the ``ANTHROPIC_API_KEY`` env var.
             base_url: Base URL override (for proxies).
@@ -119,7 +119,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         self._anthropic = anthropic_module
         self._max_tokens = max_tokens
         self._last_response: ChatResponse | None = None
-        self._api_key: SecretStr | None = SecretStr.ensure(api_key)
+        self._api_key = Envelope.optional(api_key)
         self._base_url = base_url
 
         # Sync client created eagerly. Reveal only at the SDK ctor call.
@@ -165,13 +165,15 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         request_kwargs = self._prepare_request(request, stream=True)
         structured_output_tool = request_kwargs.pop("_structured_output_tool", None)
         state = _StreamState(structured_output_tool)
-        with self._handle_errors():
-            with self._client.messages.stream(**request_kwargs) as stream:
-                for event in stream:
-                    token = self._process_stream_event(event, state)
-                    if token:
-                        yield token
-                self._finalize_stream_state(state, stream.get_final_message())
+        with (
+            self._handle_errors(),
+            self._client.messages.stream(**request_kwargs) as stream,
+        ):
+            for event in stream:
+                token = self._process_stream_event(event, state)
+                if token:
+                    yield token
+            self._finalize_stream_state(state, stream.get_final_message())
         response = state.to_response(request.model or self.default_model, self.provider)
         self._last_response = response
         if holder is not None:
@@ -208,13 +210,15 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         self._acquire_async_request()
         try:
             client = self._get_async_client()
-            async with self._handle_errors_async():
-                async with client.messages.stream(**request_kwargs) as stream:
-                    async for event in stream:
-                        token = self._process_stream_event(event, state)
-                        if token:
-                            yield token
-                    self._finalize_stream_state(state, await stream.get_final_message())
+            async with (
+                self._handle_errors_async(),
+                client.messages.stream(**request_kwargs) as stream,
+            ):
+                async for event in stream:
+                    token = self._process_stream_event(event, state)
+                    if token:
+                        yield token
+                self._finalize_stream_state(state, await stream.get_final_message())
             response = state.to_response(
                 request.model or self.default_model, self.provider
             )
@@ -321,9 +325,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         extra = dict(request.extra) if request.extra else {}
         self._apply_response_format(request_kwargs, extra)
 
-        for key, value in extra.items():
-            if value is not None and key not in ("stream",):
-                request_kwargs[key] = value
+        request_kwargs.update(
+            {k: v for k, v in extra.items() if v is not None and k != "stream"}
+        )
 
         # Apply extended thinking after extra merge so max_tokens from extra is used
         if request.think:
@@ -379,10 +383,9 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
                     }
                 ],
             }
-        elif role == "assistant" and msg.get("tool_calls"):
+        if role == "assistant" and msg.get("tool_calls"):
             return self._convert_assistant_with_tools(msg, content)
-        else:
-            return {"role": role, "content": content}
+        return {"role": role, "content": content}
 
     def _convert_assistant_with_tools(
         self, msg: dict[str, Any], content: str
@@ -592,7 +595,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             provider=self.provider,
             raw=raw,
             thinking="".join(thinking_parts) if thinking_parts else None,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls or None,
         )
 
     def _parse_content_block(
@@ -674,7 +677,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
 
         if event_type == "content_block_delta":
             return self._process_delta(event, state)
-        elif event_type == "content_block_stop":
+        if event_type == "content_block_stop":
             self._process_block_stop(event, state)
         elif event_type == "message_delta":
             # Capture usage from message_delta events (authoritative source)
@@ -694,7 +697,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             text = getattr(delta, "text", "")
             state.content_parts.append(text)
             return text
-        elif delta_type == "thinking_delta":
+        if delta_type == "thinking_delta":
             state.thinking_parts.append(getattr(delta, "thinking", ""))
         return None
 
@@ -769,5 +772,5 @@ class _StreamState:
             provider=provider,
             raw=self.raw,
             thinking="".join(self.thinking_parts) if self.thinking_parts else None,
-            tool_calls=self.tool_calls if self.tool_calls else None,
+            tool_calls=self.tool_calls or None,
         )

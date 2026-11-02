@@ -9,12 +9,8 @@ from collections.abc import Callable
 from typing import TypeVar
 from unittest.mock import MagicMock
 
-import pytest
-
 from llm_infer.serving.dispatch.config import InferenceConfig
 from llm_infer.serving.dispatch.main import BootSequence
-
-pytestmark = pytest.mark.unit
 
 T = TypeVar("T")
 

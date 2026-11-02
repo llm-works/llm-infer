@@ -21,8 +21,6 @@ from llm_infer.serving.admin.controller import (
 )
 from llm_infer.serving.admin.state import BackendState, SharedBackendState
 
-pytestmark = pytest.mark.unit
-
 T = TypeVar("T")
 
 

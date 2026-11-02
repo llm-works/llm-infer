@@ -19,13 +19,12 @@ The async path wraps the sync refresh in ``asyncio.to_thread`` because
 ``google-auth``'s transport is sync-only.
 
 Secrets policy:
-    Every API key crosses the auth boundary as ``str | SecretStr`` and is
-    coerced to ``SecretStr`` immediately on entry via ``SecretStr.ensure``.
-    The plain value is only revealed at the outbound call site (header
-    build / SDK ctor) via ``SecretStr.reveal()``. Do not store a plain
-    ``str`` past this boundary — appinfra's ``SecretStr`` returns ``'***'``
-    from ``str``/``repr``/``format`` and the Logger sanitizer masks it in
-    ``extra``, so a leaked reference logs safely.
+    Every API key crosses the auth boundary as ``str | Envelope`` and is
+    wrapped in an ``Envelope`` immediately on entry. The plain value is only
+    revealed at the outbound call site (header build / SDK ctor) via
+    ``Envelope.reveal()``. Do not store a plain ``str`` past this boundary —
+    appinfra's ``Envelope`` returns ``'***'`` from ``str``/``repr``/``format``,
+    so a leaked reference logs safely.
 """
 
 from __future__ import annotations
@@ -37,8 +36,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from appinfra import Envelope
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 if TYPE_CHECKING:
     from google.oauth2.service_account import Credentials
@@ -64,15 +63,12 @@ class AuthProvider(Protocol):
 class StaticAPIKeyAuth:
     """``Authorization: Bearer <key>``.
 
-    Accepts ``str`` or ``SecretStr``. Stores as ``SecretStr`` and reveals
+    Accepts ``str`` or ``Envelope``. Stores as ``Envelope`` and reveals
     only inside :meth:`headers` where the ``Bearer`` string is built.
     """
 
-    def __init__(self, api_key: str | SecretStr) -> None:
-        ensured = SecretStr.ensure(api_key)
-        if ensured is None:
-            raise ValueError("api_key must not be None")
-        self._api_key: SecretStr = ensured
+    def __init__(self, api_key: str | Envelope) -> None:
+        self._api_key = Envelope(api_key)
 
     def headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key.reveal()}"}
@@ -84,15 +80,12 @@ class StaticAPIKeyAuth:
 class GoogleAPIKeyHeaderAuth:
     """``x-goog-api-key: <key>`` (AI Studio embeddings).
 
-    Accepts ``str`` or ``SecretStr``. Stores as ``SecretStr`` and reveals
+    Accepts ``str`` or ``Envelope``. Stores as ``Envelope`` and reveals
     only inside :meth:`headers` where the outbound header is built.
     """
 
-    def __init__(self, api_key: str | SecretStr) -> None:
-        ensured = SecretStr.ensure(api_key)
-        if ensured is None:
-            raise ValueError("api_key must not be None")
-        self._api_key: SecretStr = ensured
+    def __init__(self, api_key: str | Envelope) -> None:
+        self._api_key = Envelope(api_key)
 
     def headers(self) -> dict[str, str]:
         return {"x-goog-api-key": self._api_key.reveal()}
@@ -197,26 +190,25 @@ class GCPServiceAccountAuth:
 
 
 def auth_from_api_key(
-    api_key: str | SecretStr | None, *, header: str = "Authorization"
+    api_key: str | Envelope | None, *, header: str = "Authorization"
 ) -> AuthProvider | None:
     """Wrap an API key in the right AuthProvider, or return None if no key.
 
     ``header='x-goog-api-key'`` yields ``GoogleAPIKeyHeaderAuth`` (AI Studio
     embeddings); anything else yields ``StaticAPIKeyAuth`` (Bearer).
     """
-    ensured = SecretStr.ensure(api_key)
-    if ensured is None:
+    if api_key is None:
         return None
     if header == "x-goog-api-key":
-        return GoogleAPIKeyHeaderAuth(ensured)
-    return StaticAPIKeyAuth(ensured)
+        return GoogleAPIKeyHeaderAuth(api_key)
+    return StaticAPIKeyAuth(api_key)
 
 
 def auth_from_config(
     lg: Logger,
     auth_cfg: dict[str, Any] | None,
     *,
-    api_key: str | SecretStr | None = None,
+    api_key: str | Envelope | None = None,
     api_key_header: str = "Authorization",
 ) -> AuthProvider | None:
     """Build an ``AuthProvider`` from an ``auth:`` config block.

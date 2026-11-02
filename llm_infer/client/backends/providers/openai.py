@@ -25,8 +25,8 @@ from dataclasses import dataclass, field
 from typing import Any, NoReturn
 
 import httpx
+from appinfra import Envelope
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from ....schemas.openai import (
     ChatCompletionUsage,
@@ -62,7 +62,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         ctx: BackendContext | None = None,
         default_model: str | None = None,
         base_url: str = "http://localhost:8000/v1",
-        api_key: str | SecretStr | None = None,
+        api_key: str | Envelope | None = None,
         auth: AuthProvider | None = None,
         provider: Provider | None = None,
     ) -> None:
@@ -74,7 +74,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             ctx: Backend context with rate limiter, backoff, and timeouts.
             default_model: Default model if not specified per-request.
             base_url: Base URL for the API.
-            api_key: Static API key (``str`` or ``SecretStr``). Wrapped as
+            api_key: Static API key (``str`` or ``Envelope``). Wrapped as
                 ``StaticAPIKeyAuth`` if ``auth`` is not provided. Ignored
                 when ``auth`` is provided.
             auth: Auth provider. Takes precedence over ``api_key``. Use this
@@ -85,7 +85,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """
         super().__init__(lg, name, ctx, default_model)
         self._base_url = base_url.rstrip("/")
-        ensured_key = SecretStr.ensure(api_key)
+        ensured_key = Envelope.optional(api_key)
         if auth is None and ensured_key is not None:
             auth = StaticAPIKeyAuth(ensured_key)
         self._auth = auth
@@ -424,17 +424,18 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         self._add_optional_params(payload, request)
         # Add extra params, filtering out reserved keys to prevent override
         if request.extra:
-            # Extract extra_body contents as top-level keys (OpenAI SDK convention)
-            extra_body = request.extra.get("extra_body")
-            if extra_body:
-                for key, value in extra_body.items():
-                    if value is not None and key not in self._RESERVED_KEYS:
-                        payload[key] = value
-            for key, value in request.extra.items():
-                if key == "extra_body":
-                    continue
-                if value is not None and key not in self._RESERVED_KEYS:
-                    payload[key] = value
+            # Extract extra_body contents as top-level keys (OpenAI SDK convention);
+            # the other extra keys are applied after, so they win on a clash
+            extra_body = request.extra.get("extra_body") or {}
+            others = {k: v for k, v in request.extra.items() if k != "extra_body"}
+            for source in (extra_body, others):
+                payload.update(
+                    {
+                        k: v
+                        for k, v in source.items()
+                        if v is not None and k not in self._RESERVED_KEYS
+                    }
+                )
         return payload
 
     def _add_optional_params(
@@ -535,8 +536,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             return False
         # Per SSE spec, space after colon is optional and stripped if present
         data = line[5:]
-        if data.startswith(" "):
-            data = data[1:]
+        data = data.removeprefix(" ")
         if data == "[DONE]":
             return None
         try:
@@ -752,7 +752,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         lg: Logger,
         base_url: str,
         model: str,
-        api_key: str | SecretStr | None = None,
+        api_key: str | Envelope | None = None,
         ctx: BackendContext | None = None,
     ) -> None:
         """Initialize OpenAI-compatible embedding backend.
@@ -761,17 +761,16 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             lg: Logger instance.
             base_url: Base URL (e.g., "https://api.openai.com/v1").
             model: Model name (e.g., "text-embedding-3-small").
-            api_key: Optional API key (``str`` or ``SecretStr``) for
-                Authorization header. Stored as ``SecretStr`` inside a
+            api_key: Optional API key (``str`` or ``Envelope``) for
+                Authorization header. Stored as ``Envelope`` inside a
                 ``StaticAPIKeyAuth``; the plain value is only produced at
                 the moment each request's headers are built.
             ctx: Backend context with rate limiter and timeouts.
         """
         super().__init__(lg, model, ctx)
         self._base_url = base_url.rstrip("/")
-        ensured_key = SecretStr.ensure(api_key)
         self._auth: AuthProvider | None = (
-            StaticAPIKeyAuth(ensured_key) if ensured_key is not None else None
+            StaticAPIKeyAuth(api_key) if api_key is not None else None
         )
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
         self._async_client: httpx.AsyncClient | None = None

@@ -12,8 +12,6 @@ from llm_infer.client import (
     BackendUnavailableError,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestBackendError:
     """Test BackendError base exception."""

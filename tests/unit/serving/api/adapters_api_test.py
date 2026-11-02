@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from appinfra.log import Logger
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -27,9 +26,6 @@ def _ok(obj: Any) -> Any:
     """Attach a non-error status to a dataclass response (mirrors real flow)."""
     obj.status = RequestStatus.COMPLETED  # type: ignore[attr-defined]
     return obj
-
-
-pytestmark = pytest.mark.unit
 
 
 class _LgInjector(BaseHTTPMiddleware):

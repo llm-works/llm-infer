@@ -67,18 +67,17 @@ def create_engine(
         from .vllm import VLLMEngine
 
         return VLLMEngine.from_config(lg, config)
-    elif engine_type == "ollama":
+    if engine_type == "ollama":
         from ..serving.dispatch.config import OllamaConfig
         from .ollama import OllamaEngine
 
         model_name = _resolve_ollama_model(config)
         ollama_cfg = OllamaConfig.from_dict(config.get("ollama", {}), model=model_name)
         return OllamaEngine(lg, ollama_cfg)
-    elif engine_type == "native":
+    if engine_type == "native":
         from .native import create_native_engine
 
         return create_native_engine(lg, config)
-    else:
-        raise ValueError(
-            f"Unknown engine type: {engine_type}. Use 'native', 'vllm', or 'ollama'."
-        )
+    raise ValueError(
+        f"Unknown engine type: {engine_type}. Use 'native', 'vllm', or 'ollama'."
+    )

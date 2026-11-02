@@ -20,8 +20,6 @@ from llm_infer.serving.api.openai.errors import (
     openai_exception_handler,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class TestHttpStatusToErrorType:
     @pytest.mark.parametrize(

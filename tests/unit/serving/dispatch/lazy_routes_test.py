@@ -15,13 +15,10 @@ from __future__ import annotations
 
 import multiprocessing as mp
 
-import pytest
 from appinfra.subprocess import Lazy
 from fastapi import APIRouter
 
 from llm_infer.serving.api.openai.router import OpenAIRouterConfig
-
-pytestmark = pytest.mark.unit
 
 
 def test_health_factory_qualname_resolves() -> None:

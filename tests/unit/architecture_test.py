@@ -6,7 +6,6 @@
 import math
 from unittest.mock import MagicMock
 
-import pytest
 import torch
 
 from llm_infer.engines.native.model.architecture import (
@@ -19,8 +18,6 @@ from llm_infer.engines.native.model.architecture import (
     get_config_defaults,
 )
 from llm_infer.engines.native.model.config import TransformerConfig
-
-pytestmark = pytest.mark.unit
 
 
 def make_config(**overrides) -> TransformerConfig:
@@ -261,7 +258,7 @@ class TestArchitectureRegistry:
 
     def test_registry_values_are_classes(self) -> None:
         """Test that registry values are architecture classes."""
-        for name, arch_cls in ARCHITECTURES.items():
+        for arch_cls in ARCHITECTURES.values():
             assert issubclass(arch_cls, LlamaArchitecture)
 
 

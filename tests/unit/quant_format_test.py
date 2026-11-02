@@ -3,11 +3,7 @@
 
 """Unit tests for QuantFormat enum."""
 
-import pytest
-
 from llm_infer.engines.native.backends.linear.formats import QuantFormat
-
-pytestmark = pytest.mark.unit
 
 
 class TestQuantFormatFromQuantMethod:

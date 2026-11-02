@@ -85,12 +85,8 @@ class Backend(ABC):
         Returns:
             True if a call would be allowed, False otherwise.
         """
-        if (
-            self._ctx.rate_limiter is not None
-            and not self._ctx.rate_limiter.can_proceed()
-        ):
-            return False
-        return True
+        rl = self._ctx.rate_limiter
+        return rl is None or rl.can_proceed()
 
     @property
     @abstractmethod
@@ -234,7 +230,6 @@ class Backend(ABC):
         Override this method to close sync HTTP clients and other resources.
         Called by __exit__.
         """
-        pass
 
     async def aclose(self) -> None:
         """Close all resources (sync and async).
@@ -243,7 +238,6 @@ class Backend(ABC):
         Called by __aexit__. Should also close sync resources since async
         context manager exit is the final cleanup opportunity.
         """
-        pass
 
     def __enter__(self) -> Backend:
         """Enter sync context manager."""

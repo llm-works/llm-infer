@@ -407,7 +407,7 @@ class InferenceEngine:
     ) -> Request:
         """Create a request from prompt and parameters."""
         if use_chat_template and self.tokenizer.has_chat_template:
-            tokens = self.tokenizer.encode_chat(messages if messages else prompt)
+            tokens = self.tokenizer.encode_chat(messages or prompt)
         else:
             tokens = self.tokenizer.encode(prompt, add_special_tokens=True)
 
@@ -692,9 +692,8 @@ class StreamingResult:
         if self._finished:
             raise StopIteration
         try:
-            if not self._started:
-                if (token := self._run_prefill_phase()) is not None:
-                    return token
+            if not self._started and (token := self._run_prefill_phase()) is not None:
+                return token
             if self._request.is_finished:
                 return self._handle_finished()
             token = self._run_decode_step()

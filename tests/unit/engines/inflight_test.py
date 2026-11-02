@@ -17,8 +17,6 @@ import pytest
 
 from llm_infer.engines.inflight import InFlightConnections, RequestAbortedError
 
-pytestmark = pytest.mark.unit
-
 
 class SilentServer:
     """Accepts connections, reads the request, never answers.

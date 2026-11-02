@@ -27,8 +27,6 @@ from llm_infer.serving.dispatch.types import (
     Response as InternalResponse,
 )
 
-pytestmark = pytest.mark.unit
-
 
 class _LgInjector(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Any) -> Any:

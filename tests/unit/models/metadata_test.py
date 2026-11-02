@@ -14,8 +14,6 @@ import pytest
 
 from llm_infer.models import ModelMetadata, get_model_metadata
 
-pytestmark = pytest.mark.unit
-
 
 class TestModelMetadataProperties:
     """Test ModelMetadata dataclass properties."""
@@ -326,9 +324,11 @@ class TestGetModelMetadataErrors:
 
     def test_missing_config_json_raises(self) -> None:
         """Test that missing config.json raises FileNotFoundError."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with pytest.raises(FileNotFoundError):
-                get_model_metadata(path=tmpdir)
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            pytest.raises(FileNotFoundError),
+        ):
+            get_model_metadata(path=tmpdir)
 
     def test_model_not_found_raises(self) -> None:
         """Test that model not found via resolver raises FileNotFoundError."""

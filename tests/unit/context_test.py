@@ -5,11 +5,7 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from llm_infer.context import _DEBUG_EVENTS, Event, RequestContext
-
-pytestmark = pytest.mark.unit
 
 
 class TestEvent:

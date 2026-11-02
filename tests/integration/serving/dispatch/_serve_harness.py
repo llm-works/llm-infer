@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -142,10 +142,8 @@ def _kill_leftovers(serve: Serve) -> None:
     for pgid_source in (serve.proc.pid, serve.vllm_pid()):
         if pgid_source is None:
             continue
-        try:
+        with suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid_source, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
     serve.proc.wait(timeout=5)
 
 

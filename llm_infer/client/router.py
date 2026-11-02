@@ -236,11 +236,14 @@ class LLMRouter(ChatClient):
             return backend
 
         # Model-based routing (skip reserved names)
-        if model is not None and model not in RESERVED_MODEL_NAMES:
-            if self._discovery is not None:
-                found = self._discovery.get_backend_for_model(model)
-                if found is not None:
-                    return found
+        if (
+            model is not None
+            and model not in RESERVED_MODEL_NAMES
+            and self._discovery is not None
+        ):
+            found = self._discovery.get_backend_for_model(model)
+            if found is not None:
+                return found
 
         # Fall back to default
         return self._default
@@ -317,7 +320,7 @@ class LLMRouter(ChatClient):
         """
         request, ctx, decision = rh.setup_routing(
             self,
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,
@@ -367,7 +370,7 @@ class LLMRouter(ChatClient):
         """
         request, ctx, decision = rh.setup_routing(
             self,
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,
@@ -440,7 +443,7 @@ class LLMRouter(ChatClient):
         """
         request, ctx, decision = rh.setup_routing(
             self,
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,
@@ -492,7 +495,7 @@ class LLMRouter(ChatClient):
         """
         request, ctx, decision = rh.setup_routing(
             self,
-            messages,
+            messages,  # cq: keep - the chat parameters are forwarded explicitly
             model,
             system,
             temperature,

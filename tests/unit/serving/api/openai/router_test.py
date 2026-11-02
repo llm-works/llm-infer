@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 from appinfra.log import Logger
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -42,8 +41,6 @@ from llm_infer.serving.dispatch.types import (
 from llm_infer.serving.dispatch.types import (
     Response as InternalResponse,
 )
-
-pytestmark = pytest.mark.unit
 
 
 class _LgInjector(BaseHTTPMiddleware):

@@ -41,8 +41,6 @@ from llm_infer.client.errors import (
 from llm_infer.client.types import ChatRequest
 from llm_infer.schemas.openai import FinishReason
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_lg() -> Logger:
@@ -50,8 +48,7 @@ def mock_lg() -> Logger:
 
 
 def _backend(mock_lg: Logger, **kwargs: Any) -> OpenAICompatibleBackend:
-    backend = OpenAICompatibleBackend(mock_lg, "test", **kwargs)
-    return backend
+    return OpenAICompatibleBackend(mock_lg, "test", **kwargs)
 
 
 # ---------------------------------------------------------------------------

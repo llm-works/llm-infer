@@ -8,9 +8,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from appinfra import Envelope
 from appinfra.dot_dict import DotDict
 from appinfra.log import Logger
-from appinfra.yaml import SecretStr
 
 from llm_infer.client.backends import BackendFactory, NativeVertexBackend
 from llm_infer.client.backends.auth import (
@@ -19,8 +19,6 @@ from llm_infer.client.backends.auth import (
 )
 from llm_infer.client.backends.providers.gemini import GeminiBackend
 from llm_infer.client.backends.providers.openai import OpenAICompatibleBackend
-
-pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -244,13 +242,13 @@ class TestBackendFactoryAuth:
     def test_top_level_secret_api_key_wraps_as_static_auth(
         self, mock_lg: Logger
     ) -> None:
-        """xray path: top-level api_key arrives as SecretStr; header still builds."""
+        """xray path: top-level api_key arrives as Envelope; header still builds."""
         factory = BackendFactory(mock_lg)
         config = DotDict(
             {
                 "type": "openai_compatible",
                 "base_url": "https://api.openai.com/v1",
-                "api_key": SecretStr("sk-secret"),
+                "api_key": Envelope("sk-secret"),
             }
         )
         backend = factory.create("openai", config)
@@ -259,13 +257,13 @@ class TestBackendFactoryAuth:
         backend.close()
 
     def test_auth_block_secret_api_key_mode(self, mock_lg: Logger) -> None:
-        """auth.mode=api_key with SecretStr inline key."""
+        """auth.mode=api_key with Envelope inline key."""
         factory = BackendFactory(mock_lg)
         config = DotDict(
             {
                 "type": "openai_compatible",
                 "base_url": "https://api.openai.com/v1",
-                "auth": {"mode": "api_key", "api_key": SecretStr("sk-inline-secret")},
+                "auth": {"mode": "api_key", "api_key": Envelope("sk-inline-secret")},
             }
         )
         backend = factory.create("openai", config)

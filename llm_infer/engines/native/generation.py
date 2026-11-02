@@ -58,7 +58,7 @@ def _run_guards(
             # OpenAI has no guard value; content_filter would wrongly imply moderation
             request.finish(FinishReason.STOP, result.message)
             return False
-        elif result.action == "warn" and result.message:
+        if result.action == "warn" and result.message:
             request.add_warning(result.message)
     return True
 

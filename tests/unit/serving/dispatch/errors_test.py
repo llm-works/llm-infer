@@ -13,12 +13,9 @@ from fastapi.responses import JSONResponse
 
 from llm_infer.serving.dispatch.errors import ExceptionHandler
 
-pytestmark = pytest.mark.unit
-
 
 def _handler() -> ExceptionHandler:
-    h = ExceptionHandler(lg=MagicMock(spec=Logger))
-    return h
+    return ExceptionHandler(lg=MagicMock(spec=Logger))
 
 
 @pytest.mark.asyncio

@@ -14,8 +14,6 @@ import pytest
 
 from llm_infer.serving.dispatch.handlers.daemon_executor import DaemonThreadExecutor
 
-pytestmark = pytest.mark.unit
-
 
 def test_submit_returns_result() -> None:
     executor = DaemonThreadExecutor(2, "t")

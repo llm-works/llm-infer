@@ -23,9 +23,6 @@ from appinfra.log import Logger
 
 from llm_infer.serving.adapters import AdapterManager, validate_adapter_key
 
-pytestmark = pytest.mark.unit
-
-
 # ---------------------------------------------------------------------------
 # validate_adapter_key
 # ---------------------------------------------------------------------------

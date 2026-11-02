@@ -20,8 +20,6 @@ from llm_infer.serving.dispatch.types import (
     StreamChunk,
 )
 
-pytestmark = pytest.mark.unit
-
 
 def _create_request(req_id: str = "req-1") -> Request:
     """Create a minimal test request."""

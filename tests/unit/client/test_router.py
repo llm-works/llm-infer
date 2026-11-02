@@ -20,8 +20,6 @@ from llm_infer.client import (
 from llm_infer.client.backends import Backend, BackendContext
 from llm_infer.client.discovery import ModelDiscovery
 
-pytestmark = pytest.mark.unit
-
 
 @pytest.fixture
 def mock_lg() -> Logger:
@@ -228,11 +226,12 @@ class TestLLMRouterAsync:
         client = make_client(mock_lg, "main", [response])
         router = LLMRouter(mock_lg, {"main": client}, "main")
 
-        tokens = []
-        async for token in router.chat_stream_async(
-            [{"role": "user", "content": "Hi"}]
-        ):
-            tokens.append(token)
+        tokens = [
+            token
+            async for token in router.chat_stream_async(
+                [{"role": "user", "content": "Hi"}]
+            )
+        ]
 
         assert tokens == ["X", "Y", "Z"]
 

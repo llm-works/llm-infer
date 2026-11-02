@@ -11,8 +11,6 @@ from appinfra.log import Logger
 from llm_infer.client import ChatRequest, ChatResponse
 from llm_infer.client.backends.providers.gemini import GeminiBackend
 
-pytestmark = pytest.mark.unit
-
 _VERTEX_BASE_URL = (
     "https://us-central1-aiplatform.googleapis.com/v1/projects/"
     "p/locations/us-central1/endpoints/openapi"

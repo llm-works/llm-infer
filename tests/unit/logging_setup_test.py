@@ -7,12 +7,28 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
+from unittest.mock import patch
 
 import pytest
 
 from llm_infer.logging_setup import configure_third_party_logging
 
-pytestmark = pytest.mark.unit
+_TORCH_LOGGERS = ("torch._inductor", "torch._dynamo", "torch.distributed")
+
+
+@pytest.fixture(autouse=True)
+def _restore_env_and_levels() -> Iterator[None]:
+    """Undo what configure_third_party_logging sets: env vars and logger levels.
+
+    monkeypatch.delenv on an unset variable records nothing to restore, so the
+    variables the function then sets would outlive the test.
+    """
+    levels = {name: logging.getLogger(name).level for name in _TORCH_LOGGERS}
+    with patch.dict(os.environ):
+        yield
+    for name, level in levels.items():
+        logging.getLogger(name).setLevel(level)
 
 
 def test_default_levels(monkeypatch: pytest.MonkeyPatch) -> None:
