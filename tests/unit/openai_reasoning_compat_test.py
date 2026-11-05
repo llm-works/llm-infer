@@ -126,7 +126,7 @@ class TestMaxCompletionTokens:
 
 
 class TestReasoningModelParams:
-    """Test acceptance of reasoning model parameters (ignored but not rejected)."""
+    """Reasoning model parameters are accepted and forwarded to the backend."""
 
     def test_reasoning_effort_accepted(self) -> None:
         """reasoning_effort parameter is accepted."""

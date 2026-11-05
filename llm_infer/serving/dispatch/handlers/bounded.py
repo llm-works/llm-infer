@@ -216,9 +216,7 @@ class BoundedQueueHandler(SequentialHandler):
             prompt_tokens=tokens,
             context=ctx,
             max_tokens=self.engine.resolve_max_tokens(request.max_tokens, len(tokens)),
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
+            **request.sampling(),
             repetition_penalty=request.repetition_penalty,
             stop_token_ids=stop_token_ids,
         )

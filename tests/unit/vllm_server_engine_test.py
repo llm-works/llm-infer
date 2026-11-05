@@ -318,6 +318,77 @@ class TestVLLMServerMaxTokens:
         assert result["finish_reason"] == "length"
 
 
+def _sent_payload(engine: Any, **kwargs: Any) -> dict[str, Any]:
+    """Run generate() against a stubbed server and return the payload it sent."""
+    engine._post_chat_completions = MagicMock(
+        return_value={"model": "m", "choices": [{"message": {"content": "ok"}}]}
+    )
+    engine.generate("hi", **kwargs)
+    payload: dict[str, Any] = engine._post_chat_completions.call_args.args[0]
+    return payload
+
+
+class TestVLLMServerPassthrough:
+    def test_unset_sampling_not_sent(self) -> None:
+        """Left out, vLLM applies the model's generation_config."""
+        payload = _sent_payload(_engine_for_payload())
+        for key in ("temperature", "top_p", "top_k"):
+            assert key not in payload
+
+    def test_set_sampling_sent(self) -> None:
+        payload = _sent_payload(
+            _engine_for_payload(), temperature=0.3, top_p=0.9, top_k=20
+        )
+        assert (payload["temperature"], payload["top_p"], payload["top_k"]) == (
+            0.3,
+            0.9,
+            20,
+        )
+
+    def test_extra_body_forwarded(self) -> None:
+        extra = {"min_p": 0.05, "reasoning_effort": "low", "thinking_token_budget": 9}
+        payload = _sent_payload(_engine_for_payload(), extra_body=extra)
+        assert extra.items() <= payload.items()
+
+    def test_extra_body_does_not_replace_fields_llm_infer_sets(self) -> None:
+        payload = _sent_payload(
+            _engine_for_payload(),
+            max_tokens=10,
+            extra_body={"max_tokens": 99, "model": "other", "stream": True},
+        )
+        assert (payload["max_tokens"], payload["model"], payload["stream"]) == (
+            10,
+            "m",
+            False,
+        )
+
+
+class TestVLLMServerReasoningField:
+    """vLLM returns reasoning as `reasoning`; older releases as `reasoning_content`."""
+
+    @pytest.mark.parametrize("field", ["reasoning", "reasoning_content"])
+    def test_completion_reasoning_kept(self, field: str) -> None:
+        engine = _engine_for_payload()
+        data = {
+            "model": "m",
+            "choices": [{"message": {"content": "answer", field: "why"}}],
+        }
+        result = engine._parse_completion_response(data, None, None)
+        content = result["content"] if isinstance(result, dict) else result
+        assert content == "<think>why</think>answer"
+
+    @pytest.mark.parametrize("field", ["reasoning", "reasoning_content"])
+    def test_stream_reasoning_kept(self, field: str) -> None:
+        from llm_infer.engines.vllm_server import VLLMServerStreamingIterator
+
+        it = VLLMServerStreamingIterator(
+            MagicMock(), MagicMock(), "/v1/chat/completions", {}, None
+        )
+        text = it._bridge_reasoning_content({field: "why"})
+        text += it._bridge_reasoning_content({"content": "answer"})
+        assert text == "<think>why</think>answer"
+
+
 class TestVLLMServerStreamingFinishReason:
     def _iterator(self, max_tokens: int | None, max_model_len: int | None) -> object:
         from llm_infer.engines.vllm_server import VLLMServerStreamingIterator

@@ -6,7 +6,7 @@
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Role(StrEnum):
@@ -214,7 +214,13 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    """POST /v1/chat/completions request body."""
+    """POST /v1/chat/completions request body.
+
+    Declares only the fields llm-infer interprets. Any other field is kept in
+    ``model_extra`` and forwarded to the backend as given.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     model: str = Field(
         ...,
@@ -230,12 +236,14 @@ class ChatCompletionRequest(BaseModel):
         ge=1,
         description="Max tokens for reasoning models (alias for max_tokens)",
     )
-    temperature: float = Field(1.0, ge=0.0, le=2.0)
-    top_p: float = Field(1.0, ge=0.0, le=1.0)
+    # Sampling: unset fields are left to the backend (the model's own defaults)
+    temperature: float | None = Field(None, ge=0.0, le=2.0)
+    top_p: float | None = Field(None, ge=0.0, le=1.0)
+    top_k: int | None = None
     n: int = Field(1, ge=1, le=1)  # Only n=1 supported
     stream: bool = False
+    stream_options: dict[str, Any] | None = None  # Set by llm-infer, not forwarded
     stop: str | list[str] | None = None
-    presence_penalty: float = Field(0.0, ge=-2.0, le=2.0)
     frequency_penalty: float = Field(0.0, ge=-2.0, le=2.0)
 
     # Tool/function calling
@@ -255,18 +263,8 @@ class ChatCompletionRequest(BaseModel):
         "(valid JSON), or 'json_schema' (strict schema enforcement)",
     )
 
-    # Accepted but ignored (for SDK compatibility)
-    logit_bias: dict[str, float] | None = None
-    logprobs: bool | None = None
-    top_logprobs: int | None = None
-    user: str | None = None
-    seed: int | None = None
-    # OpenAI reasoning model parameters (accepted but ignored)
-    reasoning_effort: str | None = None
-    store: bool | None = None
-    metadata: dict[str, str] | None = None
-    service_tier: str | None = None
-    stream_options: dict[str, Any] | None = None
+    # Merged with the model's kwargs; `think` sets enable_thinking
+    chat_template_kwargs: dict[str, Any] | None = None
 
     # llm-infer extension: LoRA adapter selection
     adapter: str | None = Field(
@@ -415,7 +413,13 @@ class ChatCompletionChunk(BaseModel):
 
 
 class CompletionRequest(BaseModel):
-    """POST /v1/completions request body (legacy endpoint)."""
+    """POST /v1/completions request body (legacy endpoint).
+
+    Undeclared fields are forwarded to the backend as given, as in
+    ``ChatCompletionRequest``.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     model: str = Field(
         ...,
@@ -426,21 +430,13 @@ class CompletionRequest(BaseModel):
 
     # Generation parameters
     max_tokens: int = Field(16, ge=1)
-    temperature: float = Field(1.0, ge=0.0, le=2.0)
-    top_p: float = Field(1.0, ge=0.0, le=1.0)
+    temperature: float | None = Field(None, ge=0.0, le=2.0)
+    top_p: float | None = Field(None, ge=0.0, le=1.0)
     n: int = Field(1, ge=1, le=1)
     stream: bool = False
     stop: str | list[str] | None = None
-    presence_penalty: float = Field(0.0, ge=-2.0, le=2.0)
     frequency_penalty: float = Field(0.0, ge=-2.0, le=2.0)
     echo: bool = False
-    suffix: str | None = None
-
-    # Accepted but ignored
-    best_of: int | None = None
-    logit_bias: dict[str, float] | None = None
-    logprobs: int | None = None
-    user: str | None = None
 
     # llm-infer extension: LoRA adapter selection
     adapter: str | None = Field(

@@ -25,7 +25,7 @@ import httpx
 from appinfra.log import Logger
 
 from ..schemas.openai import FinishReason
-from .remote import LineStream, RemoteEngine, truncate_embedding
+from .remote import LineStream, RemoteEngine, add_extra_body, truncate_embedding
 
 if TYPE_CHECKING:
     from ..context import RequestContext
@@ -484,9 +484,9 @@ class OllamaEngine(RemoteEngine):
         self,
         prompt: str,
         max_tokens: int | None = 100,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        top_k: int = 0,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
         repetition_penalty: float = 1.0,
         use_chat_template: bool | None = None,
         stop_sequences: list[str] | None = None,
@@ -495,6 +495,7 @@ class OllamaEngine(RemoteEngine):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Generate text completion (blocking).
@@ -513,6 +514,7 @@ class OllamaEngine(RemoteEngine):
             tools: List of tool definitions for function calling.
             tool_choice: Controls tool usage ("auto", "none", "required", or specific).
             response_format: Structured output format (json_object or json_schema).
+            extra_body: Request fields llm-infer does not interpret, sent as given.
 
         Returns:
             Dict with "content" and "finish_reason", plus "tool_calls" when the
@@ -530,6 +532,7 @@ class OllamaEngine(RemoteEngine):
                 tools=tools,
                 tool_choice=tool_choice,
                 response_format=response_format,
+                extra_body=extra_body,
             )
 
         payload = self._build_generate_payload(
@@ -543,6 +546,11 @@ class OllamaEngine(RemoteEngine):
             stream=False,
             response_format=response_format,
         )
+        add_extra_body(payload, extra_body)
+        return self._post_generate(payload)
+
+    def _post_generate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST a prompt request to /api/generate and parse the result."""
         data = self._post_json("/api/generate", payload, "generate")
         return {
             "content": data.get("response", ""),
@@ -553,9 +561,9 @@ class OllamaEngine(RemoteEngine):
         self,
         messages: list[dict[str, Any]],
         max_tokens: int | None,
-        temperature: float,
-        top_p: float,
-        top_k: int,
+        temperature: float | None,
+        top_p: float | None,
+        top_k: int | None,
         repetition_penalty: float,
         stop_sequences: list[str] | None,
         tools: list[dict[str, Any]] | None,
@@ -591,14 +599,15 @@ class OllamaEngine(RemoteEngine):
         self,
         messages: list[dict[str, Any]],
         max_tokens: int | None,
-        temperature: float,
-        top_p: float,
-        top_k: int,
+        temperature: float | None,
+        top_p: float | None,
+        top_k: int | None,
         repetition_penalty: float,
         stop_sequences: list[str] | None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Generate using chat API.
 
@@ -619,6 +628,7 @@ class OllamaEngine(RemoteEngine):
             stream=False,
             response_format=response_format,
         )
+        add_extra_body(payload, extra_body)
         data = self._post_json("/api/chat", payload, "chat")
         message = data.get("message", {})
         tool_calls = message.get("tool_calls")
@@ -634,9 +644,9 @@ class OllamaEngine(RemoteEngine):
         self,
         prompt: str,
         max_tokens: int | None,
-        temperature: float,
-        top_p: float,
-        top_k: int,
+        temperature: float | None,
+        top_p: float | None,
+        top_k: int | None,
         repetition_penalty: float,
         stop_sequences: list[str] | None,
         stream: bool,
@@ -670,24 +680,19 @@ class OllamaEngine(RemoteEngine):
     def _build_options(
         self,
         max_tokens: int | None,
-        temperature: float,
-        top_p: float,
-        top_k: int,
+        temperature: float | None,
+        top_p: float | None,
+        top_k: int | None,
         repetition_penalty: float,
     ) -> dict[str, Any]:
         """Build Ollama options dict."""
-        options: dict[str, Any] = {
-            "temperature": temperature,
-            "top_p": top_p,
-            "repeat_penalty": repetition_penalty,
-        }
+        # Sampling fields left None are omitted: the model's own defaults apply
+        sampling = {"temperature": temperature, "top_p": top_p, "top_k": top_k}
+        options: dict[str, Any] = {k: v for k, v in sampling.items() if v is not None}
+        options["repeat_penalty"] = repetition_penalty
         # Omitted num_predict: Ollama's default (-1), as its own OpenAI endpoint does
         if max_tokens is not None:
             options["num_predict"] = max_tokens
-
-        # Ollama uses 0 to disable top_k, which matches our convention
-        if top_k > 0:
-            options["top_k"] = top_k
 
         # Apply config-level options
         if self._config.num_ctx:
@@ -733,9 +738,9 @@ class OllamaEngine(RemoteEngine):
         self,
         messages: list[dict[str, Any]],
         max_tokens: int | None,
-        temperature: float,
-        top_p: float,
-        top_k: int,
+        temperature: float | None,
+        top_p: float | None,
+        top_k: int | None,
         repetition_penalty: float,
         stop_sequences: list[str] | None,
         tools: list[dict[str, Any]] | None = None,
@@ -761,9 +766,9 @@ class OllamaEngine(RemoteEngine):
         self,
         prompt: str,
         max_tokens: int | None = 100,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        top_k: int = 0,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
         repetition_penalty: float = 1.0,
         use_chat_template: bool | None = None,
         stop_sequences: list[str] | None = None,
@@ -772,6 +777,7 @@ class OllamaEngine(RemoteEngine):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> OllamaStreamingIterator:
         """Generate text with streaming."""
@@ -788,6 +794,7 @@ class OllamaEngine(RemoteEngine):
                 tool_choice,
                 response_format,
             )
+            add_extra_body(payload, extra_body)
             return OllamaStreamingIterator(self._lg, self._client, "/api/chat", payload)
 
         payload = self._build_generate_payload(
@@ -801,6 +808,7 @@ class OllamaEngine(RemoteEngine):
             stream=True,
             response_format=response_format,
         )
+        add_extra_body(payload, extra_body)
         return OllamaStreamingIterator(self._lg, self._client, "/api/generate", payload)
 
     # -------------------------------------------------------------------------
