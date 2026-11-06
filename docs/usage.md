@@ -370,11 +370,12 @@ Request:
 }
 ```
 
-Unset fields take OpenAI's defaults where the OpenAI API defines them (`temperature` and `top_p`
-1.0, penalties 0), otherwise the model's own (`top_k`, `min_p`). Fields llm-infer does not
-interpret, such as `min_p`, `presence_penalty`, `reasoning_effort` or `thinking_token_budget`,
-go to the vLLM server or Ollama as given; the backend decides what it accepts. For Ollama, a
-request's `options` are merged with the ones llm-infer sets, and llm-infer's win.
+Unset `temperature` and `top_p` default to 1.0, as in the OpenAI API; `top_k`, `min_p` and
+`presence_penalty` are sent only when the request sets them. Fields llm-infer does not interpret,
+such as `min_p`, `presence_penalty`, `reasoning_effort` or `thinking_token_budget`, go to the
+vLLM server or Ollama as given; the backend decides what it accepts. Ollama reads sampling
+settings only from `options` (`"options": {"min_p": 0.05}`), so send them there; a request's
+`options` are merged with the ones llm-infer sets, and llm-infer's win.
 `chat_template_kwargs` (vLLM server only) is merged with the model's; for models whose config
 sets `enable_thinking`, `think` decides its value.
 
