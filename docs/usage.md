@@ -373,9 +373,10 @@ Request:
 Unset `temperature` and `top_p` default to 1.0, as in the OpenAI API; `top_k`, `min_p` and
 `presence_penalty` are sent only when the request sets them. Fields llm-infer does not interpret,
 such as `min_p`, `presence_penalty`, `reasoning_effort` or `thinking_token_budget`, go to the
-vLLM server or Ollama as given; the backend decides what it accepts. Ollama reads sampling
-settings only from `options` (`"options": {"min_p": 0.05}`), so send them there; a request's
-`options` are merged with the ones llm-infer sets, and llm-infer's win.
+vLLM server or Ollama as given; the backend decides what it accepts. For Ollama, set
+`temperature`, `top_p` and `top_k` as request fields, and other sampling settings inside
+`options` (`"options": {"min_p": 0.05}`); a request's `options` are merged with the ones
+llm-infer sets, and llm-infer's win.
 `chat_template_kwargs` (vLLM server only) is merged with the model's; for models whose config
 sets `enable_thinking`, `think` decides its value.
 
