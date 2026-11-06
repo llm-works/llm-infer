@@ -365,6 +365,12 @@ class TestBuildOptions:
         assert opts["top_k"] == 40
         assert opts["repeat_penalty"] == 1.1
 
+    def test_unset_sampling_omitted(self) -> None:
+        """Left out, Ollama applies the model's own defaults."""
+        opts = _make_engine()._build_options(100, None, None, None, 1.1)
+        for key in ("temperature", "top_p", "top_k"):
+            assert key not in opts
+
     def test_no_cap_omits_num_predict(self) -> None:
         engine = _make_engine()
         opts = engine._build_options(None, 0.7, 0.9, 40, 1.1)
@@ -566,6 +572,49 @@ class TestGenerate:
         assert isinstance(result, dict)
         assert result["content"] == ""
         assert result["tool_calls"] is not None
+
+    @pytest.mark.parametrize("messages", [None, [{"role": "user", "content": "hi"}]])
+    def test_extra_body_forwarded_without_replacing_set_fields(
+        self, messages: list | None
+    ) -> None:
+        engine = _make_engine()
+        self._setup_post(engine, {"response": "x", "message": {"content": "x"}})
+        engine.generate(
+            "hello",
+            messages=messages,
+            extra_body={"think": False, "model": "other"},
+        )
+        payload = engine._client.post.call_args.kwargs["json"]
+        assert payload["think"] is False
+        assert payload["model"] == "test-model"
+
+    @pytest.mark.parametrize("stream", [False, True])
+    @pytest.mark.parametrize("messages", [None, [{"role": "user", "content": "hi"}]])
+    def test_extra_options_merged_into_generated_options(
+        self, messages: list | None, stream: bool
+    ) -> None:
+        """Ollama reads sampling settings from `options`; llm-infer's keys win."""
+        engine = _make_engine()
+        self._setup_post(engine, {"response": "x", "message": {"content": "x"}})
+        extra = {"options": {"min_p": 0.05, "num_predict": 1}}
+        if stream:
+            payload = engine.generate_stream_sync(
+                "hello", max_tokens=50, messages=messages, extra_body=extra
+            )._payload
+        else:
+            engine.generate("hello", max_tokens=50, messages=messages, extra_body=extra)
+            payload = engine._client.post.call_args.kwargs["json"]
+        assert payload["options"]["min_p"] == 0.05
+        assert payload["options"]["num_predict"] == 50
+
+    @pytest.mark.parametrize("messages", [None, [{"role": "user", "content": "hi"}]])
+    def test_stream_extra_body_forwarded(self, messages: list | None) -> None:
+        engine = _make_engine()
+        stream = engine.generate_stream_sync(
+            "hello", messages=messages, extra_body={"think": False, "stream": False}
+        )
+        assert stream._payload["think"] is False
+        assert stream._payload["stream"] is True
 
 
 # ---------------------------------------------------------------------------

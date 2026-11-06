@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenAI endpoints: request fields llm-infer does not interpret (`min_p`, `presence_penalty`,
+  `reasoning_effort`, `thinking_token_budget`, ...) reach the vLLM server and Ollama as given
+  instead of being dropped; `top_k`, `chat_template_kwargs` and Ollama `options` are applied.
+  Requests that set none of them are sent as before.
+- vLLM server: reasoning returned in vLLM's `reasoning` field is kept (only `reasoning_content`
+  was read, so the `thinking` field stayed empty).
+
 ## [0.8.1] - 2026-11-01
 
 ### Changed

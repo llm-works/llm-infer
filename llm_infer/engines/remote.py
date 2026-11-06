@@ -32,6 +32,16 @@ def truncate_embedding(embedding: list[float], dimensions: int | None) -> list[f
     return [x / norm for x in truncated] if norm > 0 else truncated
 
 
+def add_extra_body(payload: dict[str, Any], extra_body: dict[str, Any] | None) -> None:
+    """Forward request fields llm-infer does not interpret, as given.
+
+    Fields llm-infer already set in the payload win: the server's result must
+    match what llm-infer parses (stream, model, token cap).
+    """
+    for key, value in (extra_body or {}).items():
+        payload.setdefault(key, value)
+
+
 class RemoteEngine:
     """InferenceEngineProtocol methods the server handles on its own."""
 

@@ -463,6 +463,8 @@ class RequestHandler(ABC):
             params["response_format"] = request.response_format
         if request.chat_template_kwargs is not None:
             params["chat_template_kwargs"] = request.chat_template_kwargs
+        if request.extra_body:
+            params["extra_body"] = request.extra_body
 
     def _build_engine_params(
         self, request: Request
@@ -477,9 +479,7 @@ class RequestHandler(ABC):
         params: dict[str, Any] = {
             "prompt": request.prompt,
             "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "top_k": request.top_k,
+            **request.sampling(),
             "repetition_penalty": request.repetition_penalty,
             "use_chat_template": request.use_chat_template,
             "stop_sequences": request.stop_sequences,

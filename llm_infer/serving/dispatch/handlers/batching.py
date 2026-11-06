@@ -99,9 +99,7 @@ class ContinuousBatchingHandler(RequestHandler):
             result = self.engine.generate(
                 prompt=running.request.prompt,
                 max_tokens=running.request.max_tokens,
-                temperature=running.request.temperature,
-                top_p=running.request.top_p,
-                top_k=running.request.top_k,
+                **running.request.sampling(),
                 repetition_penalty=running.request.repetition_penalty,
                 use_chat_template=running.request.use_chat_template,
                 stop_sequences=running.request.stop_sequences,

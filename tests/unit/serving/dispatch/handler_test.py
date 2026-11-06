@@ -405,6 +405,21 @@ class TestBuildEngineParams:
         assert "lora_request" not in params
         assert fallback == "missing"
 
+    def test_unset_sampling_left_to_engine_defaults(self) -> None:
+        params, _ = _handler()._build_engine_params(_request("r1"))
+        for key in ("temperature", "top_p", "top_k", "extra_body"):
+            assert key not in params
+
+    def test_set_sampling_and_extra_body_passed(self) -> None:
+        request = _request("r1")
+        request.top_p = 0.9
+        request.top_k = 20
+        request.extra_body = {"min_p": 0.05}
+        params, _ = _handler()._build_engine_params(request)
+        assert (params["top_p"], params["top_k"]) == (0.9, 20)
+        assert params["extra_body"] == {"min_p": 0.05}
+        assert "temperature" not in params
+
 
 # ---------------------------------------------------------------------------
 # _parse_generate_result
