@@ -263,7 +263,8 @@ class ChatCompletionRequest(BaseModel):
         "(valid JSON), or 'json_schema' (strict schema enforcement)",
     )
 
-    # Merged with the model's kwargs; `think` sets enable_thinking
+    # Merged with the model's kwargs; think overrides enable_thinking when the
+    # model config sets it
     chat_template_kwargs: dict[str, Any] | None = None
 
     # llm-infer extension: LoRA adapter selection
