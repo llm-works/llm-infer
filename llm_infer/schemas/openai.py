@@ -236,9 +236,10 @@ class ChatCompletionRequest(BaseModel):
         ge=1,
         description="Max tokens for reasoning models (alias for max_tokens)",
     )
-    # Sampling: unset fields are left to the backend (the model's own defaults)
-    temperature: float | None = Field(None, ge=0.0, le=2.0)
-    top_p: float | None = Field(None, ge=0.0, le=1.0)
+    # Sampling: OpenAI's defaults where the OpenAI API defines the field; top_k
+    # is not an OpenAI field, so unset it is left to the model
+    temperature: float = Field(1.0, ge=0.0, le=2.0)
+    top_p: float = Field(1.0, ge=0.0, le=1.0)
     top_k: int | None = None
     n: int = Field(1, ge=1, le=1)  # Only n=1 supported
     stream: bool = False
@@ -431,8 +432,8 @@ class CompletionRequest(BaseModel):
 
     # Generation parameters
     max_tokens: int = Field(16, ge=1)
-    temperature: float | None = Field(None, ge=0.0, le=2.0)
-    top_p: float | None = Field(None, ge=0.0, le=1.0)
+    temperature: float = Field(1.0, ge=0.0, le=2.0)
+    top_p: float = Field(1.0, ge=0.0, le=1.0)
     n: int = Field(1, ge=1, le=1)
     stream: bool = False
     stop: str | list[str] | None = None

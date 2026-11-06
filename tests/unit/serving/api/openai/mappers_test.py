@@ -413,10 +413,11 @@ class TestChatRequestToInternal:
         result = chat_request_to_internal(body, "r1", cfg)
         assert "/think" in result.prompt
 
-    def test_unset_sampling_left_to_backend(self) -> None:
+    def test_unset_sampling_takes_openai_defaults(self) -> None:
+        """temperature/top_p default as in the OpenAI API; top_k is left to the model."""
         body = ChatCompletionRequest(model="m", messages=[_msg("user", "hi")])
         result = chat_request_to_internal(body, "r1")
-        assert (result.temperature, result.top_p, result.top_k) == (None, None, None)
+        assert (result.temperature, result.top_p, result.top_k) == (1.0, 1.0, None)
         assert result.extra_body is None
 
     def test_set_sampling_mapped(self) -> None:
@@ -462,7 +463,7 @@ class TestCompletionRequestToInternal:
             {"model": "m", "prompt": "hi", "min_p": 0.05}
         )
         result = completion_request_to_internal(body, "r1")
-        assert (result.temperature, result.top_p) == (None, None)
+        assert (result.temperature, result.top_p) == (1.0, 1.0)
         assert result.extra_body == {"min_p": 0.05}
 
     def test_string_prompt(self) -> None:
