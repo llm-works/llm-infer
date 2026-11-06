@@ -89,6 +89,23 @@ def _ollama_finish_reason(data: dict[str, Any], has_tool_calls: bool) -> FinishR
     return FinishReason.TOOL_CALLS if has_tool_calls else FinishReason.STOP
 
 
+def _add_ollama_extra_body(
+    payload: dict[str, Any], extra_body: dict[str, Any] | None
+) -> None:
+    """Forward request fields llm-infer does not interpret to Ollama.
+
+    Ollama reads sampling settings (min_p, ...) from `options`, which llm-infer
+    always generates, so a caller's `options` are merged into it; the keys
+    llm-infer set win.
+    """
+    extra = dict(extra_body or {})
+    requested = extra.pop("options", None)
+    if isinstance(requested, dict):
+        for key, value in requested.items():
+            payload["options"].setdefault(key, value)
+    add_extra_body(payload, extra)
+
+
 def _convert_single_message(
     msg: dict[str, Any], id_to_name: dict[str, str]
 ) -> dict[str, Any]:
@@ -546,7 +563,7 @@ class OllamaEngine(RemoteEngine):
             stream=False,
             response_format=response_format,
         )
-        add_extra_body(payload, extra_body)
+        _add_ollama_extra_body(payload, extra_body)
         return self._post_generate(payload)
 
     def _post_generate(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -628,7 +645,7 @@ class OllamaEngine(RemoteEngine):
             stream=False,
             response_format=response_format,
         )
-        add_extra_body(payload, extra_body)
+        _add_ollama_extra_body(payload, extra_body)
         data = self._post_json("/api/chat", payload, "chat")
         message = data.get("message", {})
         tool_calls = message.get("tool_calls")
@@ -794,7 +811,7 @@ class OllamaEngine(RemoteEngine):
                 tool_choice,
                 response_format,
             )
-            add_extra_body(payload, extra_body)
+            _add_ollama_extra_body(payload, extra_body)
             return OllamaStreamingIterator(self._lg, self._client, "/api/chat", payload)
 
         payload = self._build_generate_payload(
@@ -808,7 +825,7 @@ class OllamaEngine(RemoteEngine):
             stream=True,
             response_format=response_format,
         )
-        add_extra_body(payload, extra_body)
+        _add_ollama_extra_body(payload, extra_body)
         return OllamaStreamingIterator(self._lg, self._client, "/api/generate", payload)
 
     # -------------------------------------------------------------------------

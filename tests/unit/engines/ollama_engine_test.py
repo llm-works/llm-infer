@@ -588,6 +588,25 @@ class TestGenerate:
         assert payload["think"] is False
         assert payload["model"] == "test-model"
 
+    @pytest.mark.parametrize("stream", [False, True])
+    @pytest.mark.parametrize("messages", [None, [{"role": "user", "content": "hi"}]])
+    def test_extra_options_merged_into_generated_options(
+        self, messages: list | None, stream: bool
+    ) -> None:
+        """Ollama reads sampling settings from `options`; llm-infer's keys win."""
+        engine = _make_engine()
+        self._setup_post(engine, {"response": "x", "message": {"content": "x"}})
+        extra = {"options": {"min_p": 0.05, "num_predict": 1}}
+        if stream:
+            payload = engine.generate_stream_sync(
+                "hello", max_tokens=50, messages=messages, extra_body=extra
+            )._payload
+        else:
+            engine.generate("hello", max_tokens=50, messages=messages, extra_body=extra)
+            payload = engine._client.post.call_args.kwargs["json"]
+        assert payload["options"]["min_p"] == 0.05
+        assert payload["options"]["num_predict"] == 50
+
     @pytest.mark.parametrize("messages", [None, [{"role": "user", "content": "hi"}]])
     def test_stream_extra_body_forwarded(self, messages: list | None) -> None:
         engine = _make_engine()

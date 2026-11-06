@@ -370,12 +370,14 @@ Request:
 }
 ```
 
-Sampling fields left out (`temperature`, `top_p`, `top_k`) are not sent to the backend, so the
-model's own defaults apply (vLLM reads them from the model's `generation_config.json`). Fields
-llm-infer does not interpret, such as `min_p`, `presence_penalty`, `reasoning_effort` or
+Sampling fields left out (`temperature`, `top_p`, `top_k`) are not sent by the vLLM server and
+Ollama engines, so the model's own defaults apply (vLLM reads them from the model's
+`generation_config.json`); the in-process engines keep their defaults (1.0, 1.0, disabled).
+Fields llm-infer does not interpret, such as `min_p`, `presence_penalty`, `reasoning_effort` or
 `thinking_token_budget`, go to the vLLM server or Ollama as given; the backend decides what it
-accepts. `chat_template_kwargs` is merged with the model's; for models whose config sets
-`enable_thinking`, `think` decides its value.
+accepts. Ollama reads sampling settings from `options`, which is merged with the one llm-infer
+builds. `chat_template_kwargs` (vLLM server only) is merged with the model's; for models whose
+config sets `enable_thinking`, `think` decides its value.
 
 Response:
 ```json
