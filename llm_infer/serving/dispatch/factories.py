@@ -87,6 +87,7 @@ class NativeEngineFactory(EngineFactory):
             self._import_native_deps()
         )
         self._validate_model_path(config)
+        from ...engines.native.config import parse_dtype
 
         native_cfg = config.engines.native
         model_path = str(config.models.path)
@@ -102,7 +103,7 @@ class NativeEngineFactory(EngineFactory):
             torch_compile=native_cfg.torch_compile,
             warmup=native_cfg.warmup,
             device=native_cfg.device,
-            dtype=native_cfg.dtype,
+            dtype=parse_dtype(native_cfg.dtype),
         )
         return engine_cls(lg, engine_config, on_progress=on_progress)
 

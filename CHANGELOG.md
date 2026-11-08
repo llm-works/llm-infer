@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Dependencies: the `cuda` extra requires `vllm>=0.33.0` (was `>=0.30.0`) and
+  `flashinfer-python>=0.7.2` (was `>=0.2.0`).
+
 ### Fixed
 
+- Native engine: `llm-infer serve --engine native` loads and generates (dtype from the config,
+  chat tokenization with transformers 5, flashinfer decode for any GQA group size, Marlin AWQ
+  on vLLM 0.33).
 - OpenAI endpoints: request fields llm-infer does not interpret (`min_p`, `presence_penalty`,
   `reasoning_effort`, `thinking_token_budget`, ...) reach the vLLM server and Ollama as given
   instead of being dropped; `top_k`, `chat_template_kwargs` and Ollama `options` are applied.

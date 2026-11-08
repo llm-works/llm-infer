@@ -10,6 +10,22 @@ import torch
 
 from .model import TransformerConfig
 
+_DTYPES = {
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+    "float32": torch.float32,
+}
+
+
+def parse_dtype(name: str) -> torch.dtype:
+    """Map a configured dtype name (float16, bfloat16, float32) to its torch.dtype."""
+    try:
+        return _DTYPES[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown dtype {name!r}, expected one of {sorted(_DTYPES)}"
+        ) from None
+
 
 @dataclass
 class EngineConfig:
