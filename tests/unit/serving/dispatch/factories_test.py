@@ -104,6 +104,40 @@ class TestValidateModelPath:
 
 
 # ---------------------------------------------------------------------------
+# NativeEngineFactory.create — dtype
+# ---------------------------------------------------------------------------
+
+
+class TestNativeCreateDtype:
+    """The configured dtype string reaches the native engine as a torch.dtype."""
+
+    def _create(
+        self, lg: Logger, monkeypatch: pytest.MonkeyPatch, dtype: str
+    ) -> MagicMock:
+        engine_config_cls = MagicMock()
+        deps = (engine_config_cls, MagicMock(), MagicMock())
+        monkeypatch.setattr(NativeEngineFactory, "_import_native_deps", lambda _: deps)
+        cfg = _config(model_path=Path("/x"))
+        cfg.engines.native.dtype = dtype
+        NativeEngineFactory().create(lg, cfg)
+        return engine_config_cls
+
+    def test_dtype_string_is_converted(
+        self, lg: Logger, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import torch
+
+        engine_config_cls = self._create(lg, monkeypatch, "bfloat16")
+        assert engine_config_cls.call_args.kwargs["dtype"] is torch.bfloat16
+
+    def test_unknown_dtype_raises(
+        self, lg: Logger, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with pytest.raises(ValueError, match="bf16"):
+            self._create(lg, monkeypatch, "bf16")
+
+
+# ---------------------------------------------------------------------------
 # warmup_enabled / max_batch_size
 # ---------------------------------------------------------------------------
 
