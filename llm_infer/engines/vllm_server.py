@@ -36,7 +36,7 @@ from appinfra.log import Logger
 from ..schemas.openai import FinishReason
 from .finish import parse_finish_reason
 from .inflight import InFlightConnections, RequestAbortedError
-from .protocol import BackendNotManagedError
+from .protocol import BackendNotManagedError, BackendRequestError
 from .remote import LineStream, RemoteEngine, add_extra_body, truncate_embedding
 from .vllm_common import resolve_gpu_memory_utilization
 
@@ -918,13 +918,23 @@ class VLLMServerEngine(RemoteEngine):
         return payload
 
     def _extract_error_detail(self, response: httpx.Response) -> str:
-        """Extract error message from vLLM error response body."""
+        """Extract error message from vLLM error response body.
+
+        vLLM answers {"error": {"message": ...}} (OpenAI format); older releases
+        answered {"object": "error", "message": ...}.
+        """
         try:
-            # vLLM returns {"object":"error","message":"...","type":"...","code":400}
-            msg: str = response.json().get("message", response.text)
-            return msg
-        except Exception:
+            body = response.json()
+        except ValueError:
             return str(response.text)
+        if not isinstance(body, dict):
+            return str(response.text)
+        error = body.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return str(error["message"])
+        if isinstance(body.get("message"), str):
+            return str(body["message"])
+        return str(response.text)
 
     def _post_chat_completions(
         self, payload: dict[str, Any], request_id: str | None
@@ -942,7 +952,7 @@ class VLLMServerEngine(RemoteEngine):
         except httpx.HTTPStatusError as e:
             detail = self._extract_error_detail(e.response)
             self._lg.error("generate request failed", extra={"detail": detail})
-            raise RuntimeError(f"vLLM server error: {detail}") from e
+            raise BackendRequestError(e.response.status_code, detail) from e
         except httpx.HTTPError as e:
             if request_id and self._connections.was_aborted(request_id):
                 raise RequestAbortedError(f"request {request_id} aborted") from e

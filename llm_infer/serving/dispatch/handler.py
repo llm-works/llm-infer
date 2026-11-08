@@ -23,6 +23,7 @@ from .types import (
     Response,
     ResponseAdapterInfo,
     StreamChunk,
+    failure_response,
     refusal_message,
 )
 
@@ -578,7 +579,7 @@ class RequestHandler(ABC):
                 )
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
         except Exception as e:
-            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
+            return failure_response(request.id, e)
 
     def _stream_tokens_to_queue(self, request: Request, stream: Any) -> None:
         """Stream tokens from generator to response queue."""

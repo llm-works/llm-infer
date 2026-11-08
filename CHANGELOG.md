@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native engine: `llm-infer serve --engine native` loads and generates (dtype from the config,
   chat tokenization with transformers 5, flashinfer decode for any GQA group size, Marlin AWQ
   on vLLM 0.33).
+- vLLM server: a request vLLM rejects (4xx, e.g. `max_tokens` above the context) is answered
+  with vLLM's status and message instead of a 500.
 - OpenAI endpoints: request fields llm-infer does not interpret (`min_p`, `presence_penalty`,
   `reasoning_effort`, `thinking_token_budget`, ...) reach the vLLM server and Ollama as given
   instead of being dropped; `top_k`, `chat_template_kwargs` and Ollama `options` are applied.

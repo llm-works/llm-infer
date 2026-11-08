@@ -282,6 +282,19 @@ class BackendNotManagedError(RuntimeError):
     """The engine's backend runs outside serve, which can't stop or start it."""
 
 
+class BackendRequestError(RuntimeError):
+    """The backend answered a request with an HTTP error status.
+
+    Keeps the status so a request the backend rejected (4xx) is not reported
+    to the caller as a server failure.
+    """
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
 @runtime_checkable
 class ReleasableEngineProtocol(Protocol):
     """Engine whose backend can be stopped and started again while serve runs.
