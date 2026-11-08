@@ -29,6 +29,21 @@ except ImportError:
 # Workspace buffer size (128MB as recommended by FlashInfer docs)
 _WORKSPACE_SIZE = 128 * 1024 * 1024
 
+# GQA group sizes FlashInfer's CUDA-core decode kernels dispatch
+# (DISPATCH_GQA_GROUP_SIZE in include/flashinfer/utils.cuh).
+_CUDA_CORE_DECODE_GROUP_SIZES = frozenset({1, 2, 3, 4, 6, 8, 16})
+
+
+def decode_uses_tensor_cores(num_heads: int, num_kv_heads: int) -> bool:
+    """Whether decode needs FlashInfer's tensor-core path for this head layout.
+
+    The CUDA-core decode accumulates in fp32 but fails on other group sizes
+    ("Unsupported group_size"). The tensor-core path handles any group size,
+    but before FlashInfer 0.7 it can return inaccurate bf16 results, so it is
+    used only where the CUDA-core path cannot run.
+    """
+    return num_heads // num_kv_heads not in _CUDA_CORE_DECODE_GROUP_SIZES
+
 
 class FlashInferBackend:
     """FlashInfer optimized attention implementation.
@@ -63,16 +78,13 @@ class FlashInferBackend:
         return self._workspace_buffer
 
     def _get_decode_wrapper(
-        self, device: torch.device
+        self, device: torch.device, use_tensor_cores: bool
     ) -> "BatchDecodeWithPagedKVCacheWrapper":
-        """Get or create decode wrapper."""
+        """Get or create decode wrapper (the head layout is fixed per model)."""
         workspace = self._ensure_workspace(device)
         if self._decode_wrapper is None:
-            # The CUDA-core decode kernels only handle GQA group sizes 1, 2, 3,
-            # 4, 6, 8 and 16; the tensor-core path handles any, and vLLM uses it
-            # unconditionally as no slower on current GPUs.
             self._decode_wrapper = BatchDecodeWithPagedKVCacheWrapper(
-                workspace, kv_layout="NHD", use_tensor_cores=True
+                workspace, kv_layout="NHD", use_tensor_cores=use_tensor_cores
             )
         return self._decode_wrapper
 
@@ -163,7 +175,9 @@ class FlashInferBackend:
         sm_scale: float,
     ) -> Tensor:
         """Decode attention for single token per sequence."""
-        wrapper = self._get_decode_wrapper(q.device)
+        wrapper = self._get_decode_wrapper(
+            q.device, decode_uses_tensor_cores(num_heads, num_kv_heads)
+        )
 
         # Plan the attention computation
         wrapper.plan(

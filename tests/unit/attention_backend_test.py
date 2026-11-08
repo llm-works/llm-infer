@@ -11,6 +11,9 @@ from llm_infer.engines.native.attention import (
     NaiveAttentionBackend,
     get_attention_backend,
 )
+from llm_infer.engines.native.attention.backends.flashinfer import (
+    decode_uses_tensor_cores,
+)
 
 
 class TestGetAttentionBackend:
@@ -61,3 +64,15 @@ class TestFlashInferAvailability:
     def test_flashinfer_available_is_bool(self) -> None:
         """Test FLASHINFER_AVAILABLE is boolean."""
         assert isinstance(FLASHINFER_AVAILABLE, bool)
+
+
+class TestFlashInferDecodeKernelChoice:
+    """Tensor-core decode only where the CUDA-core decode cannot run."""
+
+    @pytest.mark.parametrize("group_size", [1, 2, 3, 4, 6, 8, 16])
+    def test_cuda_core_for_supported_group_sizes(self, group_size: int) -> None:
+        assert not decode_uses_tensor_cores(group_size * 2, 2)
+
+    @pytest.mark.parametrize("group_size", [5, 7, 12])
+    def test_tensor_cores_for_other_group_sizes(self, group_size: int) -> None:
+        assert decode_uses_tensor_cores(group_size * 2, 2)
