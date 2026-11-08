@@ -68,8 +68,11 @@ class FlashInferBackend:
         """Get or create decode wrapper."""
         workspace = self._ensure_workspace(device)
         if self._decode_wrapper is None:
+            # The CUDA-core decode kernels only handle GQA group sizes 1, 2, 3,
+            # 4, 6, 8 and 16; the tensor-core path handles any, and vLLM uses it
+            # unconditionally as no slower on current GPUs.
             self._decode_wrapper = BatchDecodeWithPagedKVCacheWrapper(
-                workspace, kv_layout="NHD"
+                workspace, kv_layout="NHD", use_tensor_cores=True
             )
         return self._decode_wrapper
 
