@@ -5,6 +5,7 @@
 
 import pytest
 
+from llm_infer.engines.native import attention
 from llm_infer.engines.native.attention import (
     FLASHINFER_AVAILABLE,
     NaiveAttentionBackend,
@@ -31,10 +32,11 @@ class TestGetAttentionBackend:
         with pytest.raises(ValueError, match="Unknown attention backend"):
             get_attention_backend("invalid_backend")
 
-    def test_flashinfer_unavailable_raises(self) -> None:
+    def test_flashinfer_unavailable_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that requesting flashinfer when unavailable raises RuntimeError."""
-        if FLASHINFER_AVAILABLE:
-            pytest.skip("FlashInfer is available")
+        monkeypatch.setattr(attention, "FLASHINFER_AVAILABLE", False)
         with pytest.raises(RuntimeError, match="FlashInfer backend requested"):
             get_attention_backend("flashinfer")
 
