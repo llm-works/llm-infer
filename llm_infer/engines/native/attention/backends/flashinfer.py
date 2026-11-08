@@ -29,19 +29,18 @@ except ImportError:
 # Workspace buffer size (128MB as recommended by FlashInfer docs)
 _WORKSPACE_SIZE = 128 * 1024 * 1024
 
-# GQA group sizes FlashInfer's CUDA-core decode kernels dispatch in every
-# supported release (DISPATCH_GQA_GROUP_SIZE in include/flashinfer/utils.cuh;
-# 0.7 adds 16, 0.6 lacks it).
-_CUDA_CORE_DECODE_GROUP_SIZES = frozenset({1, 2, 3, 4, 6, 8})
+# GQA group sizes FlashInfer's CUDA-core decode kernels dispatch
+# (DISPATCH_GQA_GROUP_SIZE in include/flashinfer/utils.cuh) as of 0.7.2, the
+# floor of the cuda extra.
+_CUDA_CORE_DECODE_GROUP_SIZES = frozenset({1, 2, 3, 4, 6, 8, 16})
 
 
 def decode_uses_tensor_cores(num_heads: int, num_kv_heads: int) -> bool:
     """Whether decode needs FlashInfer's tensor-core path for this head layout.
 
-    The CUDA-core decode accumulates in fp32 but fails on other group sizes
-    ("Unsupported group_size"). The tensor-core path handles any group size,
-    but before FlashInfer 0.7 it can return inaccurate bf16 results, so it is
-    used only where the CUDA-core path cannot run.
+    The CUDA-core decode fails on group sizes it does not dispatch
+    ("Unsupported group_size"); the tensor-core path handles any, and is used
+    only for those.
     """
     return num_heads // num_kv_heads not in _CUDA_CORE_DECODE_GROUP_SIZES
 

@@ -26,15 +26,11 @@ from ..formats.base import QuantFormat
 # Check for vLLM Marlin ops availability at import time
 _VLLM_MARLIN_AVAILABLE = False
 _VLLM_MARLIN_ERROR: str | None = None
-# vLLM 0.30 names the GEMM op gptq_marlin_gemm; by 0.33 it is marlin_gemm,
-# without the act-order arguments (g_idx, perm, is_k_full) AWQ never uses.
-_HAS_MARLIN_GEMM = False
 
 try:
     from vllm import _custom_ops as ops
     from vllm.model_executor.layers.quantization.utils.marlin_utils import (
         awq_to_marlin_zero_points,
-        marlin_make_empty,
         marlin_make_workspace_new,
         marlin_permute_bias,
         marlin_permute_scales,
@@ -43,10 +39,7 @@ try:
 
     # Verify the specific ops we need are available
     assert hasattr(ops, "awq_marlin_repack"), "awq_marlin_repack not found"
-    _HAS_MARLIN_GEMM = hasattr(ops, "marlin_gemm")
-    assert _HAS_MARLIN_GEMM or hasattr(ops, "gptq_marlin_gemm"), (
-        "neither marlin_gemm nor gptq_marlin_gemm found"
-    )
+    assert hasattr(ops, "marlin_gemm"), "marlin_gemm not found"
     _VLLM_MARLIN_AVAILABLE = True
 except (ImportError, AttributeError, AssertionError) as e:
     _VLLM_MARLIN_ERROR = str(e)
@@ -66,8 +59,6 @@ class _MarlinWeights:
     qzeros: Tensor  # Converted zero points
     bias: Tensor | None  # Permuted bias (or None)
     workspace: Tensor  # Kernel workspace buffer
-    g_idx: Tensor  # Group index (empty for AWQ)
-    g_idx_sort: Tensor  # Sort indices (empty for AWQ)
     in_features: int
     out_features: int
 
@@ -150,7 +141,6 @@ class MarlinAWQBackend:
 
         device = qweight.device
         workspace = marlin_make_workspace_new(device)
-        g_idx = marlin_make_empty(device)
 
         return _MarlinWeights(
             qweight=marlin_qweight,
@@ -158,8 +148,6 @@ class MarlinAWQBackend:
             qzeros=marlin_zp,
             bias=marlin_bias,
             workspace=workspace,
-            g_idx=g_idx,
-            g_idx_sort=g_idx,
             in_features=in_features,
             out_features=out_features,
         )
@@ -199,8 +187,6 @@ class MarlinAWQBackend:
 
     def _call_marlin_gemm(self, x: Tensor, mw: Any) -> Tensor:
         """Call Marlin GEMM kernel with prepared weights."""
-        if not _HAS_MARLIN_GEMM:
-            return self._call_gptq_marlin_gemm(x, mw)
         result: Tensor = ops.marlin_gemm(
             x,
             None,
@@ -215,31 +201,6 @@ class MarlinAWQBackend:
             size_m=x.shape[0],
             size_n=mw.out_features,
             size_k=mw.in_features,
-            use_atomic_add=False,
-            use_fp32_reduce=False,
-            is_zp_float=False,
-        )
-        return result
-
-    def _call_gptq_marlin_gemm(self, x: Tensor, mw: Any) -> Tensor:
-        """Call the GEMM op under its name before vLLM renamed it (vLLM 0.30)."""
-        result: Tensor = ops.gptq_marlin_gemm(  # type: ignore[attr-defined]
-            x,
-            None,
-            mw.qweight,
-            mw.bias,
-            mw.scales,
-            None,
-            None,
-            mw.qzeros,
-            mw.g_idx,
-            mw.g_idx_sort,
-            mw.workspace,
-            scalar_types.uint4,
-            size_m=x.shape[0],
-            size_n=mw.out_features,
-            size_k=mw.in_features,
-            is_k_full=True,
             use_atomic_add=False,
             use_fp32_reduce=False,
             is_zp_float=False,
