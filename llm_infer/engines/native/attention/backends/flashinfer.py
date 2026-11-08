@@ -29,9 +29,10 @@ except ImportError:
 # Workspace buffer size (128MB as recommended by FlashInfer docs)
 _WORKSPACE_SIZE = 128 * 1024 * 1024
 
-# GQA group sizes FlashInfer's CUDA-core decode kernels dispatch
-# (DISPATCH_GQA_GROUP_SIZE in include/flashinfer/utils.cuh).
-_CUDA_CORE_DECODE_GROUP_SIZES = frozenset({1, 2, 3, 4, 6, 8, 16})
+# GQA group sizes FlashInfer's CUDA-core decode kernels dispatch in every
+# supported release (DISPATCH_GQA_GROUP_SIZE in include/flashinfer/utils.cuh;
+# 0.7 adds 16, 0.6 lacks it).
+_CUDA_CORE_DECODE_GROUP_SIZES = frozenset({1, 2, 3, 4, 6, 8})
 
 
 def decode_uses_tensor_cores(num_heads: int, num_kv_heads: int) -> bool:
