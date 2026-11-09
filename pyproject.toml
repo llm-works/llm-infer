@@ -141,11 +141,13 @@ pythonpath = ["."]
 asyncio_default_fixture_loop_scope = "function"
 # Deprecated APIs called inside the ML stack at import, at versions vLLM pins:
 # torch/utils/mkldnn.py decorates with torch.jit.script_method (reached through
-# vLLM's marlin_utils -> deep_gemm -> torch.compile), and flashinfer's
-# cute_dsl/availability.py imports cutlass's deprecated Arch
+# vLLM's marlin_utils -> deep_gemm -> torch.compile), flashinfer's
+# cute_dsl/availability.py imports cutlass's deprecated Arch, and flashinfer's
+# kernel modules (fused_moe, gemm, gdn_kernels) use deprecated cutlass.utils APIs
 filterwarnings = [
     "ignore:`torch.jit.script_method` is deprecated:DeprecationWarning:torch.jit._script",
     "ignore:Arch from arch.py is deprecated:DeprecationWarning:flashinfer.cute_dsl.availability",
+    'ignore:cutlass\.utils\.\S+ is deprecated:DeprecationWarning:flashinfer\.',
 ]
 # Suite markers (unit, integration, e2e, security, performance) are registered by
 # the appinfra.pytest_suites plugin loaded in tests/conftest.py
