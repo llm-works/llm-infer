@@ -315,6 +315,7 @@ class TestVLLMServerScanAdapters:
         cfg.engines.vllm_server.lora.base_path = None
         assert f._scan_adapters(lg, cfg) == []
 
+    @pytest.mark.integration
     def test_scans_when_enabled(self, lg: Logger, tmp_path: Path) -> None:
         f = VLLMServerEngineFactory()
         cfg = _config(model_path=Path("/models/qwen"))
@@ -337,6 +338,7 @@ class TestPEFTScanAdapters:
         cfg.engines.peft.adapter_base_path = None
         assert f._scan_adapters(lg, cfg) == []
 
+    @pytest.mark.integration
     def test_scans_when_path_set(self, lg: Logger, tmp_path: Path) -> None:
         f = PEFTEngineFactory()
         cfg = _config(model_path=Path("/models/qwen"))

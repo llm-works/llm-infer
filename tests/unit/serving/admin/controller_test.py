@@ -19,7 +19,9 @@ from llm_infer.serving.admin.controller import (
     ReleaseNotSupportedError,
     StateConflictError,
 )
-from llm_infer.serving.admin.state import BackendState, SharedBackendState
+from llm_infer.serving.admin.state import BackendState
+
+from ._state import LocalBackendState
 
 T = TypeVar("T")
 
@@ -65,8 +67,8 @@ def _controller(
     handler: Any,
     state: BackendState = BackendState.SERVING,
     refresh_adapters: Callable[[], None] | None = None,
-) -> tuple[BackendController, SharedBackendState]:
-    shared = SharedBackendState()
+) -> tuple[BackendController, LocalBackendState]:
+    shared = LocalBackendState()
     shared.set(state)
     lg = MagicMock(spec=Logger)
     if refresh_adapters is None:
@@ -77,14 +79,14 @@ def _controller(
         lg,
         engine,
         handler,
-        shared,
+        shared,  # type: ignore[arg-type]
         _ImmediateLoopTasks(),  # type: ignore[arg-type]
         refresh_adapters,
     )
     return controller, shared
 
 
-def _wait_state(shared: SharedBackendState, want: BackendState) -> None:
+def _wait_state(shared: LocalBackendState, want: BackendState) -> None:
     deadline = time.monotonic() + 5
     while shared.get() != want:
         assert time.monotonic() < deadline, f"state stayed {shared.get().label}"

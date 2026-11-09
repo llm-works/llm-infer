@@ -81,6 +81,7 @@ def test_shutdown_cancels_pending_and_does_not_wait() -> None:
     assert running.result(timeout=5) is True
 
 
+@pytest.mark.integration
 def test_blocked_worker_does_not_delay_interpreter_exit() -> None:
     """The reason this executor exists: ThreadPoolExecutor would block here."""
     script = (

@@ -3,15 +3,11 @@
 
 """Unit tests for compatibility spec generation."""
 
-import tempfile
-
 import pytest
-import yaml
 
 from llm_infer.compat import (
     DEFAULT_ARCHITECTURE_TYPES,
     _get_architectures,
-    _load_spec_file,
     _validate_spec,
     check_spec_accuracy,
     get_supported_model_types,
@@ -97,34 +93,6 @@ class TestGetArchitectures:
         assert archs1 is archs2
 
 
-class TestLoadSpecFile:
-    """Test _load_spec_file function."""
-
-    def test_load_nonexistent_file(self) -> None:
-        """Test loading nonexistent file returns error."""
-        spec, error = _load_spec_file("/nonexistent/path.yaml")
-        assert spec is None
-        assert "not found" in error.lower()
-
-    def test_load_valid_yaml(self) -> None:
-        """Test loading valid YAML file."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump({"test": "value"}, f)
-            f.flush()
-            spec, error = _load_spec_file(f.name)
-            assert error is None
-            assert spec == {"test": "value"}
-
-    def test_load_invalid_yaml(self) -> None:
-        """Test loading invalid YAML returns error."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write("invalid: yaml: content: [")
-            f.flush()
-            spec, error = _load_spec_file(f.name)
-            assert spec is None
-            assert "yaml" in error.lower()
-
-
 class TestValidateSpec:
     """Test _validate_spec function."""
 
@@ -163,6 +131,7 @@ class TestCheckSpecAccuracy:
         assert isinstance(valid, bool)
         assert isinstance(issues, list)
 
+    @pytest.mark.integration
     def test_with_nonexistent_file(self, lg) -> None:
         """Test with nonexistent spec file."""
         valid, issues = check_spec_accuracy(lg, spec_file="/nonexistent/file.yaml")

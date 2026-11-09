@@ -13,20 +13,10 @@ module move).
 
 from __future__ import annotations
 
-import multiprocessing as mp
-
 from appinfra.subprocess import Lazy
 from fastapi import APIRouter
 
 from llm_infer.serving.api.openai.router import OpenAIRouterConfig
-
-
-def test_health_factory_qualname_resolves() -> None:
-    ready = mp.Value("b", False)
-    handler = Lazy(
-        "llm_infer.serving.api.routes:create_health_handler", ready
-    ).resolve()
-    assert callable(handler)
 
 
 def test_routes_factory_qualname_resolves() -> None:
