@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Dependencies: the `cuda` extra requires `vllm>=0.33.0` (was `>=0.30.0`) and
   `flashinfer-python>=0.7.2` (was `>=0.2.0`).
+- Building from source requires setuptools>=77.0.3 (was >=68.0).
 
 ### Fixed
 
