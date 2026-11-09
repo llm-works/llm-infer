@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from ...engines.protocol import BackendRequestError
+from ...engines.protocol import EngineRequestError
 from ...schemas.openai import FinishReason
 
 if TYPE_CHECKING:
@@ -120,7 +120,7 @@ def failure_response(request_id: str, error: Exception) -> Response:
     answer with; any other error is reported as a server failure.
     """
     http_status = None
-    if isinstance(error, BackendRequestError) and 400 <= error.status_code < 500:
+    if isinstance(error, EngineRequestError) and 400 <= error.status_code < 500:
         http_status = error.status_code
     return Response(
         id=request_id,

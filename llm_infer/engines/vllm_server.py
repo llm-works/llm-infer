@@ -36,7 +36,7 @@ from appinfra.log import Logger
 from ..schemas.openai import FinishReason
 from .finish import parse_finish_reason
 from .inflight import InFlightConnections, RequestAbortedError
-from .protocol import BackendNotManagedError, BackendRequestError
+from .protocol import BackendNotManagedError, EngineRequestError
 from .remote import LineStream, RemoteEngine, add_extra_body, truncate_embedding
 from .vllm_common import resolve_gpu_memory_utilization
 
@@ -952,7 +952,7 @@ class VLLMServerEngine(RemoteEngine):
         except httpx.HTTPStatusError as e:
             detail = self._extract_error_detail(e.response)
             self._lg.error("generate request failed", extra={"detail": detail})
-            raise BackendRequestError(e.response.status_code, detail) from e
+            raise EngineRequestError(e.response.status_code, detail) from e
         except httpx.HTTPError as e:
             if request_id and self._connections.was_aborted(request_id):
                 raise RequestAbortedError(f"request {request_id} aborted") from e

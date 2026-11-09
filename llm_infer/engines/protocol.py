@@ -282,7 +282,7 @@ class BackendNotManagedError(RuntimeError):
     """The engine's backend runs outside serve, which can't stop or start it."""
 
 
-class BackendRequestError(RuntimeError):
+class EngineRequestError(RuntimeError):
     """The backend answered a request with an HTTP error status.
 
     Keeps the status so a request the backend rejected (4xx) is not reported
