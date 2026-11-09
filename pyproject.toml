@@ -73,6 +73,11 @@ all = [
 dev = [
     "appinfra[dev]>=0.14.0",
 ]
+# CI: what CI's test jobs install (no cuda: it can't install on the runner);
+# `make deps` reports its ci column against this group
+ci = [
+    "llm-infer[dev,runtime,client]",
+]
 
 [tool.ruff]
 line-length = 88

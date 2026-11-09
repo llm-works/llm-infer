@@ -95,8 +95,8 @@ jobs:
           # Install llm-saia from GitHub (need core public API re-exports)
           python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
           # python -m pip install "llm-saia>=0.2.0,<0.3.0"  # switch back after next llm-saia release
-          # Install package with dev, runtime, saia, and gcp extras
-          python -m pip install -e ".[dev,runtime,saia,gcp]"
+          # Install package with the ci extra (dev, runtime and client)
+          python -m pip install -e ".[ci]"
 
       - name: Run unit tests
         run: python -m pytest tests/ -m unit -v --tb=short
@@ -286,8 +286,8 @@ jobs:
           # Install llm-saia from GitHub (need core public API re-exports)
           python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
           # python -m pip install "llm-saia>=0.2.0,<0.3.0"  # switch back after next llm-saia release
-          # Install package with dev, runtime, saia, and gcp extras
-          python -m pip install -e ".[dev,runtime,saia,gcp]"
+          # Install package with the ci extra (dev, runtime and client)
+          python -m pip install -e ".[ci]"
 
       - name: Run tests with coverage
         run: python -m pytest tests/ -m unit --cov=llm_infer --cov-report=xml --cov-report=term
