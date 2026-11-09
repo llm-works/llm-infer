@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from ...engines.protocol import EngineRequestError
 from ...schemas.openai import FinishReason
 
 if TYPE_CHECKING:
@@ -108,6 +109,25 @@ class Response:
     adapter: ResponseAdapterInfo | None = None
     # Engine-reported reason; None if the engine didn't report one
     finish_reason: FinishReason | None = None
+    # HTTP status to answer a failure with; None answers 500
+    http_status: int | None = None
+
+
+def failure_response(request_id: str, error: Exception) -> Response:
+    """A FAILED response for `error`.
+
+    A request the backend rejected (4xx) keeps that status for the API to
+    answer with; any other error is reported as a server failure.
+    """
+    http_status = None
+    if isinstance(error, EngineRequestError) and 400 <= error.status_code < 500:
+        http_status = error.status_code
+    return Response(
+        id=request_id,
+        status=RequestStatus.FAILED,
+        error=str(error),
+        http_status=http_status,
+    )
 
 
 @dataclass

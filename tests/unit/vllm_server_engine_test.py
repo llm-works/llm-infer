@@ -328,6 +328,54 @@ def _sent_payload(engine: Any, **kwargs: Any) -> dict[str, Any]:
     return payload
 
 
+def _engine_answering(status: int, body: dict[str, Any]) -> Any:
+    """Engine whose HTTP client gets `status` / `body` from vLLM (in-memory transport)."""
+    import httpx
+
+    engine = _engine_for_payload()
+    transport = httpx.MockTransport(lambda _request: httpx.Response(status, json=body))
+    engine._client = httpx.Client(transport=transport, base_url="http://vllm")
+    return engine
+
+
+class TestVLLMServerErrorStatus:
+    """vLLM's HTTP status reaches the caller instead of becoming a plain RuntimeError."""
+
+    def test_client_error_keeps_status_and_message(self) -> None:
+        from llm_infer.engines.protocol import EngineRequestError
+
+        message = "max_tokens=40000 cannot be greater than max_model_len=32768."
+        engine = _engine_answering(
+            400, {"object": "error", "message": message, "code": 400}
+        )
+        with pytest.raises(EngineRequestError) as exc_info:
+            engine._post_chat_completions({}, None)
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.message == message
+
+    def test_openai_error_format_message(self) -> None:
+        """vLLM's OpenAI-style body nests the message under "error"."""
+        from llm_infer.engines.protocol import EngineRequestError
+
+        message = "min_tokens must be less than or equal to max_tokens=16, got 64."
+        body = {"error": {"message": message, "type": "BadRequestError", "code": 400}}
+        engine = _engine_answering(400, body)
+        with pytest.raises(EngineRequestError) as exc_info:
+            engine._post_chat_completions({}, None)
+
+        assert exc_info.value.message == message
+
+    def test_server_error_keeps_status(self) -> None:
+        from llm_infer.engines.protocol import EngineRequestError
+
+        engine = _engine_answering(500, {"object": "error", "message": "boom"})
+        with pytest.raises(EngineRequestError) as exc_info:
+            engine._post_chat_completions({}, None)
+
+        assert exc_info.value.status_code == 500
+
+
 class TestVLLMServerPassthrough:
     def test_unset_sampling_not_sent(self) -> None:
         """Left out, vLLM applies the model's generation_config."""
