@@ -35,7 +35,7 @@ class _StubIPC:
         self.response = response
         self.submitted: list[Any] = []
 
-    async def submit(self, request: Any) -> Any:
+    async def submit(self, request: Any, timeout: float | None = None) -> Any:
         self.submitted.append(request)
         if isinstance(self.response, Exception):
             raise self.response

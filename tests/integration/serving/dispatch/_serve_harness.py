@@ -95,28 +95,28 @@ def _reachable(url: str, check: Any = _ok) -> bool:
         return False
 
 
+def _vllm_pid(model_dir: Path) -> int | None:
+    pid_file = model_dir / "vllm.pid"
+    return int(pid_file.read_text()) if pid_file.exists() else None
+
+
 @dataclass
 class Serve:
     proc: subprocess.Popen[bytes]
+    api_port: int  # The port serve's API bound (it starts on port 0)
     model_dir: Path
     auto_start: bool  # False: serve connects to a vLLM the test started
-
-    @property
-    def api_port(self) -> int:
-        """The port serve's API bound (it starts on port 0)."""
-        return int(self.marker("api.port").read_text())
 
     @property
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.api_port}"
 
     def marker(self, name: str) -> Path:
-        """Marker file written by the stand-in vLLM (see _serve_procs.py)."""
+        """Marker file written by serve or the stand-in vLLM (see _serve_procs.py)."""
         return self.model_dir / name
 
     def vllm_pid(self) -> int | None:
-        pid_file = self.model_dir / "vllm.pid"
-        return int(pid_file.read_text()) if pid_file.exists() else None
+        return _vllm_pid(self.model_dir)
 
 
 def _fake_vllm_binary(tmp_path: Path) -> Path:
@@ -154,26 +154,28 @@ def running_serve(tmp_path: Path, **options: Any) -> Iterator[Serve]:
         env=env,
         start_new_session=True,
     )
-    serve = Serve(proc, model_dir, auto_start)
     try:
-        _read_port(proc, serve.marker("api.port"), "serve to bind its API port")
+        api_port = _read_port(
+            proc, model_dir / "api.port", "serve to bind its API port"
+        )
+        serve = Serve(proc, api_port, model_dir, auto_start)
         health = f"{serve.base_url}/health"
         wait_running(
             proc, lambda: _reachable(health, _ready), 60.0, "serve to become ready"
         )
         yield serve
     finally:
-        _kill_leftovers(serve)
+        _kill_leftovers(proc, model_dir)
 
 
-def _kill_leftovers(serve: Serve) -> None:
+def _kill_leftovers(proc: subprocess.Popen[bytes], model_dir: Path) -> None:
     """Never leave processes behind, whatever the test outcome."""
-    for pgid_source in (serve.proc.pid, serve.vllm_pid()):
+    for pgid_source in (proc.pid, _vllm_pid(model_dir)):
         if pgid_source is None:
             continue
         with suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid_source, signal.SIGKILL)
-    serve.proc.wait(timeout=5)
+    proc.wait(timeout=5)
 
 
 def chat_body(content: str, stream: bool) -> dict[str, Any]:
