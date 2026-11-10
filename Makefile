@@ -29,6 +29,9 @@ APPINFRA_PYTEST_COVERAGE_THRESHOLD ?= 70
 # Report tests outside their suite and unit tests that leak process-wide state
 APPINFRA_DEV_TEST_HEALTH ?= warn
 
+# Suites collected only from tests/<suite>/, skipped without starting pytest when empty
+APPINFRA_PYTEST_BOUND_SUITES ?= e2e security performance
+
 # `make deps` ci column: the groups CI installs (pyproject's ci extra)
 APPINFRA_DEV_DEPS_ARGS ?= --ci-extras ci
 
