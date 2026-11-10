@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for serving/api/routes.py."""
+"""serving/api/routes.py endpoints through TestClient (requests run on its portal
+thread)."""
 
 from __future__ import annotations
 
@@ -14,11 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from llm_infer.serving.api.routes import (
-    create_health_handler,
-    create_routes,
-    health_handler,
-)
+from llm_infer.serving.api.routes import create_routes
 from llm_infer.serving.dispatch.types import (
     MetricsResponse,
     RequestStatus,
@@ -52,42 +49,6 @@ def _make_app(ipc: _StubIPC) -> FastAPI:
     app.add_middleware(_LgInjector)
     app.include_router(create_routes("test-model"))
     return app
-
-
-# ---------------------------------------------------------------------------
-# health_handler / create_health_handler
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_legacy_health_handler() -> None:
-    resp = await health_handler()
-    assert resp.status == "ok"
-
-
-@pytest.mark.asyncio
-async def test_create_health_handler_no_ready_flag() -> None:
-    h = create_health_handler(None)
-    resp = await h()
-    assert resp.status == "ok"
-
-
-@pytest.mark.asyncio
-async def test_create_health_handler_initializing() -> None:
-    flag = MagicMock()
-    flag.value = False
-    h = create_health_handler(flag)
-    resp = await h()
-    assert resp.status == "initializing"
-
-
-@pytest.mark.asyncio
-async def test_create_health_handler_ready() -> None:
-    flag = MagicMock()
-    flag.value = True
-    h = create_health_handler(flag)
-    resp = await h()
-    assert resp.status == "ok"
 
 
 # ---------------------------------------------------------------------------

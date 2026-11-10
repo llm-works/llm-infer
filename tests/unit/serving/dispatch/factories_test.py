@@ -397,6 +397,7 @@ class TestHandlerCreate:
         handler = f.create(lg, engine, cfg)
         assert isinstance(handler, BoundedQueueHandler)
 
+    @pytest.mark.integration
     def test_concurrent_http_handler_create(self, lg: Logger) -> None:
         f = ConcurrentHttpHandlerFactory()
         engine = MagicMock()

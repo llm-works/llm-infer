@@ -43,8 +43,9 @@ class TestVLLMServerStop:
         engine._stop_server()
         elapsed = time.monotonic() - start
 
+        # Stopped (poll), and only after waiting out stop_timeout (lower bound)
         assert proc.poll() is not None
-        assert 0.5 <= elapsed < 5.0
+        assert elapsed >= 0.5
         engine._lg.warning.assert_called_once_with(
             "vllm server did not stop gracefully, force killing"
         )

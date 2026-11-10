@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for BackendGateMiddleware."""
+"""BackendGateMiddleware through TestClient (requests run on its portal thread)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ from fastapi.testclient import TestClient
 
 from llm_infer.serving.admin.gate import BackendGateMiddleware
 from llm_infer.serving.admin.state import BackendState
-
-from ._state import LocalBackendState
+from tests.unit.serving.admin._state import LocalBackendState
 
 
 def _client(state: LocalBackendState) -> TestClient:

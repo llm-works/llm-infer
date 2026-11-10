@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for DaemonThreadExecutor."""
+"""DaemonThreadExecutor with its worker threads running."""
 
 from __future__ import annotations
 
 import subprocess
 import sys
 import threading
-import time
 
 import pytest
 
@@ -43,11 +42,6 @@ def test_workers_are_daemon_threads() -> None:
         executor.shutdown()
 
 
-def test_rejects_non_positive_max_workers() -> None:
-    with pytest.raises(ValueError, match="max_workers must be positive"):
-        DaemonThreadExecutor(0, "t")
-
-
 def test_submit_after_shutdown_raises() -> None:
     executor = DaemonThreadExecutor(1, "t")
     executor.shutdown()
@@ -68,12 +62,10 @@ def test_shutdown_cancels_pending_and_does_not_wait() -> None:
     pending = executor.submit(lambda: "never")
     assert started.wait(5)
 
-    start = time.monotonic()
     executor.shutdown(cancel_futures=True)
-    elapsed = time.monotonic() - start
 
+    # shutdown returned while the worker is still blocked: it did not wait
     try:
-        assert elapsed < 1.0
         assert pending.cancelled()
         assert not running.done()
     finally:
@@ -81,7 +73,6 @@ def test_shutdown_cancels_pending_and_does_not_wait() -> None:
     assert running.result(timeout=5) is True
 
 
-@pytest.mark.integration
 def test_blocked_worker_does_not_delay_interpreter_exit() -> None:
     """The reason this executor exists: ThreadPoolExecutor would block here."""
     script = (
@@ -92,8 +83,7 @@ def test_blocked_worker_does_not_delay_interpreter_exit() -> None:
         "ex.submit(threading.Event().wait)\n"
         "ex.shutdown(cancel_futures=True)\n"
     )
-    start = time.monotonic()
-    proc = subprocess.run([sys.executable, "-c", script], timeout=30, check=False)
+    # A worker blocking exit would hang the interpreter: the timeout fails the test
+    proc = subprocess.run([sys.executable, "-c", script], timeout=15, check=False)
 
     assert proc.returncode == 0
-    assert time.monotonic() - start < 15.0
