@@ -9,14 +9,19 @@ Run as a script, never imported by pytest collection:
         Stand-in for `vllm serve`. Answers /v1/models. A chat completion whose
         prompt contains "quick" is answered at once; any other one is held open
         (a long generation) until the client closes the connection.
-        Writes its pid to <model_path>/vllm.pid, touches
+        Writes its pid to <model_path>/vllm.pid and the port it bound (the OS
+        picks one for --port 0) to <model_path>/vllm.port, touches
         <model_path>/request.received when a held request arrives and
         <model_path>/request.closed when its client closes it.
 
-    _serve_procs.py serve <model_path> <api_port> <vllm_port> <vllm_binary> <options>
+    _serve_procs.py serve <model_path> <vllm_port> <vllm_binary> <options>
         Runs llm-infer serve with the vllm-server engine against the stand-in.
+        The API binds port 0; serve writes the port the OS picked to
+        <model_path>/api.port once its API server is up.
         <options> is JSON: auto_start (bool; false: connect to a running one),
         response_timeout (s), max_concurrent, admin (the admin config section).
+
+Port files are written whole (rename), so a reader never sees a partial one.
 """
 
 from __future__ import annotations
@@ -50,6 +55,12 @@ def _completion(model_name: str) -> bytes:
     ).encode()
 
 
+def _publish(path: Path, value: int) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(str(value))
+    os.replace(tmp, path)
+
+
 def run_fake_vllm(args: list[str]) -> None:
     model_dir = Path(args[1])
     port = int(_arg_after(args, "--port"))
@@ -57,7 +68,9 @@ def run_fake_vllm(args: list[str]) -> None:
     (model_dir / "vllm.pid").write_text(str(os.getpid()))
     handler = _handler_class(model_dir, model_name)
     ThreadingHTTPServer.daemon_threads = True
-    ThreadingHTTPServer(("127.0.0.1", port), handler).serve_forever()
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    _publish(model_dir / "vllm.port", server.server_address[1])
+    server.serve_forever()
 
 
 def _handler_class(model_dir: Path, model_name: str) -> type[BaseHTTPRequestHandler]:
@@ -90,13 +103,17 @@ def _handler_class(model_dir: Path, model_name: str) -> type[BaseHTTPRequestHand
     return Handler
 
 
-def run_serve(
-    model_dir: str, api_port: str, vllm_port: str, binary: str, options: str
-) -> None:
+def run_serve(model_dir: str, vllm_port: str, binary: str, options: str) -> None:
     from appinfra.log import Logger
 
-    from llm_infer.serving.dispatch import InferenceConfig, run_server
+    from llm_infer.serving.dispatch import InferenceConfig
     from llm_infer.serving.dispatch.config import AdminConfig
+    from llm_infer.serving.dispatch.main import BootSequence
+
+    class Boot(BootSequence):
+        def start_server(self) -> None:
+            super().start_server()
+            _publish(Path(model_dir) / "api.port", self.api_port)
 
     opts = json.loads(options)
     config = InferenceConfig()
@@ -104,7 +121,7 @@ def run_serve(
     config.backends.engine = "vllm-server"
     config.models.path = model_dir
     config.api.host = "127.0.0.1"
-    config.api.port = int(api_port)
+    config.api.port = 0
     config.api.response_timeout = opts.get("response_timeout", 300.0)
     server_cfg = config.engines.vllm_server
     server_cfg.host = "http://127.0.0.1"
@@ -114,13 +131,13 @@ def run_serve(
     server_cfg.max_concurrent = opts.get("max_concurrent", 4)
     server_cfg.warmup = False
     server_cfg.startup_timeout = 30
-    run_server(Logger("serve-test"), config)
+    Boot(config, Logger("serve-test")).run()
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "vllm":
         run_fake_vllm(sys.argv[2:])
     elif sys.argv[1] == "serve":
-        run_serve(*sys.argv[2:7])
+        run_serve(*sys.argv[2:6])
     else:
         raise SystemExit(f"unknown role: {sys.argv[1]}")

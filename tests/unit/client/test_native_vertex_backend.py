@@ -300,6 +300,7 @@ class TestRetryOnTransient:
 
 
 class TestRateLimiter:
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_slot_acquired_before_each_request_including_retry(self) -> None:
         rl = Mock()

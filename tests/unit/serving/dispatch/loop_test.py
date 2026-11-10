@@ -177,6 +177,7 @@ class TestRunEngineLoop:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_run_engine_loop_async_starts_thread() -> None:
     lg = MagicMock(spec=Logger)
     handler = _make_handler()
@@ -201,6 +202,7 @@ def test_run_engine_loop_async_starts_thread() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_loop_runs_tasks_on_its_thread() -> None:
     lg = MagicMock(spec=Logger)
     shutdown = threading.Event()
@@ -216,6 +218,7 @@ def test_loop_runs_tasks_on_its_thread() -> None:
         thread.join(timeout=2)
 
 
+@pytest.mark.integration
 def test_loop_task_error_reaches_caller() -> None:
     tasks = LoopTasks()
     result: dict[str, Any] = {}
