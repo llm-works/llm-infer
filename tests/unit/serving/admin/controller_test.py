@@ -17,8 +17,7 @@ from llm_infer.serving.admin.controller import (
     StateConflictError,
 )
 from llm_infer.serving.admin.state import BackendState
-
-from ._controller import Engine, make_controller, make_handler
+from tests.support.serving.admin import Engine, make_controller, make_handler
 
 
 def test_release_suspends_handler_then_stops_backend() -> None:

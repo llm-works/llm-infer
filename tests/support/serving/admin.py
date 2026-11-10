@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""BackendController with stand-in engine, handler, state and loop tasks."""
+"""BackendController and the gate middleware with in-process stand-ins."""
 
 from __future__ import annotations
 
@@ -15,9 +15,25 @@ from appinfra.log import Logger
 from llm_infer.serving.admin.controller import BackendController
 from llm_infer.serving.admin.state import BackendState
 
-from ._state import LocalBackendState
-
 T = TypeVar("T")
+
+
+class LocalBackendState:
+    """SharedBackendState's get/set without shared memory.
+
+    SharedBackendState keeps the value in a multiprocessing.Value, which creates
+    a file under /dev/shm. The controller and the gate middleware only call
+    get() and set(), so their tests hand them this instead.
+    """
+
+    def __init__(self) -> None:
+        self._value = BackendState.INITIALIZING
+
+    def get(self) -> BackendState:
+        return self._value
+
+    def set(self, state: BackendState) -> None:
+        self._value = state
 
 
 class ImmediateLoopTasks:

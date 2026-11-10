@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from llm_infer.serving.admin.gate import BackendGateMiddleware
 from llm_infer.serving.admin.state import BackendState
-from tests.unit.serving.admin._state import LocalBackendState
+from tests.support.serving.admin import LocalBackendState
 
 
 def _client(state: LocalBackendState) -> TestClient:

@@ -8,12 +8,12 @@ from __future__ import annotations
 import time
 
 from llm_infer.serving.admin.state import BackendState
-from tests.unit.serving.admin._controller import (
+from tests.support.serving.admin import (
     Engine,
+    LocalBackendState,
     make_controller,
     make_handler,
 )
-from tests.unit.serving.admin._state import LocalBackendState
 
 
 def _wait_state(shared: LocalBackendState, want: BackendState) -> None:
