@@ -597,6 +597,103 @@ class TestCheckedExtraArgs:
         assert _checked_extra_args(None) == []  # type: ignore[arg-type]
 
 
+def _serve_env(monkeypatch: pytest.MonkeyPatch, config: Any) -> dict[str, str]:
+    """The environment _start_server() gives `vllm serve` (Popen is mocked)."""
+    from llm_infer.engines import vllm_server
+
+    popen = MagicMock()
+    monkeypatch.setattr(vllm_server.subprocess, "Popen", popen)
+    engine = object.__new__(vllm_server.VLLMServerEngine)
+    engine._lg = MagicMock()
+    engine._config = config
+    engine._model_name = "test"
+    engine._adapter_paths = {}
+    engine._wait_for_server = MagicMock()
+    engine._start_server()
+    return dict(popen.call_args.kwargs["env"])
+
+
+class TestVLLMServerLoggingEnv:
+    """vLLM's logging follows engines.vllm_server.logging, not serve's own setup."""
+
+    def test_serve_process_setting_does_not_reach_vllm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """serve sets VLLM_CONFIGURE_LOGGING=0 for itself; `vllm serve` still logs."""
+        from llm_infer.serving.dispatch.config import VLLMServerConfig
+
+        monkeypatch.setenv("VLLM_CONFIGURE_LOGGING", "0")
+        env = _serve_env(monkeypatch, VLLMServerConfig(model_path="/models/test"))
+
+        assert env["VLLM_CONFIGURE_LOGGING"] == "1"
+        assert "VLLM_LOGGING_CONFIG_PATH" not in env
+
+    def test_configure_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from llm_infer.serving.dispatch.config import (
+            VLLMServerConfig,
+            VLLMServerLoggingConfig,
+        )
+
+        config = VLLMServerConfig(
+            model_path="/models/test",
+            logging=VLLMServerLoggingConfig(configure=False),
+        )
+        assert _serve_env(monkeypatch, config)["VLLM_CONFIGURE_LOGGING"] == "0"
+
+    def test_config_file_reaches_vllm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from llm_infer.serving.dispatch.config import (
+            VLLMServerConfig,
+            VLLMServerLoggingConfig,
+        )
+
+        config = VLLMServerConfig(
+            model_path="/models/test",
+            logging=VLLMServerLoggingConfig(config_file="/etc/vllm-logging.json"),
+        )
+        env = _serve_env(monkeypatch, config)
+
+        assert env["VLLM_CONFIGURE_LOGGING"] == "1"
+        assert env["VLLM_LOGGING_CONFIG_PATH"] == "/etc/vllm-logging.json"
+
+    def test_inherited_config_path_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The config decides vLLM's logging, not serve's environment."""
+        from llm_infer.serving.dispatch.config import VLLMServerConfig
+
+        monkeypatch.setenv("VLLM_LOGGING_CONFIG_PATH", "/elsewhere.json")
+        env = _serve_env(monkeypatch, VLLMServerConfig(model_path="/models/test"))
+
+        assert "VLLM_LOGGING_CONFIG_PATH" not in env
+
+
+class TestVLLMServerLoggingConfig:
+    def test_parsed_from_section(self) -> None:
+        from llm_infer.serving.dispatch.config import VLLMServerConfig
+
+        config = VLLMServerConfig.from_dict(
+            {"logging": {"configure": True, "config_file": "/etc/vllm-logging.json"}}
+        )
+
+        assert config.logging.configure is True
+        assert config.logging.config_file == "/etc/vllm-logging.json"
+
+    def test_defaults_without_section(self) -> None:
+        from llm_infer.serving.dispatch.config import VLLMServerConfig
+
+        config = VLLMServerConfig.from_dict({})
+
+        assert config.logging.configure is True
+        assert config.logging.config_file is None
+
+    def test_config_file_requires_configure(self) -> None:
+        """vLLM refuses a config file with its logging setup off; fail at load."""
+        from llm_infer.serving.dispatch.config import VLLMServerLoggingConfig
+
+        with pytest.raises(ValueError, match="config_file requires configure"):
+            VLLMServerLoggingConfig(configure=False, config_file="/x.json")
+
+
 class TestVLLMServerRelease:
     """release() / reacquire(): stop and start the backend while serve runs."""
 

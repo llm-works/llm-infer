@@ -316,6 +316,36 @@ class VLLMConfig:
 
 
 @dataclass
+class VLLMServerLoggingConfig:
+    """Logging of the `vllm serve` process serve starts.
+
+    serve disables vLLM's logging setup in its own process (vLLM's dictConfig
+    would close serve's file handlers); the `vllm serve` process gets these
+    settings instead.
+    """
+
+    # VLLM_CONFIGURE_LOGGING: false leaves vLLM's loggers without handlers
+    configure: bool = True
+    # VLLM_LOGGING_CONFIG_PATH: vLLM's logging config (JSON, Python dictConfig),
+    # used in place of vLLM's default (a stdout handler). None keeps the default.
+    config_file: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.config_file is not None and not self.configure:
+            # vLLM refuses to start with this combination
+            raise ValueError("vllm_server.logging: config_file requires configure")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "VLLMServerLoggingConfig":
+        data = data or {}
+        config_file = data.get("config_file")
+        return cls(
+            configure=data.get("configure", True),
+            config_file=None if config_file is None else str(config_file),
+        )
+
+
+@dataclass
 class VLLMServerConfig:
     """vLLM server engine configuration.
 
@@ -375,6 +405,9 @@ class VLLMServerConfig:
     # e.g., ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}']
     extra_args: list[str] = field(default_factory=list)
 
+    # Logging of the `vllm serve` process
+    logging: VLLMServerLoggingConfig = field(default_factory=VLLMServerLoggingConfig)
+
     # Warmup
     warmup: bool = True
 
@@ -407,6 +440,8 @@ class VLLMServerConfig:
                     max_lora_rank=lora_data.get("max_lora_rank", 128),
                     base_path=lora_data.get("base_path"),
                 )
+            elif f.name == "logging" and "logging" in data:
+                kwargs["logging"] = VLLMServerLoggingConfig.from_dict(data["logging"])
             elif f.name != "model_path" and f.name in data:
                 kwargs[f.name] = data[f.name]
         return cls(**kwargs)

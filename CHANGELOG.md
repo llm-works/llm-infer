@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Requests that set none of them are sent as before.
 - vLLM server: reasoning returned in vLLM's `reasoning` field is kept (only `reasoning_content`
   was read, so the `thinking` field stayed empty).
+- vLLM server: the `vllm serve` process llm-infer starts logs again (its logger output was
+  dropped). New `engines.vllm_server.logging` setting: `configure`, and `config_file` for a
+  vLLM logging config file.
 
 ## [0.8.1] - 2026-11-01
 

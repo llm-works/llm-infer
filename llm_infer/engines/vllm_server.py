@@ -43,7 +43,21 @@ from .vllm_common import resolve_gpu_memory_utilization
 if TYPE_CHECKING:
     from ..context import RequestContext
     from ..serving.adapters import LoadedAdapter
-    from ..serving.dispatch.config import VLLMServerConfig
+    from ..serving.dispatch.config import VLLMServerConfig, VLLMServerLoggingConfig
+
+
+def _serve_env(logging_cfg: VLLMServerLoggingConfig) -> dict[str, str]:
+    """Environment for `vllm serve`: serve's own, with logging as configured.
+
+    serve sets VLLM_CONFIGURE_LOGGING=0 for its own process; inherited, it
+    leaves vLLM's loggers without handlers and their output is lost.
+    """
+    env = os.environ.copy()
+    env["VLLM_CONFIGURE_LOGGING"] = "1" if logging_cfg.configure else "0"
+    env.pop("VLLM_LOGGING_CONFIG_PATH", None)
+    if logging_cfg.config_file is not None:
+        env["VLLM_LOGGING_CONFIG_PATH"] = logging_cfg.config_file
+    return env
 
 
 # `vllm serve` flags llm-infer sets itself and relies on to reach the server
@@ -612,7 +626,7 @@ class VLLMServerEngine(RemoteEngine):
 
         self._process = subprocess.Popen(
             cmd,
-            env=os.environ.copy(),
+            env=_serve_env(self._config.logging),
             stdout=sys.stderr,
             stderr=sys.stderr,
             start_new_session=True,

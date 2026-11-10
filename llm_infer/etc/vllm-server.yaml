@@ -50,6 +50,13 @@ chat_template_kwargs: {}
 # e.g., [--speculative-config, '{"method": "mtp", "num_speculative_tokens": 3}']
 extra_args: []
 
+# Logging of the `vllm serve` process llm-infer starts
+logging:
+  configure: true             # false: vLLM sets up no logging, its log output is dropped
+  # vLLM logging config file (JSON, Python logging dictConfig), replacing vLLM's
+  # default stdout handler, e.g. to add a log file: !path /etc/llm-infer/vllm-logging.json
+  config_file: null
+
 # Warmup: Run initial query on startup to ensure model is loaded
 warmup: true
 

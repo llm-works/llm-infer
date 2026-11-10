@@ -152,7 +152,18 @@ max_concurrent: 4         # Concurrent HTTP requests to vLLM server
 lora:
   enabled: true
   base_path: /path/to/adapters
+
+logging:
+  configure: true         # vLLM sets up its logging (VLLM_CONFIGURE_LOGGING)
+  config_file: null       # vLLM logging config file (VLLM_LOGGING_CONFIG_PATH)
 ```
+
+By default `vllm serve` logs to its stdout, which llm-infer passes on to its own stderr.
+`logging.config_file` points at a JSON file in Python's `logging.config.dictConfig` format
+that replaces vLLM's default setup, e.g. to write vLLM's log to a file of its own (set it
+with `!path`). It requires `configure: true`. The file covers vLLM's Python logging only:
+output printed outside it (C-level CUDA/NCCL messages, a crash before logging starts) still
+goes to stdout.
 
 ### PEFT (`etc/peft.yaml`)
 
