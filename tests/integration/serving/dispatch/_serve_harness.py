@@ -27,6 +27,11 @@ MODEL_NAME = "fake-model"
 
 
 def free_port() -> int:
+    """A port free now, for a process that must be told its port up front.
+
+    Racy: the port is released before that process binds it, and anything can
+    take it in between. Servers that can bind port 0 and report it do that.
+    """
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
@@ -57,6 +62,24 @@ def wait_for(predicate: Any, timeout: float, what: str) -> None:
         time.sleep(0.1)
 
 
+def wait_running(
+    proc: subprocess.Popen[bytes], predicate: Any, timeout: float, what: str
+) -> None:
+    """wait_for, failing at once if proc exits first."""
+
+    def check() -> bool:
+        if proc.poll() is not None:
+            raise AssertionError(f"exited with {proc.returncode} waiting for {what}")
+        return bool(predicate())
+
+    wait_for(check, timeout, what)
+
+
+def _read_port(proc: subprocess.Popen[bytes], path: Path, what: str) -> int:
+    wait_running(proc, path.exists, 60.0, what)
+    return int(path.read_text())
+
+
 def _ok(response: httpx.Response) -> bool:
     return response.status_code == 200
 
@@ -75,9 +98,13 @@ def _reachable(url: str, check: Any = _ok) -> bool:
 @dataclass
 class Serve:
     proc: subprocess.Popen[bytes]
-    api_port: int
     model_dir: Path
     auto_start: bool  # False: serve connects to a vLLM the test started
+
+    @property
+    def api_port(self) -> int:
+        """The port serve's API bound (it starts on port 0)."""
+        return int(self.marker("api.port").read_text())
 
     @property
     def base_url(self) -> str:
@@ -99,14 +126,14 @@ def _fake_vllm_binary(tmp_path: Path) -> Path:
     return binary
 
 
-def _start_external_vllm(binary: Path, model_dir: Path, port: int) -> None:
-    subprocess.Popen(
-        [str(binary), "serve", str(model_dir), "--port", str(port)]
+def _start_external_vllm(binary: Path, model_dir: Path) -> int:
+    """Start the stand-in on port 0; returns the port it bound."""
+    proc = subprocess.Popen(
+        [str(binary), "serve", str(model_dir), "--port", "0"]
         + ["--served-model-name", model_dir.name],
         start_new_session=True,
     )
-    url = f"http://127.0.0.1:{port}/v1/models"
-    wait_for(lambda: _reachable(url), 30.0, "external vllm to listen")
+    return _read_port(proc, model_dir / "vllm.port", "external vllm to listen")
 
 
 @contextmanager
@@ -116,22 +143,24 @@ def running_serve(tmp_path: Path, **options: Any) -> Iterator[Serve]:
     model_dir = tmp_path / MODEL_NAME
     model_dir.mkdir()
     binary = _fake_vllm_binary(tmp_path)
-    api_port, vllm_port = free_port(), free_port()
-    if not auto_start:
-        _start_external_vllm(binary, model_dir, vllm_port)
+    # serve passes the port to the vLLM it starts, so it is picked up front
+    vllm_port = free_port() if auto_start else _start_external_vllm(binary, model_dir)
 
     # Run as a script, so the repo root must be on the path to import llm_infer
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     proc = subprocess.Popen(
-        [sys.executable, str(PROCS), "serve", str(model_dir), str(api_port)]
-        + [str(vllm_port), str(binary), json.dumps(options)],
+        [sys.executable, str(PROCS), "serve", str(model_dir), str(vllm_port)]
+        + [str(binary), json.dumps(options)],
         env=env,
         start_new_session=True,
     )
-    serve = Serve(proc, api_port, model_dir, auto_start)
+    serve = Serve(proc, model_dir, auto_start)
     try:
+        _read_port(proc, serve.marker("api.port"), "serve to bind its API port")
         health = f"{serve.base_url}/health"
-        wait_for(lambda: _reachable(health, _ready), 60.0, "serve to become ready")
+        wait_running(
+            proc, lambda: _reachable(health, _ready), 60.0, "serve to become ready"
+        )
         yield serve
     finally:
         _kill_leftovers(serve)
