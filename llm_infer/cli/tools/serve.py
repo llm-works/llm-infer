@@ -10,6 +10,7 @@ from typing import Any
 from appinfra.app.tools import Tool, ToolConfig
 
 from ...models import ModelResolver
+from ...serving.dispatch.config import ThirdPartyLoggingConfig
 from ...serving.dispatch.config_overrides import parse_override_args
 
 
@@ -96,10 +97,13 @@ class ServeTool(Tool):
         """Configure third-party logging before slow imports."""
         from ...logging_setup import configure_third_party_logging
 
-        log_cfg = raw_config.get("third_party_logging", {})
+        # The same parse InferenceConfig uses, before it is built (slow imports)
+        log_cfg = ThirdPartyLoggingConfig.from_dict(
+            raw_config.get("third_party_logging") or {}
+        )
         configure_third_party_logging(
-            torch_level=log_cfg.get("torch", "warning"),
-            transformers_level=log_cfg.get("transformers", "error"),
+            torch_level=log_cfg.torch,
+            transformers_level=log_cfg.transformers,
         )
 
     def _get_model_name_early(self, raw_config: dict) -> str | None:

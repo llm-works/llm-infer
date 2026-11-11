@@ -26,8 +26,7 @@ PACKAGED = REPO / "llm_infer" / "etc" / "llm-infer.yaml"
 _OTHER_READERS = (
     "logging",  # appinfra's logging section
     "admin",  # AdminConfig (pydantic, extra="forbid"): unknown keys fail parsing
-    "third_party_logging",  # cli/tools/serve.py, _configure_logging
-    "compat",  # cli/tools/compat.py
+    "compat.template",  # cli/tools/compat.py, the one key it reads
     "models.templates",  # holds YAML anchors only; never read as config
 )
 
@@ -119,7 +118,11 @@ def _unread_keys(path: Path) -> list[str]:
     read |= _model_vllm_keys(raw)
 
     def owned_elsewhere(key: str) -> bool:
-        return any(key == p or key.startswith(f"{p}.") for p in _OTHER_READERS)
+        # The key itself, a key below it, or the section holding it
+        return any(
+            key == p or key.startswith(f"{p}.") or p.startswith(f"{key}.")
+            for p in _OTHER_READERS
+        )
 
     unread = [k for k in _key_paths(raw) if k not in read and not owned_elsewhere(k)]
     # Report a section once, not each key below it
@@ -146,6 +149,7 @@ def test_example_values_reach_the_config() -> None:
     assert config.models.get("bge-small-en-v1.5").task == "embed"
     assert config.backends.engine == "vllm-server"
     assert config.engines.vllm_server.logging.mode == "stderr"
+    assert config.third_party_logging.transformers == "error"
 
 
 def test_default_model_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,10 +179,18 @@ def test_removed_and_misspelled_keys_are_reported(tmp_path: Path) -> None:
         "        enforce_eagre: true\n"
         "dispatch:\n"
         "  max_pendng: 10\n"
+        "third_party_logging:\n"
+        "  torch: warning\n"
+        "  transformer: error\n"
+        "compat:\n"
+        "  template: compat_template.yaml\n"
+        "  templat: compat_template.yaml\n"
     )
 
     assert _unread_keys(config) == [
         "models.selection",
         "models.models.qwen.vllm.enforce_eagre",
         "dispatch.max_pendng",
+        "third_party_logging.transformer",
+        "compat.templat",
     ]
