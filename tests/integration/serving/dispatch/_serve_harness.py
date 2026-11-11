@@ -37,11 +37,17 @@ def free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def port_bindable(port: int) -> bool:
+def port_listening(port: int) -> bool:
+    """Whether anything still listens on port.
+
+    Connects instead of binding: a bind also fails while the port is in
+    TIME_WAIT from a connection the server closed first, which depends on
+    timing; a connect is refused exactly when no listener is left.
+    """
     with socket.socket() as s:
         try:
-            s.bind(("127.0.0.1", port))
-        except OSError:
+            s.connect(("127.0.0.1", port))
+        except ConnectionRefusedError:
             return False
         return True
 

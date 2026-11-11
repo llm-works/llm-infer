@@ -522,6 +522,14 @@ class ThirdPartyLoggingConfig:
     torch: str = "warning"  # Suppresses inductor/dynamo noise
     transformers: str = "error"  # Suppresses "Special tokens" warning
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ThirdPartyLoggingConfig":
+        """Create from the third_party_logging section."""
+        return cls(
+            torch=data.get("torch", "warning"),
+            transformers=data.get("transformers", "error"),
+        )
+
 
 @dataclass
 class InferenceConfig:
@@ -533,14 +541,15 @@ class InferenceConfig:
     dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
     admin: AdminConfig = field(default_factory=AdminConfig)
-    logging: ThirdPartyLoggingConfig = field(default_factory=ThirdPartyLoggingConfig)
+    third_party_logging: ThirdPartyLoggingConfig = field(
+        default_factory=ThirdPartyLoggingConfig
+    )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "InferenceConfig":
         """Create config from dictionary."""
         backends = data.get("backends", {}) or {}
         dispatch = data.get("dispatch", {}) or {}
-        logging = data.get("logging", {}) or {}
 
         return cls(
             models=ModelsConfig.from_dict(data.get("models", {}) or {}),
@@ -553,9 +562,8 @@ class InferenceConfig:
             dispatch=cls._parse_dispatch_config(dispatch),
             api=cls._parse_api_config(data.get("api", {}) or {}),
             admin=AdminConfig.model_validate(data.get("admin") or {}),
-            logging=ThirdPartyLoggingConfig(
-                torch=logging.get("torch", "warning"),
-                transformers=logging.get("transformers", "error"),
+            third_party_logging=ThirdPartyLoggingConfig.from_dict(
+                data.get("third_party_logging") or {}
             ),
         )
 

@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped). New `engines.vllm_server.logging.mode` picks where its output goes: `stderr`
   (default), `stdout`, `vllm` (a vLLM logging config file), `drop`, or experimental `capture`
   (through llm-infer's logger).
+- Docs: the configuration and usage guides describe `models.default` instead of the removed
+  `selection` keys. New `docs/examples/llm-infer.yaml`: a complete configuration, tested to use
+  only keys llm-infer reads.
+- `serve`: `third_party_logging` levels (torch, transformers) from the config file and from
+  `-o third_party_logging.<lib>=<level>` take effect.
 
 ## [0.8.1] - 2026-11-01
 

@@ -7,7 +7,7 @@ A stand-in `vllm serve` (``_serve_procs.py``) accepts a chat completion and
 never answers, like a long generation. SIGTERM to serve must then:
 - answer the waiting client with 503 at once,
 - stop the vLLM process if serve started it (an external one keeps running),
-- exit, with nothing left bound to the API port,
+- exit, with nothing left listening on the API port,
 well inside a 15 s service stop timeout. With an external vLLM the upstream call
 is still blocked at exit; the handler's daemon workers must not hold up exit.
 
@@ -30,7 +30,7 @@ from ._serve_harness import (
     Serve,
     chat_body,
     pid_alive,
-    port_bindable,
+    port_listening,
     running_serve,
     wait_for,
 )
@@ -88,4 +88,4 @@ def test_sigterm_with_request_in_flight_stops_within_budget(
     assert "Server shutting down" in result["text"]
     # serve stops the vLLM it started; an external one is not serve's to stop
     assert pid_alive(vllm_pid) is not serve.auto_start
-    assert port_bindable(serve.api_port), "API port still bound after stop"
+    assert not port_listening(serve.api_port), "API port still listening after stop"

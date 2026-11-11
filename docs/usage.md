@@ -126,75 +126,45 @@ Configuration uses YAML files with the primary config at `etc/llm-infer.yaml`.
 
 Model selection follows this priority:
 1. CLI `--model-path` (absolute path)
-2. CLI `--model` (model name; resolved from `models.locations` for local-file engines, or passed through directly for Ollama)
-3. Selection file (`models.selection.generate.path` or `.embed.path`)
-4. Default (`models.selection.generate.default` or `.embed.default`)
+2. CLI `--model` (model name; resolved from `models.locations` for local-file engines, or passed
+   through directly for Ollama)
+3. `models.default` in the config; `INFRA_MODELS_DEFAULT=<name>` overrides it at runtime
+
+Embedding models are marked per model with `task: embed`; there is no separate embedding default.
 
 ### Main Configuration File
 
+The packaged `etc/llm-infer.yaml` pulls each section from its own file with `!include`.
+[`examples/llm-infer.yaml`](examples/llm-infer.yaml) is a complete configuration in one file,
+with every section. A test loads it and fails on any key llm-infer doesn't read, so it stays
+current. Use it with `llm-infer --etc-dir docs/examples serve`, or copy it as a starting point.
+An excerpt:
+
 ```yaml
-# etc/llm-infer.yaml
-
-# Backend selection (default: ollama)
 backends:
-  engine: ollama      # ollama | vllm | vllm-server | native
-  model: native       # native | gptqmodel (only if engine=native)
-  linear: marlin      # pytorch | marlin (only if model=native)
+  engine: ollama                # ollama | vllm | vllm-server | native | peft
 
-# Model locations and selection
 models:
   locations:
-    - /path/to/models/directory
-  selection:
-    generate:
-      # path: !path <path-to-selection.yaml>  # Optional: ops-controlled model catalog
-      default: qwen2.5-1.5b              # Fallback generation model
-    embed:
-      default: bge-small-en-v1.5         # Fallback embedding model
+    - !path /srv/models
+  default: qwen2.5-7b-instruct  # Served when --model / --model-path is omitted
+  models:
+    qwen2.5-7b-instruct:
+      ollama: qwen2.5:7b        # Name in Ollama's registry
+      vllm:                     # Applied to the vllm or vllm-server engine
+        gpu_memory_gb: 20.0
+    bge-small-en-v1.5:
+      task: embed
 
-# Engine-specific settings
-engines:
-  native:
-    num_blocks: 1024
-    block_size: 16
-    max_batch_size: 4
-    device: cuda
-    dtype: float16
-    attention_backend: flashinfer  # auto | flashinfer | naive
-    torch_compile: false
-    warmup: true
-
-  vllm:
-    gpu_memory_gb: null          # or e.g., 8.0 for 8GB absolute limit
-    gpu_memory_utilization: 0.9  # used if gpu_memory_gb is null
-    max_model_len: 16384
-    tensor_parallel_size: 1
-    max_num_seqs: 256
-    enable_prefix_caching: true
-    warmup: true
-
-  ollama:
-    host: http://localhost:11434  # Ollama server URL
-    timeout: 300                   # Request timeout in seconds
-    models_path: /path/to/models   # Model storage (sets OLLAMA_MODELS)
-    auto_start: true               # Start Ollama server if not running
-    keep_alive: 5m                 # How long to keep model loaded
-    num_ctx: null                  # Context window (null = model default)
-    num_gpu: null                  # GPU layers (null = auto, 0 = CPU only)
-    warmup: true
-
-# Request dispatch
 dispatch:
-  handler: bounded       # sequential | bounded | batching
+  handler:
+    primary: concurrent_http    # HTTP engines (vllm-server, ollama)
+    fallback: bounded           # In-process engines (native, vllm)
   max_pending: 10
-  poll_timeout: 0.01
-  batch_streaming: true
 
-# API server
 api:
   host: 0.0.0.0
   port: 8000
-  response_timeout: 60.0
 ```
 
 ### Engine Selection
@@ -242,11 +212,14 @@ For native engine, kernel selection:
 
 ### Dispatch Handlers
 
+`dispatch.handler.primary` is used for the HTTP engines (vllm-server, ollama),
+`dispatch.handler.fallback` for the in-process engines (native, vllm).
+
 | Handler | Behavior |
 |---------|----------|
 | `sequential` | One request at a time (simplest) |
-| `bounded` | Bounded queue with backpressure (recommended) |
-| `batching` | Full continuous batching |
+| `bounded` | Bounded queue with backpressure (in-process engines) |
+| `concurrent_http` | Parallel requests to the engine's HTTP server (vllm-server, ollama only) |
 
 ### Model-Specific Configuration
 
