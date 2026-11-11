@@ -44,15 +44,20 @@ def send_cancel(lg: Logger, ipc: Any, request_id: str) -> None:
     task.add_done_callback(_pending.discard)
 
 
+def _now() -> float:
+    """The clock the retry window is measured on."""
+    return asyncio.get_running_loop().time()
+
+
 async def _cancel(lg: Logger, ipc: Any, request_id: str) -> None:
     message = CancelRequest(id=f"cancel-{uuid.uuid4().hex}", request_id=request_id)
-    deadline = asyncio.get_running_loop().time() + CANCEL_RETRY_WINDOW
+    deadline = _now() + CANCEL_RETRY_WINDOW
     while True:
         try:
             ack = await ipc.submit(message, timeout=CANCEL_ACK_TIMEOUT)
             break
         except RuntimeError as e:  # IPCChannel's pending limit; channel errors aren't
-            if asyncio.get_running_loop().time() >= deadline:
+            if _now() >= deadline:
                 _log_undelivered(lg, request_id, e)
                 return
             await asyncio.sleep(CANCEL_RETRY_INTERVAL)

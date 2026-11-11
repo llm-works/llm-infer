@@ -152,7 +152,38 @@ max_concurrent: 4         # Concurrent HTTP requests to vLLM server
 lora:
   enabled: true
   base_path: /path/to/adapters
+
+logging:
+  mode: stderr            # capture | stdout | stderr | vllm | drop
+  config_file: null       # mode vllm: vLLM logging config file
+  demote_info: info       # mode capture: level for vLLM's INFO records (info | debug | trace)
 ```
+
+`logging.mode` decides where the output of the `vllm serve` process goes:
+
+| mode | Output |
+|---|---|
+| `stderr` (default) | llm-infer's stderr, in vLLM's text format |
+| `stdout` | llm-infer's stdout, in vLLM's text format |
+| `vllm` | vLLM's logging follows `config_file` (`VLLM_LOGGING_CONFIG_PATH`); other output goes to stderr |
+| `drop` | vLLM's logger output is dropped (`VLLM_CONFIGURE_LOGGING=0`); other output goes to stderr |
+| `capture` | Experimental: logged through llm-infer's logger |
+
+`stderr`, `stdout`, `vllm` and `drop` hand the process llm-infer's file descriptors: its output
+doesn't depend on llm-infer's process. For production, `vllm` mode with a log file is the
+dependable choice. `config_file` is a JSON file in Python's `logging.config.dictConfig` format
+that replaces vLLM's default setup (set it with `!path`). It covers vLLM's Python logging only:
+output printed outside it (C-level CUDA/NCCL messages, a crash before logging starts) still goes
+to stderr.
+
+`capture` runs `vllm serve` with `--logging-config.formatter json` and reads its stdout and
+stderr through a pipe. Each vLLM record is logged under a `vllm` sub-logger at its own level,
+so llm-infer's log level, format and log files apply. `demote_info: debug` logs vLLM's INFO
+records (startup steps, access lines, engine stats) at debug, keeping llm-infer's info level
+for its own messages and vLLM's warnings and errors. Other lines (from torch, flashinfer,
+CUDA, or a record cut by an interleaved write) are logged as they are at debug. It is not for
+production: vLLM then depends on llm-infer for its output, and blocks on its next write if
+llm-infer stops reading. The repository's `etc/` (the dev setup) uses `capture`.
 
 ### PEFT (`etc/peft.yaml`)
 

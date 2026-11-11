@@ -137,16 +137,29 @@ async def test_error_response_does_not_cancel() -> None:
     assert ipc.cancelled == []
 
 
-class _FullIPC:
-    """IPC stub at its pending limit for the first `full_for` cancel attempts."""
+class _Clock:
+    """Fake clock for the cancel retry window; only the IPC stub advances it."""
 
-    def __init__(self, full_for: int) -> None:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+
+class _FullIPC:
+    """IPC stub at its pending limit for the first `full_for` cancel attempts.
+
+    Each attempt takes `attempt_s` on the fake clock.
+    """
+
+    def __init__(self, clock: _Clock, full_for: int, attempt_s: float = 0.0) -> None:
+        self._clock = clock
         self._full_for = full_for
+        self._attempt_s = attempt_s
         self.attempts = 0
         self.cancelled: list[str] = []
 
     async def submit(self, request: Any, timeout: float | None = None) -> Any:
         self.attempts += 1
+        self._clock.now += self._attempt_s
         if self.attempts <= self._full_for:
             raise RuntimeError("Max pending requests exceeded (100)")
         self.cancelled.append(request.request_id)
@@ -154,15 +167,17 @@ class _FullIPC:
 
 
 @pytest.fixture
-def fast_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cancel_module, "CANCEL_RETRY_INTERVAL", 0.01)
-    monkeypatch.setattr(cancel_module, "CANCEL_RETRY_WINDOW", 0.5)
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    """Retry window on a fake clock, retries without a real pause."""
+    fake = _Clock()
+    monkeypatch.setattr(cancel_module, "_now", lambda: fake.now)
+    monkeypatch.setattr(cancel_module, "CANCEL_RETRY_INTERVAL", 0)
+    return fake
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("fast_retry")
-async def test_cancel_retries_while_channel_is_full() -> None:
-    ipc = _FullIPC(full_for=3)
+async def test_cancel_retries_while_channel_is_full(clock: _Clock) -> None:
+    ipc = _FullIPC(clock, full_for=3)
     lg = MagicMock(spec=Logger)
 
     cancel_module.send_cancel(lg, ipc, "r1")
@@ -174,14 +189,16 @@ async def test_cancel_retries_while_channel_is_full() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("fast_retry")
-async def test_cancel_gives_up_after_retry_window() -> None:
-    ipc = _FullIPC(full_for=10_000)
+async def test_cancel_gives_up_after_retry_window(clock: _Clock) -> None:
+    window = cancel_module.CANCEL_RETRY_WINDOW
+    ipc = _FullIPC(clock, full_for=10_000, attempt_s=window / 3)
     lg = MagicMock(spec=Logger)
 
     cancel_module.send_cancel(lg, ipc, "r1")
-    await asyncio.wait_for(_drain_cancels(), timeout=5)
+    await _drain_cancels()
 
+    # Attempts end at window/3, 2/3 and 3/3 of the window; the third reaches it
+    assert ipc.attempts == 3
     assert ipc.cancelled == []
     lg.warning.assert_called_once()
     assert lg.warning.call_args[0][0] == "cancel not delivered"

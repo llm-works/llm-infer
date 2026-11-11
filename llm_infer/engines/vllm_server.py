@@ -25,7 +25,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -39,6 +38,12 @@ from .inflight import InFlightConnections, RequestAbortedError
 from .protocol import BackendNotManagedError, EngineRequestError
 from .remote import LineStream, RemoteEngine, add_extra_body, truncate_embedding
 from .vllm_common import resolve_gpu_memory_utilization
+from .vllm_server_output import (
+    VLLMOutputReader,
+    serve_env,
+    serve_flags,
+    serve_streams,
+)
 
 if TYPE_CHECKING:
     from ..context import RequestContext
@@ -404,6 +409,8 @@ class VLLMServerEngine(RemoteEngine):
         self._lg = lg
         self._config = config
         self._process: subprocess.Popen[bytes] | None = None
+        # Reads the process's output in logging mode capture
+        self._output: VLLMOutputReader | None = None
         self._owns_process = False
         self._base_url = self._parse_base_url(config)
         self._model_name = config.served_model_name or Path(config.model_path).name
@@ -575,6 +582,7 @@ class VLLMServerEngine(RemoteEngine):
         self._add_engine_flags(cmd)
         self._add_chat_flags(cmd)
         self._add_lora_flags(cmd)
+        cmd.extend(serve_flags(cfg.logging))
 
         # Last, so user arguments win over the flags above
         cmd.extend(_checked_extra_args(cfg.extra_args))
@@ -604,20 +612,33 @@ class VLLMServerEngine(RemoteEngine):
 
     def _start_server(self) -> None:
         """Start the vLLM server process."""
+        logging_cfg = self._config.logging
+        logging_cfg.validate()  # -o overrides bypass the check at config load
         cmd = self._build_serve_command()
         self._lg.info(
             "starting vllm server",
-            extra={"cmd": " ".join(cmd), "port": self._config.port},
+            extra={
+                "cmd": " ".join(cmd),
+                "port": self._config.port,
+                "logging": logging_cfg.mode,
+            },
         )
 
+        stdout, stderr = serve_streams(logging_cfg)
         self._process = subprocess.Popen(
             cmd,
-            env=os.environ.copy(),
-            stdout=sys.stderr,
-            stderr=sys.stderr,
+            env=serve_env(logging_cfg),
+            stdout=stdout,
+            stderr=stderr,
             start_new_session=True,
         )
         self._owns_process = True
+        if self._process.stdout is not None:
+            # Before the wait: vLLM blocks on a full pipe while it starts up
+            self._output = VLLMOutputReader(
+                self._lg, self._process.stdout, logging_cfg.demote_info
+            )
+            self._output.start()
 
         self._wait_for_server()
 
@@ -634,7 +655,7 @@ class VLLMServerEngine(RemoteEngine):
             if self._process is not None and self._process.poll() is not None:
                 raise RuntimeError(
                     f"vllm serve process exited with code {self._process.returncode}. "
-                    f"Check stderr output above for details."
+                    "Check the vllm serve output above for details."
                 )
             if self._is_server_running():
                 # Double-check process didn't die immediately after responding
@@ -671,6 +692,9 @@ class VLLMServerEngine(RemoteEngine):
                     "vllm server processes still running", extra={"pgid": pgid}
                 )
         self._process = None
+        if self._output is not None:
+            self._output.stop()
+            self._output = None
 
     def _signal_group(self, pgid: int, sig: signal.Signals) -> None:
         try:
