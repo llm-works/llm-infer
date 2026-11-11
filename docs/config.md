@@ -18,6 +18,9 @@ etc/
 └── infra.yaml          # Logging configuration
 ```
 
+[`examples/llm-infer.yaml`](examples/llm-infer.yaml) holds all of these sections in one complete
+file. A test loads it, and the packaged `etc/`, and fails on any key llm-infer doesn't read.
+
 ## Main Configuration
 
 The main config (`etc/llm-infer.yaml`) selects the engine and includes engine-specific configs:
@@ -208,12 +211,8 @@ Per-model settings in `etc/models.yaml` override engine defaults:
 locations:
   - /path/to/models
 
-# Default model selection
-selection:
-  generate:
-    default: qwen2.5-7b
-  embed:
-    default: bge-small-en-v1.5
+# Model served when --model / --model-path is omitted
+default: qwen2.5-7b
 
 # Model-specific settings
 models:
@@ -225,7 +224,13 @@ models:
 
   qwen2.5-7b:
     ollama: qwen2.5:7b   # Ollama model name mapping
+
+  bge-small-en-v1.5:
+    task: embed          # Embedding model (default: generate)
 ```
+
+`INFRA_MODELS_DEFAULT=<name>` overrides `default` at runtime. A `--model` or `--model-path` on
+the command line takes precedence over both.
 
 ### Templates (YAML Anchors)
 
