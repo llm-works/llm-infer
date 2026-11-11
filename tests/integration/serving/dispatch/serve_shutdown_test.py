@@ -30,7 +30,7 @@ from ._serve_harness import (
     Serve,
     chat_body,
     pid_alive,
-    port_bindable,
+    port_listening,
     running_serve,
     wait_for,
 )
@@ -88,4 +88,4 @@ def test_sigterm_with_request_in_flight_stops_within_budget(
     assert "Server shutting down" in result["text"]
     # serve stops the vLLM it started; an external one is not serve's to stop
     assert pid_alive(vllm_pid) is not serve.auto_start
-    assert port_bindable(serve.api_port), "API port still bound after stop"
+    assert not port_listening(serve.api_port), "API port still listening after stop"
