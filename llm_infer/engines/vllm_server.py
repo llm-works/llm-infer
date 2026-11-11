@@ -635,7 +635,9 @@ class VLLMServerEngine(RemoteEngine):
         self._owns_process = True
         if self._process.stdout is not None:
             # Before the wait: vLLM blocks on a full pipe while it starts up
-            self._output = VLLMOutputReader(self._lg, self._process.stdout)
+            self._output = VLLMOutputReader(
+                self._lg, self._process.stdout, logging_cfg.demote_info
+            )
             self._output.start()
 
         self._wait_for_server()

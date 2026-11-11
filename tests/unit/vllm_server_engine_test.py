@@ -725,7 +725,7 @@ class TestVLLMServerOutputModes:
         cmd = popen.call_args.args[0]
         flag = cmd.index("--logging-config.formatter")
         assert cmd[flag + 1] == "json"
-        reader.assert_called_once_with(engine._lg, popen.return_value.stdout)
+        reader.assert_called_once_with(engine._lg, popen.return_value.stdout, "info")
         reader.return_value.start.assert_called_once()
 
     def test_override_checked_at_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -750,11 +750,18 @@ class TestVLLMServerLoggingConfig:
         from llm_infer.serving.dispatch.config import VLLMServerConfig
 
         config = VLLMServerConfig.from_dict(
-            {"logging": {"mode": "vllm", "config_file": "/etc/vllm-logging.json"}}
+            {
+                "logging": {
+                    "mode": "vllm",
+                    "config_file": "/etc/vllm-logging.json",
+                    "demote_info": "debug",
+                }
+            }
         )
 
         assert config.logging.mode == "vllm"
         assert config.logging.config_file == "/etc/vllm-logging.json"
+        assert config.logging.demote_info == "debug"
 
     def test_defaults_without_section(self) -> None:
         """Without config, output passes through to stderr: safe for production."""
@@ -764,6 +771,14 @@ class TestVLLMServerLoggingConfig:
 
         assert config.logging.mode == "stderr"
         assert config.logging.config_file is None
+        assert config.logging.demote_info == "info"
+
+    def test_unknown_demote_info_rejected(self) -> None:
+        """Only levels below vLLM's warnings: demoting is all it does."""
+        from llm_infer.serving.dispatch.config import VLLMServerLoggingConfig
+
+        with pytest.raises(ValueError, match="demote_info must be one of"):
+            VLLMServerLoggingConfig(demote_info="warning")
 
     def test_unknown_mode_rejected(self) -> None:
         from llm_infer.serving.dispatch.config import VLLMServerLoggingConfig
@@ -798,7 +813,7 @@ class TestVLLMOutputParseLine:
             '"vllm_process_name": "EngineCore"}'
         )
 
-        assert parse_line(line) == (
+        assert parse_line(line, "info") == (
             "error",
             "boom",
             {
@@ -822,7 +837,7 @@ class TestVLLMOutputParseLine:
             '"exc_info": "tb", "vllm_process_name": "EngineCore"}'
         )
 
-        assert not set(parse_line(line)[2]) & reserved
+        assert not set(parse_line(line, "info")[2]) & reserved
 
     @pytest.mark.parametrize(
         ("levelname", "method"),
@@ -839,7 +854,25 @@ class TestVLLMOutputParseLine:
 
         line = f'{{"levelname": "{levelname}", "message": "m"}}'
 
-        assert parse_line(line)[0] == method
+        assert parse_line(line, "info")[0] == method
+
+    @pytest.mark.parametrize(
+        ("levelname", "method"),
+        [
+            ("INFO", "debug"),
+            ("DEBUG", "debug"),
+            ("WARNING", "warning"),
+            ("ERROR", "error"),
+            ("CRITICAL", "critical"),
+        ],
+    )
+    def test_demote_info_moves_only_info(self, levelname: str, method: str) -> None:
+        """demote_info: debug keeps vLLM's warnings and errors at their level."""
+        from llm_infer.engines.vllm_server_output import parse_line
+
+        line = f'{{"levelname": "{levelname}", "message": "m"}}'
+
+        assert parse_line(line, "debug")[0] == method
 
     @pytest.mark.parametrize(
         "line",
@@ -856,7 +889,7 @@ class TestVLLMOutputParseLine:
     def test_other_output_logged_raw_at_debug(self, line: str) -> None:
         from llm_infer.engines.vllm_server_output import parse_line
 
-        assert parse_line(line) == ("debug", line, {})
+        assert parse_line(line, "info") == ("debug", line, {})
 
 
 class TestVLLMServerRelease:

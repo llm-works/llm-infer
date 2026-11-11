@@ -35,7 +35,7 @@ def _read_child(
         stderr=subprocess.STDOUT,
     )
     assert proc.stdout is not None
-    reader = VLLMOutputReader(MagicMock(), proc.stdout)
+    reader = VLLMOutputReader(MagicMock(), proc.stdout, "info")
 
     reader.start()
     proc.wait(timeout=30)

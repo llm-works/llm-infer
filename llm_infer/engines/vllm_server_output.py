@@ -76,10 +76,11 @@ def serve_streams(cfg: VLLMServerLoggingConfig) -> tuple[Any, Any]:
     return sys.stderr, sys.stderr
 
 
-def parse_line(line: str) -> tuple[str, str, dict[str, Any]]:
+def parse_line(line: str, info_method: str) -> tuple[str, str, dict[str, Any]]:
     """Logger method, message and extra for one line of captured output.
 
-    A vLLM JSON record keeps its level; any other line (another library's
+    A vLLM JSON record keeps its level, except INFO, which is logged with
+    info_method (logging.demote_info). Any other line (another library's
     output, a record split by an interleaved write) is logged as is at debug.
     """
     try:
@@ -89,7 +90,11 @@ def parse_line(line: str) -> tuple[str, str, dict[str, Any]]:
     if not isinstance(record, dict) or not isinstance(record.get("message"), str):
         return "debug", line, {}
 
-    method = _LEVEL_METHODS.get(str(record.get("levelname")), "debug")
+    levelname = str(record.get("levelname"))
+    if levelname == "INFO":
+        method = info_method
+    else:
+        method = _LEVEL_METHODS.get(levelname, "debug")
     extra: dict[str, Any] = {}
     # Renamed: Logger rejects extra keys that are LogRecord attributes
     # (name, process, exc_info)
@@ -111,9 +116,10 @@ class VLLMOutputReader:
     which they do when they exit.
     """
 
-    def __init__(self, lg: Logger, stream: IO[bytes]) -> None:
+    def __init__(self, lg: Logger, stream: IO[bytes], info_method: str) -> None:
         self._lg = derive_lg(lg, "vllm")
         self._stream = stream
+        self._info_method = info_method
         self._thread = threading.Thread(
             target=self._run, name="vllm-output", daemon=True
         )
@@ -133,7 +139,7 @@ class VLLMOutputReader:
     def _log(self, line: str) -> None:
         """Log one line; a line that fails to log must not stop the reading,
         or vLLM blocks once the pipe is full."""
-        method, message, extra = parse_line(line)
+        method, message, extra = parse_line(line, self._info_method)
         try:
             getattr(self._lg, method)(message, extra=extra)
         except Exception as e:

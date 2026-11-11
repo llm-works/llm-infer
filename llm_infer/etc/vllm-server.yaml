@@ -59,6 +59,9 @@ extra_args: []
 #            (a vllm sub-logger); vLLM stalls if llm-infer stops reading
 logging:
   mode: capture
+  # Mode capture: our level for vLLM's INFO records (info, debug, trace);
+  # its warnings and errors keep their level
+  demote_info: debug
   # Mode vllm: vLLM logging config file (JSON, Python logging dictConfig),
   # e.g. to add a log file: !path /etc/llm-infer/vllm-logging.json
   config_file: null

@@ -316,6 +316,8 @@ class VLLMConfig:
 
 
 VLLM_LOGGING_MODES = ("capture", "stdout", "stderr", "vllm", "drop")
+# Levels vLLM's INFO records can be logged at in capture mode (Logger methods)
+VLLM_DEMOTE_INFO_LEVELS = ("info", "debug", "trace")
 
 
 @dataclass
@@ -334,6 +336,10 @@ class VLLMServerLoggingConfig:
     # Mode vllm: vLLM's logging config (JSON, Python dictConfig), used in place
     # of vLLM's default (a stdout handler)
     config_file: str | None = None
+    # Mode capture: our level for vLLM's INFO records (its warnings and errors
+    # keep theirs); debug keeps vLLM's progress out of serve's info level.
+    # Ignored by the other modes, so a -o mode switch works without it.
+    demote_info: str = "info"
 
     def __post_init__(self) -> None:
         self.validate()
@@ -344,6 +350,11 @@ class VLLMServerLoggingConfig:
             raise ValueError(
                 f"vllm_server.logging.mode must be one of "
                 f"{', '.join(VLLM_LOGGING_MODES)}, got {self.mode!r}"
+            )
+        if self.demote_info not in VLLM_DEMOTE_INFO_LEVELS:
+            raise ValueError(
+                f"vllm_server.logging.demote_info must be one of "
+                f"{', '.join(VLLM_DEMOTE_INFO_LEVELS)}, got {self.demote_info!r}"
             )
         if self.mode == "vllm" and self.config_file is None:
             raise ValueError("vllm_server.logging: mode vllm requires config_file")
@@ -357,6 +368,7 @@ class VLLMServerLoggingConfig:
         return cls(
             mode=str(data.get("mode", "stderr")),
             config_file=None if config_file is None else str(config_file),
+            demote_info=str(data.get("demote_info", "info")),
         )
 
 
