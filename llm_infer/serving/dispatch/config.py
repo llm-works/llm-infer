@@ -315,32 +315,47 @@ class VLLMConfig:
             kwargs["max_lora_rank"] = self.lora.max_lora_rank
 
 
+VLLM_LOGGING_MODES = ("capture", "stdout", "stderr", "vllm", "drop")
+
+
 @dataclass
 class VLLMServerLoggingConfig:
     """Logging of the `vllm serve` process serve starts.
 
     serve disables vLLM's logging setup in its own process (vLLM's dictConfig
     would close serve's file handlers); the `vllm serve` process gets these
-    settings instead.
+    settings instead. The modes are described in engines/vllm_server_output.py.
     """
 
-    # VLLM_CONFIGURE_LOGGING: false leaves vLLM's loggers without handlers
-    configure: bool = True
-    # VLLM_LOGGING_CONFIG_PATH: vLLM's logging config (JSON, Python dictConfig),
-    # used in place of vLLM's default (a stdout handler). None keeps the default.
+    # Where the process's output goes: stderr, stdout, vllm (its logging config
+    # file), drop (vLLM's logger output dropped), capture (experimental: logged
+    # through serve's logger)
+    mode: str = "stderr"
+    # Mode vllm: vLLM's logging config (JSON, Python dictConfig), used in place
+    # of vLLM's default (a stdout handler)
     config_file: str | None = None
 
     def __post_init__(self) -> None:
-        if self.config_file is not None and not self.configure:
-            # vLLM refuses to start with this combination
-            raise ValueError("vllm_server.logging: config_file requires configure")
+        self.validate()
+
+    def validate(self) -> None:
+        """Reject invalid settings; again at server start, after -o overrides."""
+        if self.mode not in VLLM_LOGGING_MODES:
+            raise ValueError(
+                f"vllm_server.logging.mode must be one of "
+                f"{', '.join(VLLM_LOGGING_MODES)}, got {self.mode!r}"
+            )
+        if self.mode == "vllm" and self.config_file is None:
+            raise ValueError("vllm_server.logging: mode vllm requires config_file")
+        if self.mode != "vllm" and self.config_file is not None:
+            raise ValueError("vllm_server.logging: config_file requires mode vllm")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "VLLMServerLoggingConfig":
         data = data or {}
         config_file = data.get("config_file")
         return cls(
-            configure=data.get("configure", True),
+            mode=str(data.get("mode", "stderr")),
             config_file=None if config_file is None else str(config_file),
         )
 

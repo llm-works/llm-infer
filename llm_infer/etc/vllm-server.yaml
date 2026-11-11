@@ -50,11 +50,17 @@ chat_template_kwargs: {}
 # e.g., [--speculative-config, '{"method": "mtp", "num_speculative_tokens": 3}']
 extra_args: []
 
-# Logging of the `vllm serve` process llm-infer starts
+# Output of the `vllm serve` process llm-infer starts
+#   stderr   llm-infer's stderr, vLLM's text format
+#   stdout   llm-infer's stdout, vLLM's text format
+#   vllm     vLLM's logging config file decides (config_file); other output to stderr
+#   drop     vLLM's logger output dropped; other output to stderr
+#   capture  experimental, not for production: logged through llm-infer's logger
+#            (a vllm sub-logger); vLLM stalls if llm-infer stops reading
 logging:
-  configure: true             # false: vLLM sets up no logging, its log output is dropped
-  # vLLM logging config file (JSON, Python logging dictConfig), replacing vLLM's
-  # default stdout handler, e.g. to add a log file: !path /etc/llm-infer/vllm-logging.json
+  mode: capture
+  # Mode vllm: vLLM logging config file (JSON, Python logging dictConfig),
+  # e.g. to add a log file: !path /etc/llm-infer/vllm-logging.json
   config_file: null
 
 # Warmup: Run initial query on startup to ensure model is loaded

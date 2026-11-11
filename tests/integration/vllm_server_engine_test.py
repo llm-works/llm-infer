@@ -18,6 +18,7 @@ class TestVLLMServerStop:
         engine._lg = MagicMock()
         engine._config = MagicMock(stop_timeout=stop_timeout)
         engine._process = proc
+        engine._output = None
         return engine
 
     def test_sigkill_after_stop_timeout_when_sigterm_ignored(self) -> None:
