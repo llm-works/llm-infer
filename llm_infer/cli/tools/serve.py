@@ -97,10 +97,14 @@ class ServeTool(Tool):
         """Configure third-party logging before slow imports."""
         from ...logging_setup import configure_third_party_logging
 
-        # The same parse InferenceConfig uses, before it is built (slow imports)
-        log_cfg = ThirdPartyLoggingConfig.from_dict(
-            raw_config.get("third_party_logging") or {}
-        )
+        # The same parse InferenceConfig uses, before it is built (slow imports);
+        # -o overrides are applied to InferenceConfig only after that, too late
+        section = dict(raw_config.get("third_party_logging") or {})
+        prefix = "third_party_logging."
+        for key, value in (self._parse_overrides() or {}).items():
+            if key.startswith(prefix):
+                section[key.removeprefix(prefix)] = value
+        log_cfg = ThirdPartyLoggingConfig.from_dict(section)
         configure_third_party_logging(
             torch_level=log_cfg.torch,
             transformers_level=log_cfg.transformers,

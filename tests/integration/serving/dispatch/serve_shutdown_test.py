@@ -7,7 +7,7 @@ A stand-in `vllm serve` (``_serve_procs.py``) accepts a chat completion and
 never answers, like a long generation. SIGTERM to serve must then:
 - answer the waiting client with 503 at once,
 - stop the vLLM process if serve started it (an external one keeps running),
-- exit, with nothing left bound to the API port,
+- exit, with nothing left listening on the API port,
 well inside a 15 s service stop timeout. With an external vLLM the upstream call
 is still blocked at exit; the handler's daemon workers must not hold up exit.
 
