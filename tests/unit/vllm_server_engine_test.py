@@ -800,6 +800,23 @@ class TestVLLMServerLoggingConfig:
             VLLMServerLoggingConfig(mode="capture", config_file="/x.json")
 
 
+class TestVLLMOutputReaderStop:
+    def test_stop_without_start_closes_pipe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed start() (no thread running) still lets stop() close the pipe."""
+        from llm_infer.engines import vllm_server_output
+        from llm_infer.engines.vllm_server_output import VLLMOutputReader
+
+        monkeypatch.setattr(vllm_server_output, "derive_lg", lambda lg, tags: lg)
+        stream = MagicMock()
+        reader = VLLMOutputReader(MagicMock(), stream, "info")
+
+        reader.stop()
+
+        stream.close.assert_called_once()
+
+
 class TestVLLMOutputParseLine:
     """parse_line(): one line of captured `vllm serve` output to a log call."""
 

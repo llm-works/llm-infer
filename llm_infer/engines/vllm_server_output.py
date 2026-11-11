@@ -152,8 +152,10 @@ class VLLMOutputReader:
 
         Call once the process has exited. A child of it still holding the
         pipe open would keep the reader going; it is left to run as a daemon.
+        A thread that never started (start() failed) has nothing to wait for.
         """
-        self._thread.join(_READER_JOIN_TIMEOUT)
+        if self._thread.is_alive():
+            self._thread.join(_READER_JOIN_TIMEOUT)
         if self._thread.is_alive():
             self._lg.warning("vllm output reader still running after stop")
             return
