@@ -9,7 +9,14 @@ from typing import TYPE_CHECKING
 
 from ....engines.protocol import AbortableEngineProtocol
 from ..handler import RequestHandler
-from ..types import Request, RequestStatus, Response, StreamChunk, refusal_message
+from ..types import (
+    Request,
+    RequestStatus,
+    Response,
+    StreamChunk,
+    failure_response,
+    refusal_message,
+)
 from .daemon_executor import DaemonThreadExecutor
 
 if TYPE_CHECKING:
@@ -124,11 +131,7 @@ class ConcurrentHttpHandler(RequestHandler):
         try:
             return self._process_request(request)
         except Exception as e:
-            return Response(
-                id=request.id,
-                status=RequestStatus.FAILED,
-                error=str(e),
-            )
+            return failure_response(request.id, e)
 
     def _collect_completed(self) -> list[Response]:
         """Collect responses from completed futures without blocking."""

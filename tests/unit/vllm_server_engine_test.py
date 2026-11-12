@@ -318,6 +318,125 @@ class TestVLLMServerMaxTokens:
         assert result["finish_reason"] == "length"
 
 
+def _sent_payload(engine: Any, **kwargs: Any) -> dict[str, Any]:
+    """Run generate() against a stubbed server and return the payload it sent."""
+    engine._post_chat_completions = MagicMock(
+        return_value={"model": "m", "choices": [{"message": {"content": "ok"}}]}
+    )
+    engine.generate("hi", **kwargs)
+    payload: dict[str, Any] = engine._post_chat_completions.call_args.args[0]
+    return payload
+
+
+def _engine_answering(status: int, body: dict[str, Any]) -> Any:
+    """Engine whose HTTP client gets `status` / `body` from vLLM (in-memory transport)."""
+    import httpx
+
+    engine = _engine_for_payload()
+    transport = httpx.MockTransport(lambda _request: httpx.Response(status, json=body))
+    engine._client = httpx.Client(transport=transport, base_url="http://vllm")
+    return engine
+
+
+class TestVLLMServerErrorStatus:
+    """vLLM's HTTP status reaches the caller instead of becoming a plain RuntimeError."""
+
+    def test_client_error_keeps_status_and_message(self) -> None:
+        from llm_infer.engines.protocol import EngineRequestError
+
+        message = "max_tokens=40000 cannot be greater than max_model_len=32768."
+        engine = _engine_answering(
+            400, {"object": "error", "message": message, "code": 400}
+        )
+        with pytest.raises(EngineRequestError) as exc_info:
+            engine._post_chat_completions({}, None)
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.message == message
+
+    def test_openai_error_format_message(self) -> None:
+        """vLLM's OpenAI-style body nests the message under "error"."""
+        from llm_infer.engines.protocol import EngineRequestError
+
+        message = "min_tokens must be less than or equal to max_tokens=16, got 64."
+        body = {"error": {"message": message, "type": "BadRequestError", "code": 400}}
+        engine = _engine_answering(400, body)
+        with pytest.raises(EngineRequestError) as exc_info:
+            engine._post_chat_completions({}, None)
+
+        assert exc_info.value.message == message
+
+    def test_server_error_keeps_status(self) -> None:
+        from llm_infer.engines.protocol import EngineRequestError
+
+        engine = _engine_answering(500, {"object": "error", "message": "boom"})
+        with pytest.raises(EngineRequestError) as exc_info:
+            engine._post_chat_completions({}, None)
+
+        assert exc_info.value.status_code == 500
+
+
+class TestVLLMServerPassthrough:
+    def test_unset_sampling_not_sent(self) -> None:
+        """Left out, vLLM applies the model's generation_config."""
+        payload = _sent_payload(_engine_for_payload())
+        for key in ("temperature", "top_p", "top_k"):
+            assert key not in payload
+
+    def test_set_sampling_sent(self) -> None:
+        payload = _sent_payload(
+            _engine_for_payload(), temperature=0.3, top_p=0.9, top_k=20
+        )
+        assert (payload["temperature"], payload["top_p"], payload["top_k"]) == (
+            0.3,
+            0.9,
+            20,
+        )
+
+    def test_extra_body_forwarded(self) -> None:
+        extra = {"min_p": 0.05, "reasoning_effort": "low", "thinking_token_budget": 9}
+        payload = _sent_payload(_engine_for_payload(), extra_body=extra)
+        assert extra.items() <= payload.items()
+
+    def test_extra_body_does_not_replace_fields_llm_infer_sets(self) -> None:
+        payload = _sent_payload(
+            _engine_for_payload(),
+            max_tokens=10,
+            extra_body={"max_tokens": 99, "model": "other", "stream": True},
+        )
+        assert (payload["max_tokens"], payload["model"], payload["stream"]) == (
+            10,
+            "m",
+            False,
+        )
+
+
+class TestVLLMServerReasoningField:
+    """vLLM returns reasoning as `reasoning`; older releases as `reasoning_content`."""
+
+    @pytest.mark.parametrize("field", ["reasoning", "reasoning_content"])
+    def test_completion_reasoning_kept(self, field: str) -> None:
+        engine = _engine_for_payload()
+        data = {
+            "model": "m",
+            "choices": [{"message": {"content": "answer", field: "why"}}],
+        }
+        result = engine._parse_completion_response(data, None, None)
+        content = result["content"] if isinstance(result, dict) else result
+        assert content == "<think>why</think>answer"
+
+    @pytest.mark.parametrize("field", ["reasoning", "reasoning_content"])
+    def test_stream_reasoning_kept(self, field: str) -> None:
+        from llm_infer.engines.vllm_server import VLLMServerStreamingIterator
+
+        it = VLLMServerStreamingIterator(
+            MagicMock(), MagicMock(), "/v1/chat/completions", {}, None
+        )
+        text = it._bridge_reasoning_content({field: "why"})
+        text += it._bridge_reasoning_content({"content": "answer"})
+        assert text == "<think>why</think>answer"
+
+
 class TestVLLMServerStreamingFinishReason:
     def _iterator(self, max_tokens: int | None, max_model_len: int | None) -> object:
         from llm_infer.engines.vllm_server import VLLMServerStreamingIterator
@@ -373,7 +492,11 @@ class TestBuildServeCommand:
     def _full_command(self) -> list[str]:
         """Serve command with every optional flag enabled."""
         from llm_infer.engines.vllm_server import VLLMServerEngine
-        from llm_infer.serving.dispatch.config import LoRAConfig, VLLMServerConfig
+        from llm_infer.serving.dispatch.config import (
+            LoRAConfig,
+            VLLMServerConfig,
+            VLLMServerLoggingConfig,
+        )
 
         # Skip __init__: it connects to (or starts) the server
         engine = object.__new__(VLLMServerEngine)
@@ -386,6 +509,7 @@ class TestBuildServeCommand:
             reasoning_parser="qwen3",
             chat_template_kwargs={"enable_thinking": False},
             lora=LoRAConfig(enabled=True),
+            logging=VLLMServerLoggingConfig(mode="capture"),
             extra_args=list(_EXTRA_ARGS),
         )
         engine._model_name = "test"
@@ -417,6 +541,7 @@ class TestBuildServeCommand:
             "--default-chat-template-kwargs",
             "--enable-lora",
             "--lora-modules",
+            "--logging-config.formatter",
         ):
             assert flag in cmd
 
@@ -478,79 +603,310 @@ class TestCheckedExtraArgs:
         assert _checked_extra_args(None) == []  # type: ignore[arg-type]
 
 
-class TestVLLMServerStop:
-    """_stop_server escalates to SIGKILL after stop_timeout."""
+def _start_server(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str = "stderr",
+    config_file: str | None = None,
+) -> tuple[Any, MagicMock, MagicMock]:
+    """Run _start_server() with Popen and the output reader mocked.
 
-    def _engine_with_process(self, proc: object, stop_timeout: float) -> object:
-        from llm_infer.engines.vllm_server import VLLMServerEngine
+    Returns the engine, the Popen mock and the VLLMOutputReader mock.
+    """
+    from llm_infer.engines import vllm_server
+    from llm_infer.serving.dispatch.config import (
+        VLLMServerConfig,
+        VLLMServerLoggingConfig,
+    )
 
-        engine = object.__new__(VLLMServerEngine)
+    popen = MagicMock()
+    reader = MagicMock()
+    monkeypatch.setattr(vllm_server.subprocess, "Popen", popen)
+    monkeypatch.setattr(vllm_server, "VLLMOutputReader", reader)
+    engine = object.__new__(vllm_server.VLLMServerEngine)
+    engine._lg = MagicMock()
+    engine._config = VLLMServerConfig(
+        model_path="/models/test",
+        logging=VLLMServerLoggingConfig(mode=mode, config_file=config_file),
+    )
+    engine._model_name = "test"
+    engine._adapter_paths = {}
+    engine._output = None
+    engine._wait_for_server = MagicMock()
+    if mode != "capture":
+        # A real Popen leaves stdout None unless it is piped
+        popen.return_value.stdout = None
+    engine._start_server()
+    return engine, popen, reader
+
+
+def _serve_env(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str = "stderr",
+    config_file: str | None = None,
+) -> dict[str, str]:
+    """The environment _start_server() gives `vllm serve`."""
+    _, popen, _ = _start_server(monkeypatch, mode, config_file)
+    return dict(popen.call_args.kwargs["env"])
+
+
+class TestVLLMServerLoggingEnv:
+    """vLLM's logging follows engines.vllm_server.logging, not serve's own setup."""
+
+    def test_serve_process_setting_does_not_reach_vllm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """serve sets VLLM_CONFIGURE_LOGGING=0 for itself; `vllm serve` still logs."""
+        monkeypatch.setenv("VLLM_CONFIGURE_LOGGING", "0")
+        env = _serve_env(monkeypatch)
+
+        assert env["VLLM_CONFIGURE_LOGGING"] == "1"
+        assert "VLLM_LOGGING_CONFIG_PATH" not in env
+
+    def test_drop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert _serve_env(monkeypatch, "drop")["VLLM_CONFIGURE_LOGGING"] == "0"
+
+    def test_config_file_reaches_vllm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        env = _serve_env(monkeypatch, "vllm", "/etc/vllm-logging.json")
+
+        assert env["VLLM_CONFIGURE_LOGGING"] == "1"
+        assert env["VLLM_LOGGING_CONFIG_PATH"] == "/etc/vllm-logging.json"
+
+    def test_inherited_config_path_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The config decides vLLM's logging, not serve's environment."""
+        monkeypatch.setenv("VLLM_LOGGING_CONFIG_PATH", "/elsewhere.json")
+
+        assert "VLLM_LOGGING_CONFIG_PATH" not in _serve_env(monkeypatch)
+
+
+class TestVLLMServerOutputModes:
+    """Where the `vllm serve` process's output goes, per logging mode."""
+
+    @pytest.mark.parametrize(
+        ("mode", "stream"),
+        [("stderr", "stderr"), ("stdout", "stdout"), ("drop", "stderr")],
+    )
+    def test_passthrough(
+        self, monkeypatch: pytest.MonkeyPatch, mode: str, stream: str
+    ) -> None:
+        """The process writes to serve's own stream; nothing reads it."""
+        import sys
+
+        _, popen, reader = _start_server(monkeypatch, mode)
+
+        kwargs = popen.call_args.kwargs
+        assert kwargs["stdout"] is getattr(sys, stream)
+        assert kwargs["stderr"] is getattr(sys, stream)
+        assert "--logging-config.formatter" not in popen.call_args.args[0]
+        reader.assert_not_called()
+
+    def test_vllm_mode_passes_other_output_to_stderr(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import sys
+
+        _, popen, reader = _start_server(monkeypatch, "vllm", "/etc/vllm-logging.json")
+
+        assert popen.call_args.kwargs["stdout"] is sys.stderr
+        reader.assert_not_called()
+
+    def test_capture_pipes_json_records_to_reader(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both streams into one pipe, vLLM formats JSON, a reader is started."""
+        import subprocess
+
+        engine, popen, reader = _start_server(monkeypatch, "capture")
+
+        kwargs = popen.call_args.kwargs
+        assert kwargs["stdout"] is subprocess.PIPE
+        assert kwargs["stderr"] is subprocess.STDOUT
+        cmd = popen.call_args.args[0]
+        flag = cmd.index("--logging-config.formatter")
+        assert cmd[flag + 1] == "json"
+        reader.assert_called_once_with(engine._lg, popen.return_value.stdout, "info")
+        reader.return_value.start.assert_called_once()
+
+    def test_override_checked_at_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """-o sets the field after the load-time check; the start checks again."""
+        from llm_infer.engines import vllm_server
+        from llm_infer.serving.dispatch.config import VLLMServerConfig
+
+        popen = MagicMock()
+        monkeypatch.setattr(vllm_server.subprocess, "Popen", popen)
+        engine = object.__new__(vllm_server.VLLMServerEngine)
         engine._lg = MagicMock()
-        engine._config = MagicMock(stop_timeout=stop_timeout)
-        engine._process = proc
-        return engine
+        engine._config = VLLMServerConfig(model_path="/models/test")
+        engine._config.logging.mode = "vllm"  # as -o would, without config_file
 
-    def test_sigkill_after_stop_timeout_when_sigterm_ignored(self) -> None:
-        import subprocess
-        import sys
-        import time
+        with pytest.raises(ValueError, match="mode vllm requires config_file"):
+            engine._start_server()
+        popen.assert_not_called()
 
-        # Ignores SIGTERM like a server stuck in its shutdown; prints once ready
-        script = (
-            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-            "print('ready', flush=True); time.sleep(60)"
-        )
-        proc = subprocess.Popen(
-            [sys.executable, "-c", script],
-            stdout=subprocess.PIPE,
-            start_new_session=True,
-        )
-        assert proc.stdout is not None
-        assert proc.stdout.readline().strip() == b"ready"
-        engine = self._engine_with_process(proc, stop_timeout=0.5)
 
-        start = time.monotonic()
-        engine._stop_server()
-        elapsed = time.monotonic() - start
+class TestVLLMServerLoggingConfig:
+    def test_parsed_from_section(self) -> None:
+        from llm_infer.serving.dispatch.config import VLLMServerConfig
 
-        assert proc.poll() is not None
-        assert 0.5 <= elapsed < 5.0
-        engine._lg.warning.assert_called_once_with(
-            "vllm server did not stop gracefully, force killing"
+        config = VLLMServerConfig.from_dict(
+            {
+                "logging": {
+                    "mode": "vllm",
+                    "config_file": "/etc/vllm-logging.json",
+                    "demote_info": "debug",
+                }
+            }
         )
 
-    def test_waits_for_whole_process_group(self) -> None:
-        """A grandchild that outlives the main process (as vLLM's EngineCore can)
-        is stopped too before _stop_server returns."""
-        import os
-        import subprocess
-        import sys
+        assert config.logging.mode == "vllm"
+        assert config.logging.config_file == "/etc/vllm-logging.json"
+        assert config.logging.demote_info == "debug"
 
-        grandchild = (
-            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-            "time.sleep(60)"
-        )
-        # Main process: starts the grandchild, prints its pid, exits on SIGTERM
-        script = (
-            "import subprocess, sys, time; "
-            f"p = subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
-            "print(p.pid, flush=True); time.sleep(60)"
-        )
-        proc = subprocess.Popen(
-            [sys.executable, "-c", script],
-            stdout=subprocess.PIPE,
-            start_new_session=True,
-        )
-        assert proc.stdout is not None
-        grandchild_pid = int(proc.stdout.readline())
-        engine = self._engine_with_process(proc, stop_timeout=0.5)
+    def test_defaults_without_section(self) -> None:
+        """Without config, output passes through to stderr: safe for production."""
+        from llm_infer.serving.dispatch.config import VLLMServerConfig
 
-        engine._stop_server()
+        config = VLLMServerConfig.from_dict({})
 
-        with pytest.raises(ProcessLookupError):
-            os.killpg(proc.pid, 0)
-        with pytest.raises(ProcessLookupError):
-            os.kill(grandchild_pid, 0)
+        assert config.logging.mode == "stderr"
+        assert config.logging.config_file is None
+        assert config.logging.demote_info == "info"
+
+    def test_unknown_demote_info_rejected(self) -> None:
+        """Only levels below vLLM's warnings: demoting is all it does."""
+        from llm_infer.serving.dispatch.config import VLLMServerLoggingConfig
+
+        with pytest.raises(ValueError, match="demote_info must be one of"):
+            VLLMServerLoggingConfig(demote_info="warning")
+
+    def test_unknown_mode_rejected(self) -> None:
+        from llm_infer.serving.dispatch.config import VLLMServerLoggingConfig
+
+        with pytest.raises(ValueError, match="mode must be one of"):
+            VLLMServerLoggingConfig(mode="file")
+
+    def test_vllm_mode_requires_config_file(self) -> None:
+        from llm_infer.serving.dispatch.config import VLLMServerLoggingConfig
+
+        with pytest.raises(ValueError, match="mode vllm requires config_file"):
+            VLLMServerLoggingConfig(mode="vllm")
+
+    def test_config_file_requires_vllm_mode(self) -> None:
+        """A file another mode would ignore is an error, not a silent no-op."""
+        from llm_infer.serving.dispatch.config import VLLMServerLoggingConfig
+
+        with pytest.raises(ValueError, match="config_file requires mode vllm"):
+            VLLMServerLoggingConfig(mode="capture", config_file="/x.json")
+
+
+class TestVLLMOutputReaderStop:
+    def test_stop_without_start_closes_pipe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed start() (no thread running) still lets stop() close the pipe."""
+        from llm_infer.engines import vllm_server_output
+        from llm_infer.engines.vllm_server_output import VLLMOutputReader
+
+        monkeypatch.setattr(vllm_server_output, "derive_lg", lambda lg, tags: lg)
+        stream = MagicMock()
+        reader = VLLMOutputReader(MagicMock(), stream, "info")
+
+        reader.stop()
+
+        stream.close.assert_called_once()
+
+
+class TestVLLMOutputParseLine:
+    """parse_line(): one line of captured `vllm serve` output to a log call."""
+
+    def test_vllm_record_keeps_level_and_fields(self) -> None:
+        from llm_infer.engines.vllm_server_output import parse_line
+
+        line = (
+            '{"asctime": "2026-11-10 22:00:49,701", "levelname": "ERROR", '
+            '"name": "vllm.engine.core", "processName": "MainProcess", '
+            '"process": 42, "message": "boom", "exc_info": "Traceback ...", '
+            '"vllm_process_name": "EngineCore"}'
+        )
+
+        assert parse_line(line, "info") == (
+            "error",
+            "boom",
+            {
+                "logger": "vllm.engine.core",
+                "vllm_process": "EngineCore",
+                "pid": 42,
+                "traceback": "Traceback ...",
+            },
+        )
+
+    def test_extra_avoids_log_record_attributes(self) -> None:
+        """Logger rejects extra keys that are LogRecord attributes (ReservedKeyError)."""
+        import logging
+
+        from llm_infer.engines.vllm_server_output import parse_line
+
+        reserved = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
+        line = (
+            '{"asctime": "t", "levelname": "INFO", "name": "vllm.x", '
+            '"processName": "MainProcess", "process": 42, "message": "m", '
+            '"exc_info": "tb", "vllm_process_name": "EngineCore"}'
+        )
+
+        assert not set(parse_line(line, "info")[2]) & reserved
+
+    @pytest.mark.parametrize(
+        ("levelname", "method"),
+        [
+            ("DEBUG", "debug"),
+            ("INFO", "info"),
+            ("WARNING", "warning"),
+            ("CRITICAL", "critical"),
+            ("NOTICE", "debug"),
+        ],
+    )
+    def test_level_translated(self, levelname: str, method: str) -> None:
+        from llm_infer.engines.vllm_server_output import parse_line
+
+        line = f'{{"levelname": "{levelname}", "message": "m"}}'
+
+        assert parse_line(line, "info")[0] == method
+
+    @pytest.mark.parametrize(
+        ("levelname", "method"),
+        [
+            ("INFO", "debug"),
+            ("DEBUG", "debug"),
+            ("WARNING", "warning"),
+            ("ERROR", "error"),
+            ("CRITICAL", "critical"),
+        ],
+    )
+    def test_demote_info_moves_only_info(self, levelname: str, method: str) -> None:
+        """demote_info: debug keeps vLLM's warnings and errors at their level."""
+        from llm_infer.engines.vllm_server_output import parse_line
+
+        line = f'{{"levelname": "{levelname}", "message": "m"}}'
+
+        assert parse_line(line, "debug")[0] == method
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Another library's output (torch's C++ logging)
+            "W1110 22:00:47.317000 2328594 torch/_opaque_base.py:6] deprecated",
+            # A record cut by an interleaved write
+            '{"levelname": "INFO", "message": "par',
+            # JSON, but not a log record
+            "[1, 2]",
+            '{"levelname": "INFO"}',
+        ],
+    )
+    def test_other_output_logged_raw_at_debug(self, line: str) -> None:
+        from llm_infer.engines.vllm_server_output import parse_line
+
+        assert parse_line(line, "info") == ("debug", line, {})
 
 
 class TestVLLMServerRelease:

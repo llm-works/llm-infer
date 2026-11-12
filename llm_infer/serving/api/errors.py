@@ -10,7 +10,11 @@ import asyncio
 from typing import Any
 
 from appinfra.log import Logger
-from appinfra.service.errors import ChannelClosedError, ChannelError
+from appinfra.service.errors import (
+    ChannelClosedError,
+    ChannelError,
+    ChannelResponseError,
+)
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from starlette.requests import Request as HTTPRequest
@@ -118,8 +122,36 @@ def _ipc_error_response(lg: Logger, request_id: str, e: Exception) -> JSONRespon
     if isinstance(e, ChannelClosedError):
         lg.warning("IPC closed", extra={"request_id": request_id, "error": str(e)})
         return _error_json(503, "Server shutting down", "unavailable")
+    if isinstance(e, ChannelResponseError):
+        status: int | None = getattr(e.response, "http_status", None)
+        if status is not None:
+            return _backend_rejected_json(lg, request_id, status, e)
     lg.warning("request failed", extra={"request_id": request_id, "error": str(e)})
     return _error_json(500, str(e), "error")
+
+
+def _backend_rejected_json(
+    lg: Logger, request_id: str, status: int, e: ChannelResponseError
+) -> JSONResponse:
+    """Answer a request the backend rejected with the backend's status and message."""
+    # Imported here: the openai package imports this module at load time.
+    from .openai.errors import http_status_to_error_type
+
+    message = str(e.response.error)
+    lg.info(
+        "request rejected by backend",
+        extra={"request_id": request_id, "status": status, "error": message},
+    )
+    return JSONResponse(
+        status_code=status,
+        content={
+            "error": {
+                "message": message,
+                "type": http_status_to_error_type(status),
+                "code": str(status),
+            }
+        },
+    )
 
 
 async def submit_inference(

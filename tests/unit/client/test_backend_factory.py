@@ -284,6 +284,7 @@ class TestBackendFactoryAuth:
         assert backend._build_headers()["Authorization"] == "Bearer sk-inline"
         backend.close()
 
+    @pytest.mark.integration
     def test_auth_block_gcp_sa_mode(self, mock_lg: Logger, fake_sa_file: str) -> None:
         """auth.mode=gcp_sa returns Gemini backend with GCP SA auth (Vertex)."""
         factory = BackendFactory(mock_lg)

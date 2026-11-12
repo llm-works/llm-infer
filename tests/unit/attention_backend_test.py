@@ -5,10 +5,14 @@
 
 import pytest
 
+from llm_infer.engines.native import attention
 from llm_infer.engines.native.attention import (
     FLASHINFER_AVAILABLE,
     NaiveAttentionBackend,
     get_attention_backend,
+)
+from llm_infer.engines.native.attention.backends.flashinfer import (
+    decode_uses_tensor_cores,
 )
 
 
@@ -31,10 +35,11 @@ class TestGetAttentionBackend:
         with pytest.raises(ValueError, match="Unknown attention backend"):
             get_attention_backend("invalid_backend")
 
-    def test_flashinfer_unavailable_raises(self) -> None:
+    def test_flashinfer_unavailable_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that requesting flashinfer when unavailable raises RuntimeError."""
-        if FLASHINFER_AVAILABLE:
-            pytest.skip("FlashInfer is available")
+        monkeypatch.setattr(attention, "FLASHINFER_AVAILABLE", False)
         with pytest.raises(RuntimeError, match="FlashInfer backend requested"):
             get_attention_backend("flashinfer")
 
@@ -59,3 +64,15 @@ class TestFlashInferAvailability:
     def test_flashinfer_available_is_bool(self) -> None:
         """Test FLASHINFER_AVAILABLE is boolean."""
         assert isinstance(FLASHINFER_AVAILABLE, bool)
+
+
+class TestFlashInferDecodeKernelChoice:
+    """Tensor-core decode only where the CUDA-core decode cannot run."""
+
+    @pytest.mark.parametrize("group_size", [1, 2, 3, 4, 6, 8, 16])
+    def test_cuda_core_for_supported_group_sizes(self, group_size: int) -> None:
+        assert not decode_uses_tensor_cores(group_size * 2, 2)
+
+    @pytest.mark.parametrize("group_size", [5, 7, 12])
+    def test_tensor_cores_for_other_group_sizes(self, group_size: int) -> None:
+        assert decode_uses_tensor_cores(group_size * 2, 2)

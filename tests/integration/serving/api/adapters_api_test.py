@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for serving/api/adapters.py FastAPI routes."""
+"""serving/api/adapters.py routes through TestClient (requests run on its portal thread)."""
 
 from __future__ import annotations
 

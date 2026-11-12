@@ -244,24 +244,25 @@ def _build_messages_with_injections(
 
 
 def _get_chat_template_kwargs(
-    think: bool | None, model_config: ModelConfig | None
+    think: bool | None,
+    model_config: ModelConfig | None,
+    requested: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    """Build per-request chat_template_kwargs from model config and think mode.
+    """Build per-request chat_template_kwargs from model config, request and think.
 
-    For models that use chat_template_kwargs for thinking control (e.g., Qwen 3.5),
-    dynamically set enable_thinking based on the resolved think mode.
-    Non-enable_thinking keys are always preserved.
+    The caller's kwargs override the model config's. For models that use
+    chat_template_kwargs for thinking control (e.g., Qwen 3.5), enable_thinking
+    follows the resolved think mode, whatever the caller sent for it.
     """
-    if model_config is None:
+    base_kwargs = (
+        model_config.vllm.get("chat_template_kwargs") if model_config else None
+    )
+    merged = {**(base_kwargs or {}), **(requested or {})}
+    if not merged:
         return None
-    base_kwargs = model_config.vllm.get("chat_template_kwargs")
-    if not base_kwargs:
-        return None
-    # Override enable_thinking dynamically when present in base config
-    if "enable_thinking" in base_kwargs:
-        effective_think = resolve_think_mode(think, model_config)
-        return {**base_kwargs, "enable_thinking": effective_think}
-    return dict(base_kwargs)
+    if base_kwargs and "enable_thinking" in base_kwargs:
+        merged["enable_thinking"] = resolve_think_mode(think, model_config)
+    return merged
 
 
 def effective_max_tokens(body: ChatCompletionRequest) -> int | None:
@@ -294,7 +295,7 @@ def chat_request_to_internal(
         max_tokens=effective_max_tokens(body),
         temperature=body.temperature,
         top_p=body.top_p,
-        top_k=0,  # OpenAI doesn't expose top_k
+        top_k=body.top_k,
         repetition_penalty=map_frequency_penalty(body.frequency_penalty),
         stream=body.stream,
         use_chat_template=None,  # Let engine auto-detect based on model type
@@ -305,7 +306,10 @@ def chat_request_to_internal(
         tools=tools_to_dict(body.tools),
         tool_choice=tool_choice_to_dict(body.tool_choice),
         response_format=response_format_to_dict(body.response_format),
-        chat_template_kwargs=_get_chat_template_kwargs(body.think, model_config),
+        chat_template_kwargs=_get_chat_template_kwargs(
+            body.think, model_config, body.chat_template_kwargs
+        ),
+        extra_body=body.model_extra or None,
     )
 
 
@@ -323,13 +327,13 @@ def completion_request_to_internal(
         max_tokens=body.max_tokens,
         temperature=body.temperature,
         top_p=body.top_p,
-        top_k=0,
         repetition_penalty=map_frequency_penalty(body.frequency_penalty),
         stream=body.stream,
         use_chat_template=False,  # Raw completion, no chat template
         stop_sequences=normalize_stop_sequences(body.stop),
         model=body.model,
         adapter=body.adapter,
+        extra_body=body.model_extra or None,
     )
 
 

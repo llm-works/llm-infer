@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for BootSequence._refresh_adapters: the rescan before a reacquire."""
+"""Tests for BootSequence._refresh_adapters: the rescan before a reacquire."""
 
 from __future__ import annotations
 

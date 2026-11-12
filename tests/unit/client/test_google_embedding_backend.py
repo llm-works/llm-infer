@@ -432,6 +432,7 @@ class TestGoogleEmbeddingBackendVertex:
         assert payload["model"] == "models/gemini-embedding-001"
         backend.close()
 
+    @pytest.mark.integration
     def test_sa_auth_sends_bearer_header(self, mock_lg: Logger, tmp_path) -> None:
         """With GCP SA auth, Authorization: Bearer is sent instead of x-goog-api-key."""
         import json as _json

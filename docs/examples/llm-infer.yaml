@@ -1,0 +1,177 @@
+# Complete llm-infer configuration, in one file.
+#
+# Every key here is one llm-infer reads: tests/integration/config_example_test.py
+# loads this file and fails on any key the config parsing ignores. The packaged
+# etc/ splits the same sections over several files with !include.
+#
+# Use it with: llm-infer --etc-dir <dir holding this file as llm-infer.yaml> serve
+
+# Models: where to find them, the default, and per-model settings
+models:
+  # Directories searched for a model name (local-file engines: native, vllm,
+  # vllm-server, peft)
+  locations:
+    - !path /srv/models
+
+  # Model served when --model / --model-path is not given.
+  # Override at runtime: INFRA_MODELS_DEFAULT=<name>
+  default: qwen2.5-7b-instruct
+
+  # YAML anchors for reuse; not read as configuration
+  templates:
+    qwen_think: &qwen_think
+      think:
+        default: false
+        enable_suffix: " /think"
+        disable_suffix: " /no_think"
+        tags:
+          open: ["<think>"]
+          close: ["</think>"]
+
+  models:
+    qwen2.5-7b-instruct:
+      <<: *qwen_think
+      max_model_len: 16384
+      ollama: qwen2.5:7b          # Name in Ollama's registry (ollama engine)
+      vllm:                       # Applied to the vllm or vllm-server engine
+        gpu_memory_gb: 20.0
+        enable_prefix_caching: true
+
+    bge-small-en-v1.5:
+      task: embed                 # Embedding model (default: generate)
+      vllm:
+        enable_prefix_caching: false
+
+  # Settings for a model not listed above
+  defaults:
+    system_prompt: null
+    think:
+      default: false
+      tags:
+        open: ["<think>", "<thinking>"]
+        close: ["</think>", "</thinking>"]
+
+# Engine: ollama | vllm | vllm-server | native | peft
+backends:
+  engine: vllm-server
+  model: native                   # native | gptqmodel (engine native only)
+  linear: marlin                  # pytorch | marlin (model native only)
+
+engines:
+  vllm_server:
+    host: http://localhost
+    port: 8100
+    auto_start: true              # Start `vllm serve` (false: connect to a running one)
+    binary_path: vllm
+    startup_timeout: 300
+    stop_timeout: 5.0
+    timeout: 300
+    gpu_memory_gb: null           # Absolute limit; null uses gpu_memory_utilization
+    gpu_memory_utilization: 0.9
+    max_model_len: null
+    max_num_seqs: 16
+    enforce_eager: false
+    dtype: auto
+    trust_remote_code: true
+    enable_prefix_caching: true
+    tool_call_parser: hermes
+    reasoning_parser: null
+    chat_template_kwargs: {}
+    extra_args: []
+    warmup: true
+    max_concurrent: 4
+    lora:
+      enabled: true
+      max_loras: 4
+      max_lora_rank: 128
+      base_path: !path /srv/adapters
+    logging:
+      mode: stderr                # capture | stdout | stderr | vllm | drop
+      config_file: null           # Mode vllm: vLLM logging config (JSON)
+      demote_info: info           # Mode capture: level for vLLM's INFO records
+
+  vllm:
+    gpu_memory_gb: null
+    gpu_memory_utilization: 0.9
+    max_model_len: 16384
+    tensor_parallel_size: 1
+    max_num_seqs: 256
+    enable_prefix_caching: true
+    enforce_eager: false
+    dtype: auto
+    warmup: true
+    lora:
+      enabled: true
+      max_loras: 4
+      max_lora_rank: 128
+      base_path: !path /srv/adapters
+
+  ollama:
+    host: http://localhost:11434
+    timeout: 300
+    models_path: !path /srv/ollama
+    auto_start: true
+    keep_alive: 5m
+    num_ctx: null
+    num_gpu: null
+    warmup: true
+    max_concurrent: 4
+
+  native:
+    num_blocks: 1024
+    block_size: 16
+    max_batch_size: 4
+    device: cuda
+    dtype: float16
+    attention_backend: auto       # auto | flashinfer | naive
+    torch_compile: false
+    warmup: true
+
+  peft:
+    device: cuda
+    dtype: auto
+    max_cached_adapters: 4
+    load_in_4bit: false
+    warmup: false
+    adapter_base_path: !path /srv/adapters
+
+dispatch:
+  handler:
+    primary: concurrent_http      # HTTP engines (vllm-server, ollama)
+    fallback: bounded             # In-process engines (native, vllm)
+  max_pending: 10
+  poll_timeout: 0.01
+  batch_streaming: false
+  in_flight_join_timeout: 2.0
+  server_stop_timeout: 2.0
+
+admin:
+  enabled: false
+  host: 127.0.0.1                 # An intranet address, never a public one
+  port: 8090
+  tokens: []
+  retry_after: 60
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  response_timeout: 300.0
+  log_file: null
+  uvicorn:
+    workers: 1
+    timeout_keep_alive: 5
+    backlog: 2048
+    log_level: warning
+    access_log: false
+
+third_party_logging:
+  torch: warning
+  transformers: error
+
+# appinfra logging (see appinfra's logging docs)
+logging:
+  level: info
+  handlers:
+    console:
+      type: console
+      stream: stdout

@@ -1,20 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for serving/api/openai/router.py."""
+"""Unit tests for serving/api/openai/router.py helpers; the endpoints are tested
+in integration."""
 
 from __future__ import annotations
 
 from typing import Any
 from unittest.mock import MagicMock
 
-from appinfra.log import Logger
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from starlette.middleware.base import BaseHTTPMiddleware
-
 from llm_infer.serving.api.openai.router import (
-    OpenAIRouterConfig,
     _build_adapter_fallback_headers,
     _build_adapter_info,
     _build_chat_response,
@@ -29,10 +24,6 @@ from llm_infer.serving.api.openai.router import (
     _get_think_tags,
     _normalize_response,
     _with_fallback_headers,
-    create_openai_router,
-)
-from llm_infer.serving.dispatch.types import (
-    EmbeddingResponse as InternalEmbeddingResponse,
 )
 from llm_infer.serving.dispatch.types import (
     RequestStatus,
@@ -41,34 +32,6 @@ from llm_infer.serving.dispatch.types import (
 from llm_infer.serving.dispatch.types import (
     Response as InternalResponse,
 )
-
-
-class _LgInjector(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: Any) -> Any:
-        request.state.lg = MagicMock(spec=Logger)
-        return await call_next(request)
-
-
-class _StubIPC:
-    def __init__(self, response: Any | Exception) -> None:
-        self.response = response
-        self.submitted: list[Any] = []
-
-    async def submit(self, request: Any) -> Any:
-        self.submitted.append(request)
-        if isinstance(self.response, Exception):
-            raise self.response
-        return self.response
-
-
-def _make_app(ipc: _StubIPC, model_name: str = "test-model") -> FastAPI:
-    app = FastAPI()
-    app.state.ipc_channel = ipc
-    app.add_middleware(_LgInjector)
-    app.include_router(
-        create_openai_router(OpenAIRouterConfig(model_name=model_name)), prefix="/v1"
-    )
-    return app
 
 
 def _completed_response(
@@ -393,170 +356,3 @@ def test_build_embedding_response_empty() -> None:
     response = MagicMock(embeddings=None, total_tokens=0)
     result = _build_embedding_response(response, "test-model")
     assert result.data == []
-
-
-# ---------------------------------------------------------------------------
-# /v1/models endpoints
-# ---------------------------------------------------------------------------
-
-
-class TestModelsEndpoints:
-    def test_list_models(self) -> None:
-        ipc = _StubIPC(MagicMock())
-        client = TestClient(_make_app(ipc, model_name="qwen-7b"))
-        resp = client.get("/v1/models")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert len(body["data"]) == 1
-        assert body["data"][0]["id"] == "qwen-7b"
-
-    def test_get_model_found(self) -> None:
-        ipc = _StubIPC(MagicMock())
-        client = TestClient(_make_app(ipc, model_name="qwen-7b"))
-        resp = client.get("/v1/models/qwen-7b")
-        assert resp.status_code == 200
-
-    def test_get_model_not_found(self) -> None:
-        ipc = _StubIPC(MagicMock())
-        client = TestClient(_make_app(ipc, model_name="qwen-7b"))
-        resp = client.get("/v1/models/other-model")
-        assert resp.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# /v1/chat/completions endpoint
-# ---------------------------------------------------------------------------
-
-
-class TestChatCompletions:
-    def test_basic_non_streaming(self) -> None:
-        response = _completed_response(result="hello")
-        ipc = _StubIPC(response)
-        client = TestClient(_make_app(ipc))
-        resp = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hi"}],
-            },
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["choices"][0]["message"]["content"] == "hello"
-
-    def test_with_max_tokens(self) -> None:
-        response = _completed_response()
-        ipc = _StubIPC(response)
-        client = TestClient(_make_app(ipc))
-        resp = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hi"}],
-                "max_tokens": 50,
-            },
-        )
-        assert resp.status_code == 200
-
-    def test_with_tool_calls(self) -> None:
-        response = _completed_response(
-            tool_calls=[{"function": {"name": "f", "arguments": "{}"}, "id": "tc1"}]
-        )
-        ipc = _StubIPC(response)
-        client = TestClient(_make_app(ipc))
-        resp = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hi"}],
-            },
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["choices"][0]["finish_reason"] == "tool_calls"
-
-    def test_timeout(self) -> None:
-        ipc = _StubIPC(TimeoutError("timeout"))
-        client = TestClient(_make_app(ipc))
-        resp = client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hi"}],
-            },
-        )
-        assert resp.status_code == 504
-
-
-# ---------------------------------------------------------------------------
-# /v1/completions endpoint
-# ---------------------------------------------------------------------------
-
-
-class TestCompletions:
-    def test_basic(self) -> None:
-        response = _completed_response(result="generated")
-        ipc = _StubIPC(response)
-        client = TestClient(_make_app(ipc))
-        resp = client.post(
-            "/v1/completions",
-            json={"model": "test-model", "prompt": "hello", "max_tokens": 50},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["choices"][0]["text"] == "generated"
-
-    def test_with_echo(self) -> None:
-        response = _completed_response(result=" generated")
-        ipc = _StubIPC(response)
-        client = TestClient(_make_app(ipc))
-        resp = client.post(
-            "/v1/completions",
-            json={"model": "test-model", "prompt": "prompt:", "echo": True},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["choices"][0]["text"] == "prompt: generated"
-
-
-# ---------------------------------------------------------------------------
-# /v1/embeddings endpoint
-# ---------------------------------------------------------------------------
-
-
-class TestEmbeddings:
-    def test_single_input(self) -> None:
-        response = InternalEmbeddingResponse(
-            id="x",
-            status=RequestStatus.COMPLETED,
-            embeddings=[[0.1, 0.2, 0.3]],
-            total_tokens=5,
-        )
-        ipc = _StubIPC(response)
-        client = TestClient(_make_app(ipc))
-        resp = client.post("/v1/embeddings", json={"model": "test", "input": "hello"})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert len(body["data"]) == 1
-
-    def test_list_input(self) -> None:
-        response = InternalEmbeddingResponse(
-            id="x",
-            status=RequestStatus.COMPLETED,
-            embeddings=[[0.1], [0.2]],
-            total_tokens=10,
-        )
-        ipc = _StubIPC(response)
-        client = TestClient(_make_app(ipc))
-        resp = client.post(
-            "/v1/embeddings", json={"model": "test", "input": ["a", "b"]}
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert len(body["data"]) == 2
-
-    def test_timeout(self) -> None:
-        ipc = _StubIPC(TimeoutError("timeout"))
-        client = TestClient(_make_app(ipc))
-        resp = client.post("/v1/embeddings", json={"model": "test", "input": "hi"})
-        assert resp.status_code == 504

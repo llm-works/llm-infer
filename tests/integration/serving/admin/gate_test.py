@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for BackendGateMiddleware and SharedBackendState."""
+"""BackendGateMiddleware through TestClient (requests run on its portal thread)."""
 
 from __future__ import annotations
 
@@ -10,10 +10,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from llm_infer.serving.admin.gate import BackendGateMiddleware
-from llm_infer.serving.admin.state import BackendState, SharedBackendState
+from llm_infer.serving.admin.state import BackendState
+from tests.support.serving.admin import LocalBackendState
 
 
-def _client(state: SharedBackendState) -> TestClient:
+def _client(state: LocalBackendState) -> TestClient:
     app = FastAPI()
 
     @app.post("/v1/chat/completions")
@@ -28,10 +29,10 @@ def _client(state: SharedBackendState) -> TestClient:
     return TestClient(app)
 
 
-def _state(value: BackendState) -> SharedBackendState:
-    shared = SharedBackendState()
-    shared.set(value)
-    return shared
+def _state(value: BackendState) -> LocalBackendState:
+    state = LocalBackendState()
+    state.set(value)
+    return state
 
 
 @pytest.mark.parametrize(
@@ -57,7 +58,3 @@ def test_health_passes_while_released() -> None:
     r = _client(_state(BackendState.RELEASED)).get("/health")
 
     assert r.status_code == 200
-
-
-def test_shared_state_starts_initializing() -> None:
-    assert SharedBackendState().get() == BackendState.INITIALIZING

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from ...engines.protocol import EngineRequestError
 from ...schemas.openai import FinishReason
 
 if TYPE_CHECKING:
@@ -57,9 +58,11 @@ class Request:
     # None = no cap: the engine generates up to the remaining context window
     max_tokens: int | None
     context: RequestContext | None = None  # Shared context for logging/timing
-    temperature: float = 1.0
-    top_p: float = 1.0
-    top_k: int = 0
+    # None = not set by the caller: the engine's default applies (vLLM and
+    # Ollama: the model's own generation settings)
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
     repetition_penalty: float = 1.1
     stream: bool = False
     use_chat_template: bool | None = None
@@ -76,6 +79,18 @@ class Request:
     response_format: dict[str, Any] | None = None  # {"type": "json_object"} or schema
     # Chat template kwargs (e.g., {"enable_thinking": true/false} for Qwen 3.5)
     chat_template_kwargs: dict[str, Any] | None = None
+    # Request fields llm-infer does not interpret (min_p, reasoning_effort, ...);
+    # engines that call a backend API forward them as given
+    extra_body: dict[str, Any] | None = None
+
+    def sampling(self) -> dict[str, Any]:
+        """Sampling settings the caller set; the others keep the engine's default."""
+        values = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+        }
+        return {k: v for k, v in values.items() if v is not None}
 
 
 @dataclass
@@ -94,6 +109,25 @@ class Response:
     adapter: ResponseAdapterInfo | None = None
     # Engine-reported reason; None if the engine didn't report one
     finish_reason: FinishReason | None = None
+    # HTTP status to answer a failure with; None answers 500
+    http_status: int | None = None
+
+
+def failure_response(request_id: str, error: Exception) -> Response:
+    """A FAILED response for `error`.
+
+    A request the backend rejected (4xx) keeps that status for the API to
+    answer with; any other error is reported as a server failure.
+    """
+    http_status = None
+    if isinstance(error, EngineRequestError) and 400 <= error.status_code < 500:
+        http_status = error.status_code
+    return Response(
+        id=request_id,
+        status=RequestStatus.FAILED,
+        error=str(error),
+        http_status=http_status,
+    )
 
 
 @dataclass

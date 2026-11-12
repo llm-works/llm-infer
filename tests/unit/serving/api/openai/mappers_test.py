@@ -219,21 +219,29 @@ class TestGetSystemPrompt:
 
 class TestGetChatTemplateKwargs:
     def test_no_config(self) -> None:
-        assert _get_chat_template_kwargs(True, None) is None
+        assert _get_chat_template_kwargs(True, None, None) is None
 
     def test_no_kwargs(self) -> None:
         cfg = _model_cfg()
-        assert _get_chat_template_kwargs(True, cfg) is None
+        assert _get_chat_template_kwargs(True, cfg, None) is None
 
     def test_with_enable_thinking_override(self) -> None:
         cfg = _model_cfg(chat_template_kwargs={"enable_thinking": False})
-        result = _get_chat_template_kwargs(True, cfg)
+        result = _get_chat_template_kwargs(True, cfg, None)
         assert result == {"enable_thinking": True}
 
     def test_other_kwargs_passed_through(self) -> None:
         cfg = _model_cfg(chat_template_kwargs={"some_key": "value"})
-        result = _get_chat_template_kwargs(True, cfg)
+        result = _get_chat_template_kwargs(True, cfg, None)
         assert result == {"some_key": "value"}
+
+    def test_caller_kwargs_without_model_config(self) -> None:
+        assert _get_chat_template_kwargs(True, None, {"k": 1}) == {"k": 1}
+
+    def test_caller_kwargs_override_model_kwargs(self) -> None:
+        cfg = _model_cfg(chat_template_kwargs={"k": "model"})
+        result = _get_chat_template_kwargs(True, cfg, {"k": "caller"})
+        assert result == {"k": "caller"}
 
 
 class TestHasSystemMessage:
@@ -405,8 +413,59 @@ class TestChatRequestToInternal:
         result = chat_request_to_internal(body, "r1", cfg)
         assert "/think" in result.prompt
 
+    def test_unset_sampling_takes_openai_defaults(self) -> None:
+        """temperature/top_p default as in the OpenAI API; top_k is left to the model."""
+        body = ChatCompletionRequest(model="m", messages=[_msg("user", "hi")])
+        result = chat_request_to_internal(body, "r1")
+        assert (result.temperature, result.top_p, result.top_k) == (1.0, 1.0, None)
+        assert result.extra_body is None
+
+    def test_set_sampling_mapped(self) -> None:
+        body = ChatCompletionRequest(
+            model="m",
+            messages=[_msg("user", "hi")],
+            temperature=0.3,
+            top_p=0.9,
+            top_k=20,
+        )
+        result = chat_request_to_internal(body, "r1")
+        assert (result.temperature, result.top_p, result.top_k) == (0.3, 0.9, 20)
+
+    def test_undeclared_fields_forwarded(self) -> None:
+        extra = {
+            "min_p": 0.05,
+            "presence_penalty": 1.5,
+            "reasoning_effort": "low",
+            "thinking_token_budget": 1500,
+        }
+        body = ChatCompletionRequest.model_validate(
+            {"model": "m", "messages": [{"role": "user", "content": "hi"}], **extra}
+        )
+        result = chat_request_to_internal(body, "r1")
+        assert result.extra_body == extra
+
+    def test_caller_template_kwargs_kept_think_sets_enable_thinking(self) -> None:
+        cfg = _model_cfg(chat_template_kwargs={"enable_thinking": False})
+        body = ChatCompletionRequest(
+            model="m",
+            messages=[_msg("user", "hi")],
+            think=True,
+            chat_template_kwargs={"enable_thinking": False, "custom": 1},
+        )
+        result = chat_request_to_internal(body, "r1", cfg)
+        assert result.chat_template_kwargs == {"enable_thinking": True, "custom": 1}
+        assert result.extra_body is None
+
 
 class TestCompletionRequestToInternal:
+    def test_unset_sampling_and_undeclared_fields(self) -> None:
+        body = CompletionRequest.model_validate(
+            {"model": "m", "prompt": "hi", "min_p": 0.05}
+        )
+        result = completion_request_to_internal(body, "r1")
+        assert (result.temperature, result.top_p) == (1.0, 1.0)
+        assert result.extra_body == {"min_p": 0.05}
+
     def test_string_prompt(self) -> None:
         body = CompletionRequest(model="m", prompt="hello")
         result = completion_request_to_internal(body, "r1")

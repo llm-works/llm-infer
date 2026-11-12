@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for EngineConfig."""
+"""Tests for EngineConfig, with model configs written to a temp directory."""
 
 import tempfile
 

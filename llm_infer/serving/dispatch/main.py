@@ -149,10 +149,17 @@ class BootSequence:
             "server started",
             extra={
                 "host": self._config.api.host,
-                "port": self._config.api.port,
+                "port": self.api_port,
                 "pid": proc.pid,
             },
         )
+
+    @property
+    def api_port(self) -> int:
+        """The port the API server bound; with api.port 0, the one the OS picked."""
+        if self._server is None:
+            raise RuntimeError("api_port is known once start_server() has run")
+        return self._server.port
 
     def load_engine(self) -> None:
         """Phase 2: Load model and create engine.

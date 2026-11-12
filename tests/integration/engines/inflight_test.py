@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for InFlightConnections (abort one httpx call from another thread)."""
+"""Tests for InFlightConnections (abort one httpx call from another thread)."""
 
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..handler import RequestHandler
-from ..types import Request, RequestStatus, Response
+from ..types import Request, RequestStatus, Response, failure_response
 
 if TYPE_CHECKING:
     from ....engines.protocol import InferenceEngineProtocol
@@ -99,9 +99,7 @@ class ContinuousBatchingHandler(RequestHandler):
             result = self.engine.generate(
                 prompt=running.request.prompt,
                 max_tokens=running.request.max_tokens,
-                temperature=running.request.temperature,
-                top_p=running.request.top_p,
-                top_k=running.request.top_k,
+                **running.request.sampling(),
                 repetition_penalty=running.request.repetition_penalty,
                 use_chat_template=running.request.use_chat_template,
                 stop_sequences=running.request.stop_sequences,
@@ -121,7 +119,7 @@ class ContinuousBatchingHandler(RequestHandler):
                 ),
             )
         except Exception as e:
-            return Response(id=req_id, status=RequestStatus.FAILED, error=str(e))
+            return failure_response(req_id, e)
 
     def step(self) -> list[Response]:
         """Execute one batched processing step (stub: sequential fallback)."""

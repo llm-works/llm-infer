@@ -14,6 +14,7 @@ from appinfra.log import Logger
 from appinfra.service.errors import (
     ChannelClosedError,
     ChannelError,
+    ChannelResponseError,
     ChannelTimeoutError,
 )
 from fastapi import HTTPException
@@ -77,6 +78,34 @@ async def test_error_response_maps_to_500_with_message() -> None:
 
     assert resp.status_code == 500
     assert _error(resp)["message"] == "Request failed: vLLM server error: boom"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_error_keeps_status_and_message() -> None:
+    """A response carrying the backend's 4xx answers with it, not 500."""
+    response = Response(
+        id="r1",
+        status=RequestStatus.FAILED,
+        error="max_tokens=40000 cannot be greater than max_model_len=32768.",
+        http_status=400,
+    )
+    resp = await _submit(ChannelResponseError(response))
+
+    assert resp.status_code == 400
+    assert _error(resp) == {
+        "message": "max_tokens=40000 cannot be greater than max_model_len=32768.",
+        "type": "invalid_request_error",
+        "code": "400",
+    }
+
+
+@pytest.mark.asyncio
+async def test_error_response_without_status_maps_to_500() -> None:
+    response = Response(id="r1", status=RequestStatus.FAILED, error="boom")
+    resp = await _submit(ChannelResponseError(response))
+
+    assert resp.status_code == 500
+    assert _error(resp)["message"] == "Request failed: boom"
 
 
 def test_unavailable_status_maps_to_503() -> None:

@@ -40,7 +40,7 @@ jobs:
           # dev: appinfra's toolchain (ruff, mypy, pylint). client and appinfra[fastapi]:
           # the typed libraries mypy resolves; the ML stack is skipped by the mypy
           # overrides in pyproject.toml, not installed.
-          python -m pip install -e ".[dev,client]" "appinfra[fastapi]>=0.14.0"
+          python -m pip install -e ".[dev,client]" "appinfra[dev,fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
 
       - name: Lint workflows
         # zizmor policy in .github/zizmor.yml; actionlint runs shellcheck on run: scripts
@@ -95,8 +95,9 @@ jobs:
           # Install llm-saia from GitHub (need core public API re-exports)
           python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
           # python -m pip install "llm-saia>=0.2.0,<0.3.0"  # switch back after next llm-saia release
-          # Install package with dev, runtime, saia, and gcp extras
-          python -m pip install -e ".[dev,runtime,saia,gcp]"
+          python -m pip install "appinfra[dev,fastapi,validation] @ git+https://github.com/llm-works/appinfra.git@develop"
+          # Install package with the ci extra (dev, runtime and client)
+          python -m pip install -e ".[ci]"
 
       - name: Run unit tests
         run: python -m pytest tests/ -m unit -v --tb=short
@@ -149,7 +150,7 @@ jobs:
           # Install the built wheel (not editable) so bundled package-data
           # (etc/) is exercised the same way a `pip install llm-infer` user
           # would hit it. Ollama engine talks HTTP — no torch needed.
-          python -m pip install ./dist/*.whl "appinfra[fastapi]>=0.14.0"
+          python -m pip install ./dist/*.whl "appinfra[fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
 
       - name: Verify client-library imports on base install
         # cd out of the source tree so `import llm_infer` resolves to the
@@ -232,7 +233,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # The client examples need FastAPI (retry demo server), not torch
-          python -m pip install -e ".[dev]" "appinfra[fastapi]>=0.14.0"
+          python -m pip install -e ".[dev]" "appinfra[dev,fastapi] @ git+https://github.com/llm-works/appinfra.git@develop"
 
       - name: Run examples
         run: make examples.check
@@ -286,8 +287,9 @@ jobs:
           # Install llm-saia from GitHub (need core public API re-exports)
           python -m pip install "llm-saia @ git+https://github.com/llm-works/llm-saia.git@develop"
           # python -m pip install "llm-saia>=0.2.0,<0.3.0"  # switch back after next llm-saia release
-          # Install package with dev, runtime, saia, and gcp extras
-          python -m pip install -e ".[dev,runtime,saia,gcp]"
+          python -m pip install "appinfra[dev,fastapi,validation] @ git+https://github.com/llm-works/appinfra.git@develop"
+          # Install package with the ci extra (dev, runtime and client)
+          python -m pip install -e ".[ci]"
 
       - name: Run tests with coverage
         run: python -m pytest tests/ -m unit --cov=llm_infer --cov-report=xml --cov-report=term

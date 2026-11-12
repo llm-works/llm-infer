@@ -315,6 +315,63 @@ class VLLMConfig:
             kwargs["max_lora_rank"] = self.lora.max_lora_rank
 
 
+VLLM_LOGGING_MODES = ("capture", "stdout", "stderr", "vllm", "drop")
+# Levels vLLM's INFO records can be logged at in capture mode (Logger methods)
+VLLM_DEMOTE_INFO_LEVELS = ("info", "debug", "trace")
+
+
+@dataclass
+class VLLMServerLoggingConfig:
+    """Logging of the `vllm serve` process serve starts.
+
+    serve disables vLLM's logging setup in its own process (vLLM's dictConfig
+    would close serve's file handlers); the `vllm serve` process gets these
+    settings instead. The modes are described in engines/vllm_server_output.py.
+    """
+
+    # Where the process's output goes: stderr, stdout, vllm (its logging config
+    # file), drop (vLLM's logger output dropped), capture (experimental: logged
+    # through serve's logger)
+    mode: str = "stderr"
+    # Mode vllm: vLLM's logging config (JSON, Python dictConfig), used in place
+    # of vLLM's default (a stdout handler)
+    config_file: str | None = None
+    # Mode capture: our level for vLLM's INFO records (its warnings and errors
+    # keep theirs); debug keeps vLLM's progress out of serve's info level.
+    # Ignored by the other modes, so a -o mode switch works without it.
+    demote_info: str = "info"
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        """Reject invalid settings; again at server start, after -o overrides."""
+        if self.mode not in VLLM_LOGGING_MODES:
+            raise ValueError(
+                f"vllm_server.logging.mode must be one of "
+                f"{', '.join(VLLM_LOGGING_MODES)}, got {self.mode!r}"
+            )
+        if self.demote_info not in VLLM_DEMOTE_INFO_LEVELS:
+            raise ValueError(
+                f"vllm_server.logging.demote_info must be one of "
+                f"{', '.join(VLLM_DEMOTE_INFO_LEVELS)}, got {self.demote_info!r}"
+            )
+        if self.mode == "vllm" and self.config_file is None:
+            raise ValueError("vllm_server.logging: mode vllm requires config_file")
+        if self.mode != "vllm" and self.config_file is not None:
+            raise ValueError("vllm_server.logging: config_file requires mode vllm")
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "VLLMServerLoggingConfig":
+        data = data or {}
+        config_file = data.get("config_file")
+        return cls(
+            mode=str(data.get("mode", "stderr")),
+            config_file=None if config_file is None else str(config_file),
+            demote_info=str(data.get("demote_info", "info")),
+        )
+
+
 @dataclass
 class VLLMServerConfig:
     """vLLM server engine configuration.
@@ -375,6 +432,9 @@ class VLLMServerConfig:
     # e.g., ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}']
     extra_args: list[str] = field(default_factory=list)
 
+    # Logging of the `vllm serve` process
+    logging: VLLMServerLoggingConfig = field(default_factory=VLLMServerLoggingConfig)
+
     # Warmup
     warmup: bool = True
 
@@ -407,6 +467,8 @@ class VLLMServerConfig:
                     max_lora_rank=lora_data.get("max_lora_rank", 128),
                     base_path=lora_data.get("base_path"),
                 )
+            elif f.name == "logging" and "logging" in data:
+                kwargs["logging"] = VLLMServerLoggingConfig.from_dict(data["logging"])
             elif f.name != "model_path" and f.name in data:
                 kwargs[f.name] = data[f.name]
         return cls(**kwargs)
@@ -460,6 +522,14 @@ class ThirdPartyLoggingConfig:
     torch: str = "warning"  # Suppresses inductor/dynamo noise
     transformers: str = "error"  # Suppresses "Special tokens" warning
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ThirdPartyLoggingConfig":
+        """Create from the third_party_logging section."""
+        return cls(
+            torch=data.get("torch", "warning"),
+            transformers=data.get("transformers", "error"),
+        )
+
 
 @dataclass
 class InferenceConfig:
@@ -471,14 +541,15 @@ class InferenceConfig:
     dispatch: DispatchConfig = field(default_factory=DispatchConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
     admin: AdminConfig = field(default_factory=AdminConfig)
-    logging: ThirdPartyLoggingConfig = field(default_factory=ThirdPartyLoggingConfig)
+    third_party_logging: ThirdPartyLoggingConfig = field(
+        default_factory=ThirdPartyLoggingConfig
+    )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "InferenceConfig":
         """Create config from dictionary."""
         backends = data.get("backends", {}) or {}
         dispatch = data.get("dispatch", {}) or {}
-        logging = data.get("logging", {}) or {}
 
         return cls(
             models=ModelsConfig.from_dict(data.get("models", {}) or {}),
@@ -491,9 +562,8 @@ class InferenceConfig:
             dispatch=cls._parse_dispatch_config(dispatch),
             api=cls._parse_api_config(data.get("api", {}) or {}),
             admin=AdminConfig.model_validate(data.get("admin") or {}),
-            logging=ThirdPartyLoggingConfig(
-                torch=logging.get("torch", "warning"),
-                transformers=logging.get("transformers", "error"),
+            third_party_logging=ThirdPartyLoggingConfig.from_dict(
+                data.get("third_party_logging") or {}
             ),
         )
 

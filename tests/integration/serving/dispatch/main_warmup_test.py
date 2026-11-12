@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright 2026 The llm-infer Authors
 
-"""Unit tests for BootSequence.warmup wiring."""
+"""Tests for BootSequence.warmup wiring."""
 
 from __future__ import annotations
 

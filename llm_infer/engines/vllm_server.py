@@ -25,7 +25,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -36,9 +35,15 @@ from appinfra.log import Logger
 from ..schemas.openai import FinishReason
 from .finish import parse_finish_reason
 from .inflight import InFlightConnections, RequestAbortedError
-from .protocol import BackendNotManagedError
-from .remote import LineStream, RemoteEngine, truncate_embedding
+from .protocol import BackendNotManagedError, EngineRequestError
+from .remote import LineStream, RemoteEngine, add_extra_body, truncate_embedding
 from .vllm_common import resolve_gpu_memory_utilization
+from .vllm_server_output import (
+    VLLMOutputReader,
+    serve_env,
+    serve_flags,
+    serve_streams,
+)
 
 if TYPE_CHECKING:
     from ..context import RequestContext
@@ -79,6 +84,29 @@ def _checked_extra_args(extra_args: list[Any]) -> list[str]:
             "these; use the host / port / served_model_name config instead"
         )
     return args
+
+
+def _add_vllm_params(
+    payload: dict[str, Any],
+    top_k: int | None,
+    repetition_penalty: float,
+    extra_body: dict[str, Any] | None,
+) -> None:
+    """Add vLLM's non-OpenAI sampling fields and the caller's extra fields."""
+    if repetition_penalty != 1.0:
+        payload["repetition_penalty"] = repetition_penalty
+    if top_k is not None:
+        payload["top_k"] = top_k
+    add_extra_body(payload, extra_body)
+
+
+def _reasoning_text(message: dict[str, Any]) -> str:
+    """Reasoning from a vLLM message or delta.
+
+    Current vLLM names the field `reasoning`; older releases `reasoning_content`.
+    """
+    text: str = message.get("reasoning") or message.get("reasoning_content") or ""
+    return text
 
 
 def _get_adapter_name(lora_request: Any) -> str:
@@ -280,8 +308,8 @@ class VLLMServerStreamingIterator(LineStream):
                 self.finish_reason = FinishReason.STOP
 
     def _bridge_reasoning_content(self, delta: dict[str, Any]) -> str:
-        """Bridge vLLM reasoning_content into <think> tags for ThinkTagParser."""
-        reasoning: str = delta.get("reasoning_content") or ""
+        """Bridge vLLM reasoning into <think> tags for ThinkTagParser."""
+        reasoning = _reasoning_text(delta)
         content: str = delta.get("content") or ""
         result = ""
         if reasoning:
@@ -381,6 +409,8 @@ class VLLMServerEngine(RemoteEngine):
         self._lg = lg
         self._config = config
         self._process: subprocess.Popen[bytes] | None = None
+        # Reads the process's output in logging mode capture
+        self._output: VLLMOutputReader | None = None
         self._owns_process = False
         self._base_url = self._parse_base_url(config)
         self._model_name = config.served_model_name or Path(config.model_path).name
@@ -552,6 +582,7 @@ class VLLMServerEngine(RemoteEngine):
         self._add_engine_flags(cmd)
         self._add_chat_flags(cmd)
         self._add_lora_flags(cmd)
+        cmd.extend(serve_flags(cfg.logging))
 
         # Last, so user arguments win over the flags above
         cmd.extend(_checked_extra_args(cfg.extra_args))
@@ -581,20 +612,33 @@ class VLLMServerEngine(RemoteEngine):
 
     def _start_server(self) -> None:
         """Start the vLLM server process."""
+        logging_cfg = self._config.logging
+        logging_cfg.validate()  # -o overrides bypass the check at config load
         cmd = self._build_serve_command()
         self._lg.info(
             "starting vllm server",
-            extra={"cmd": " ".join(cmd), "port": self._config.port},
+            extra={
+                "cmd": " ".join(cmd),
+                "port": self._config.port,
+                "logging": logging_cfg.mode,
+            },
         )
 
+        stdout, stderr = serve_streams(logging_cfg)
         self._process = subprocess.Popen(
             cmd,
-            env=os.environ.copy(),
-            stdout=sys.stderr,
-            stderr=sys.stderr,
+            env=serve_env(logging_cfg),
+            stdout=stdout,
+            stderr=stderr,
             start_new_session=True,
         )
         self._owns_process = True
+        if self._process.stdout is not None:
+            # Before the wait: vLLM blocks on a full pipe while it starts up
+            self._output = VLLMOutputReader(
+                self._lg, self._process.stdout, logging_cfg.demote_info
+            )
+            self._output.start()
 
         self._wait_for_server()
 
@@ -611,7 +655,7 @@ class VLLMServerEngine(RemoteEngine):
             if self._process is not None and self._process.poll() is not None:
                 raise RuntimeError(
                     f"vllm serve process exited with code {self._process.returncode}. "
-                    f"Check stderr output above for details."
+                    "Check the vllm serve output above for details."
                 )
             if self._is_server_running():
                 # Double-check process didn't die immediately after responding
@@ -648,6 +692,9 @@ class VLLMServerEngine(RemoteEngine):
                     "vllm server processes still running", extra={"pgid": pgid}
                 )
         self._process = None
+        if self._output is not None:
+            self._output.stop()
+            self._output = None
 
     def _signal_group(self, pgid: int, sig: signal.Signals) -> None:
         try:
@@ -852,8 +899,8 @@ class VLLMServerEngine(RemoteEngine):
         messages: list[dict[str, Any]] | None,
         prompt: str,
         max_tokens: int | None,
-        temperature: float,
-        top_p: float,
+        temperature: float | None,
+        top_p: float | None,
         stop_sequences: list[str] | None,
         stream: bool,
         lora_request: Any | None = None,
@@ -862,17 +909,23 @@ class VLLMServerEngine(RemoteEngine):
         response_format: dict[str, Any] | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Build OpenAI-compatible chat completions payload."""
+        """Build OpenAI-compatible chat completions payload.
+
+        Sampling fields left None are omitted, so vLLM applies the model's
+        generation_config.
+        """
         api_messages = (
             list(messages) if messages else [{"role": "user", "content": prompt}]
         )
         payload: dict[str, Any] = {
             "model": self._resolve_model_name(lora_request),
             "messages": api_messages,
-            "temperature": temperature,
-            "top_p": top_p,
             "stream": stream,
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
         # Omitted max_tokens: vLLM generates up to max_model_len - prompt_len
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
@@ -889,13 +942,23 @@ class VLLMServerEngine(RemoteEngine):
         return payload
 
     def _extract_error_detail(self, response: httpx.Response) -> str:
-        """Extract error message from vLLM error response body."""
+        """Extract error message from vLLM error response body.
+
+        vLLM answers {"error": {"message": ...}} (OpenAI format); older releases
+        answered {"object": "error", "message": ...}.
+        """
         try:
-            # vLLM returns {"object":"error","message":"...","type":"...","code":400}
-            msg: str = response.json().get("message", response.text)
-            return msg
-        except Exception:
+            body = response.json()
+        except ValueError:
             return str(response.text)
+        if not isinstance(body, dict):
+            return str(response.text)
+        error = body.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return str(error["message"])
+        if isinstance(body.get("message"), str):
+            return str(body["message"])
+        return str(response.text)
 
     def _post_chat_completions(
         self, payload: dict[str, Any], request_id: str | None
@@ -913,7 +976,7 @@ class VLLMServerEngine(RemoteEngine):
         except httpx.HTTPStatusError as e:
             detail = self._extract_error_detail(e.response)
             self._lg.error("generate request failed", extra={"detail": detail})
-            raise RuntimeError(f"vLLM server error: {detail}") from e
+            raise EngineRequestError(e.response.status_code, detail) from e
         except httpx.HTTPError as e:
             if request_id and self._connections.was_aborted(request_id):
                 raise RequestAbortedError(f"request {request_id} aborted") from e
@@ -982,7 +1045,7 @@ class VLLMServerEngine(RemoteEngine):
         choice = choices[0] if choices else {}
         message = choice.get("message", {})
         content: str = message.get("content") or ""
-        reasoning: str = message.get("reasoning_content") or ""
+        reasoning = _reasoning_text(message)
         if reasoning:
             content = f"<think>{reasoning}</think>{content}"
         tool_calls = message.get("tool_calls")
@@ -1012,9 +1075,9 @@ class VLLMServerEngine(RemoteEngine):
         self,
         prompt: str,
         max_tokens: int | None = 100,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        top_k: int = 0,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
         repetition_penalty: float = 1.0,
         use_chat_template: bool | None = None,
         stop_sequences: list[str] | None = None,
@@ -1025,11 +1088,13 @@ class VLLMServerEngine(RemoteEngine):
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> str | dict[str, Any]:
         """Generate text completion (blocking).
 
         Args:
             lora_request: LoRA adapter request (uses adapter name as model field).
+            extra_body: Request fields llm-infer does not interpret, sent as given.
 
         Returns:
             Generated text string, or dict with "content" and "tool_calls" when
@@ -1049,11 +1114,7 @@ class VLLMServerEngine(RemoteEngine):
             response_format=response_format,
             chat_template_kwargs=chat_template_kwargs,
         )
-        # Add optional params that vLLM supports via extra_body
-        if repetition_penalty != 1.0:
-            payload["repetition_penalty"] = repetition_penalty
-        if top_k > 0:
-            payload["top_k"] = top_k
+        _add_vllm_params(payload, top_k, repetition_penalty, extra_body)
 
         data = self._post_chat_completions(payload, context.id if context else None)
         return self._parse_completion_response(data, lora_request, max_tokens)
@@ -1062,9 +1123,9 @@ class VLLMServerEngine(RemoteEngine):
         self,
         prompt: str,
         max_tokens: int | None = 100,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        top_k: int = 0,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
         repetition_penalty: float = 1.0,
         use_chat_template: bool | None = None,
         stop_sequences: list[str] | None = None,
@@ -1075,6 +1136,7 @@ class VLLMServerEngine(RemoteEngine):
         tool_choice: str | dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         chat_template_kwargs: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> VLLMServerStreamingIterator:
         """Generate text with streaming via SSE."""
         payload = self._build_payload(
@@ -1091,10 +1153,7 @@ class VLLMServerEngine(RemoteEngine):
             response_format=response_format,
             chat_template_kwargs=chat_template_kwargs,
         )
-        if repetition_penalty != 1.0:
-            payload["repetition_penalty"] = repetition_penalty
-        if top_k > 0:
-            payload["top_k"] = top_k
+        _add_vllm_params(payload, top_k, repetition_penalty, extra_body)
 
         return VLLMServerStreamingIterator(
             self._lg,

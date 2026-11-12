@@ -1,6 +1,6 @@
 # Known Issues
 
-Operational and runtime issues with workarounds. For resolved bugs, see `bugs-journal.md`.
+Operational and runtime issues with workarounds.
 
 ---
 

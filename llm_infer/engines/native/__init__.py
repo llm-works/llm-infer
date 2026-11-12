@@ -104,21 +104,9 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _parse_dtype(dtype_str: str) -> Any:
-    """Parse dtype string to torch dtype."""
-    _require_runtime_deps()
-    import torch
-
-    return {
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float32": torch.float32,
-    }.get(dtype_str, torch.float16)
-
-
 def _build_engine_config(config: dict[str, Any]) -> tuple[EngineConfig, str]:
     """Build EngineConfig from config dict. Returns (engine_config, model_path)."""
-    from .config import EngineConfig
+    from .config import EngineConfig, parse_dtype
     from .model import TransformerConfig
 
     model_path = config.get("model", {}).get("path", "")
@@ -133,7 +121,7 @@ def _build_engine_config(config: dict[str, Any]) -> tuple[EngineConfig, str]:
         block_size=engine.get("block_size", 16),
         max_batch_size=engine.get("max_batch_size", 1),
         device=engine.get("device", "cuda"),
-        dtype=_parse_dtype(engine.get("dtype", "float16")),
+        dtype=parse_dtype(engine.get("dtype", "float16")),
         attention_backend=engine.get("attention_backend", "auto"),
         linear_backend=backends.get("linear", "pytorch"),
         torch_compile=engine.get("torch_compile", False),

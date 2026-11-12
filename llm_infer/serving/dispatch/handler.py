@@ -23,6 +23,7 @@ from .types import (
     Response,
     ResponseAdapterInfo,
     StreamChunk,
+    failure_response,
     refusal_message,
 )
 
@@ -463,6 +464,8 @@ class RequestHandler(ABC):
             params["response_format"] = request.response_format
         if request.chat_template_kwargs is not None:
             params["chat_template_kwargs"] = request.chat_template_kwargs
+        if request.extra_body:
+            params["extra_body"] = request.extra_body
 
     def _build_engine_params(
         self, request: Request
@@ -477,9 +480,7 @@ class RequestHandler(ABC):
         params: dict[str, Any] = {
             "prompt": request.prompt,
             "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "top_p": request.top_p,
-            "top_k": request.top_k,
+            **request.sampling(),
             "repetition_penalty": request.repetition_penalty,
             "use_chat_template": request.use_chat_template,
             "stop_sequences": request.stop_sequences,
@@ -578,7 +579,7 @@ class RequestHandler(ABC):
                 )
             return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
         except Exception as e:
-            return Response(id=request.id, status=RequestStatus.FAILED, error=str(e))
+            return failure_response(request.id, e)
 
     def _stream_tokens_to_queue(self, request: Request, stream: Any) -> None:
         """Stream tokens from generator to response queue."""
