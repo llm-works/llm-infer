@@ -257,22 +257,32 @@ llm-infer serve --model qwen2.5:0.5b
 # With vLLM
 llm-infer serve --engine vllm --model-path /path/to/model
 
-# With config file
-llm-infer serve --config etc/llm-infer.yaml
+# With config file (a global option: before the subcommand)
+llm-infer --config etc/llm-infer.yaml serve
 
 # With model name (resolved from models.locations)
 llm-infer serve --model qwen2.5-1.5b
 ```
 
 Options:
-- `--engine`: Inference backend (default: `ollama`): `ollama` | `vllm` | `vllm-server` | `native` | `peft`
-- `--config, -c`: Config file path (default: `etc/llm-infer.yaml`)
-- `--etc-dir`: Configuration directory to load (default: the bundled `llm_infer/etc/` shipped in the wheel)
+- `--engine`: Inference backend (default: `ollama`): `ollama` | `vllm` | `vllm-server` |
+  `native` | `peft`
 - `--model-path`: Direct path to model directory
-- `--model, -m`: Model name to load
+- `--model`: Model name to load
+- `--models-dir`: Directory to resolve `--model` in (default: `models.locations`)
+- `--model-template`: Use another configured model's settings for a model not in the config
+- `--list-models`: List the configured models and exit
 - `--handler`: Request handler type (`sequential` | `bounded`)
-- `--port, -p`: Override server port
+- `--port`: Override server port
 - `--host`: Override server host
+- `-o, --override KEY=VALUE`: Override a config value (e.g. `-o engines.vllm_server.port=8401`)
+- `-- ARGS`: Arguments after `--` are passed to `vllm serve` (`vllm-server` engine only)
+
+Global options go before the subcommand (`llm-infer [global options] serve ...`):
+- `--config, -c`: Config file path; with `--etc-dir`, a file name in that directory
+- `--etc-dir`: Configuration directory (default: project-local `etc/`, the user overlay, or the
+  `llm_infer/etc/` shipped in the wheel)
+- `--log-level, -l`: Log level
 
 ### `llm-infer query`
 
