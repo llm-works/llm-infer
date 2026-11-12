@@ -7,17 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-11
+
 ### Changed
 
 - Dependencies: the `cuda` extra requires `vllm>=0.33.0` (was `>=0.30.0`) and
   `flashinfer-python>=0.7.2` (was `>=0.2.0`).
+- Dependencies: requires `appinfra>=0.15.0` (was `>=0.14.0`).
 - Building from source requires setuptools>=77.0.3 (was >=68.0).
 
 ### Fixed
 
-- Native engine: `llm-infer serve --engine native` loads and generates (dtype from the config,
-  chat tokenization with transformers 5, flashinfer decode for any GQA group size, Marlin AWQ
-  on vLLM 0.33).
+- Native engine: `llm-infer serve --engine native` loads and generates with vLLM 0.33 and
+  transformers 5.
 - vLLM server: a request vLLM rejects (4xx, e.g. `max_tokens` above the context) is answered
   with vLLM's status and message instead of a 500.
 - OpenAI endpoints: request fields llm-infer does not interpret (`min_p`, `presence_penalty`,
@@ -33,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: the configuration and usage guides describe `models.default` instead of the removed
   `selection` keys. New `docs/examples/llm-infer.yaml`: a complete configuration, tested to use
   only keys llm-infer reads.
+- Docs: the usage guide lists the options `serve` accepts; `--config` is a global option and
+  goes before the subcommand.
 - `serve`: `third_party_logging` levels (torch, transformers) from the config file and from
   `-o third_party_logging.<lib>=<level>` take effect.
 
@@ -578,7 +582,8 @@ Initial public release.
 - Client library guide (`docs/client.md`)
 - Contributing guide (`CONTRIBUTING.md`)
 
-[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/llm-works/llm-infer/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/llm-works/llm-infer/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/llm-works/llm-infer/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/llm-works/llm-infer/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/llm-works/llm-infer/compare/v0.7.0...v0.7.1
