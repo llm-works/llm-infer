@@ -45,6 +45,7 @@ from appinfra.rate_limit import RateLimiter
 from .backends import Backend, BackendContext, BackendFactory, RetryConfig
 from .backends.auth import AuthProvider, auth_from_config
 from .backends.factory import NON_CHAT_BACKEND_TYPES
+from .backends.providers.scripted import Script, ScriptedBackend
 from .backends.vertex_native import NativeVertexBackend
 from .client import LLMClient
 from .discovery import ModelDiscovery
@@ -587,6 +588,38 @@ class Factory:
         if rate_limit:
             config["rate_limit"] = rate_limit
         return self.from_backend_config(config, "anthropic", callbacks)
+
+    def scripted(
+        self,
+        script: Script | None = None,
+        default_model: str = "scripted",
+        retry: RetryConfig | None = None,
+        callbacks: LLMCallbacks | None = None,
+    ) -> LLMClient:
+        """Create LLMClient that answers from a script, without a network or model.
+
+        Only the transport is replaced: retries, callbacks and SAIAAdapter run as with
+        a real backend. See ``ScriptedBackend`` for the script forms and for how
+        answers are built when no script is given.
+
+        Args:
+            script: List of entries (ChatResponse, exception, FailAfter), a callable
+                taking the ChatRequest, or None to answer from the request.
+            default_model: Model name reported when the request names none.
+            retry: Retry config; None disables retries, so exception entries raise
+                straight to the caller.
+            callbacks: Optional callbacks for request/response/error lifecycle events.
+
+        Returns:
+            LLMClient backed by a ScriptedBackend (reachable as ``client.backend``).
+        """
+        backend = ScriptedBackend(
+            self._lg,
+            script,
+            ctx=BackendContext(retry=retry),
+            default_model=default_model,
+        )
+        return LLMClient(self._lg, backend, callbacks=callbacks)
 
     def embeddings(
         self,

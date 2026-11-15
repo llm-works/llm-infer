@@ -13,7 +13,14 @@ from .context import BackendContext, RetryConfig
 from .factory import BackendFactory
 from .mixins import AsyncRequestTrackingMixin
 from .provider import Provider, ProviderDetector
-from .providers import AnthropicBackend, GeminiBackend, OpenAICompatibleBackend
+from .providers import (
+    AnthropicBackend,
+    FailAfter,
+    GeminiBackend,
+    OpenAICompatibleBackend,
+    ScriptedBackend,
+    ScriptExhaustedError,
+)
 from .vertex_native import NativeVertexBackend, NativeVertexFactory
 
 __all__ = [
@@ -22,6 +29,7 @@ __all__ = [
     "Backend",
     "BackendContext",
     "BackendFactory",
+    "FailAfter",
     "GeminiBackend",
     "NativeVertexBackend",
     "NativeVertexFactory",
@@ -29,5 +37,7 @@ __all__ = [
     "Provider",
     "ProviderDetector",
     "RetryConfig",
+    "ScriptExhaustedError",
+    "ScriptedBackend",
     "embedding",
 ]

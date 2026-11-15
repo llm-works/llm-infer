@@ -216,6 +216,40 @@ default. Models discovered at runtime (via `list_models()`) are routed
 first-wins. Qualified `model@backend` refs are validated at construction to
 name a configured backend; unknown backends raise `ConfigError`.
 
+### Scripted Backend (no network, no model)
+
+`Factory.scripted()` returns an ordinary `LLMClient` whose backend answers from a
+script. Retries, callbacks, `ChatResponse.request` and `SAIAAdapter` run as with
+a real backend; only the transport is replaced. Intended for smoke runs in CI and
+for unit tests.
+
+```python
+from llm_infer.client import BackendRequestError, ChatResponse, FailAfter, RetryConfig
+
+# A list: one entry per call. Exceptions are raised (and retried when transient
+# and a retry config is given); FailAfter streams N chunks, then raises.
+client = Factory(lg).scripted(
+    [BackendRequestError("rate limited", status_code=429), ChatResponse(content="ok")],
+    retry=RetryConfig(base=0.01),
+)
+client.chat(messages).content  # "ok", after one retry
+client.backend.requests  # every ChatRequest received
+client.backend.remaining  # 0; one more call raises ScriptExhaustedError
+
+# A callable: answers each request
+client = Factory(lg).scripted(lambda request: ChatResponse(content="echo"))
+
+# No script: answers are built from the request
+client = Factory(lg).scripted()
+```
+
+Without a script, a request with tools gets a call to the first tool on the first
+turn and to the last tool on every later turn, so the terminal tool must be listed
+last; a JSON-schema `response_format` gets a JSON object built from the schema
+(first enum value, two array items, zero, `false`); anything else gets the text
+`"scripted"`. These are the rules of llm-saia's `SmokeBackend`, so smoke runs
+behave the same through `SAIAAdapter`. Streaming yields the content in word chunks.
+
 ## Embeddings
 
 Generate vector embeddings with OpenAI or Google backends.

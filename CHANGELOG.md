@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Client: `Factory.scripted()` returns an `LLMClient` that answers from a script (responses,
+  exceptions, mid-stream failures, or a callable) or, with no script, from the request,
+  without a network or model. See the client README.
+
 ## [0.9.0] - 2026-11-11
 
 ### Changed

@@ -7,6 +7,7 @@ from .anthropic import AnthropicBackend
 from .gemini import GeminiBackend
 from .google import GoogleEmbeddingBackend, GoogleEmbeddingTaskType
 from .openai import OpenAICompatibleBackend, OpenAIEmbeddingBackend
+from .scripted import FailAfter, ScriptedBackend, ScriptExhaustedError
 
 __all__ = [
     "AnthropicBackend",
@@ -14,5 +15,8 @@ __all__ = [
     "GoogleEmbeddingBackend",
     "OpenAICompatibleBackend",
     "OpenAIEmbeddingBackend",
+    "FailAfter",
+    "ScriptedBackend",
+    "ScriptExhaustedError",
     "GoogleEmbeddingTaskType",
 ]
