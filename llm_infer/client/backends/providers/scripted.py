@@ -102,7 +102,8 @@ class ScriptedBackend(Backend):
 
     Every request is recorded in ``requests``. Returned responses are copies of the
     script's entries, so the client setting ``request`` on them leaves the script
-    unchanged.
+    unchanged. A callable script runs without the backend's lock held, so concurrent
+    calls can run it at the same time; one with shared state must be thread-safe.
     """
 
     def __init__(
@@ -179,18 +180,24 @@ class ScriptedBackend(Backend):
             yield chunk
 
     def _next(self, request: ChatRequest) -> ChatResponse | FailAfter:
-        """Record the request and take its answer; raise an exception entry."""
+        """Record the request and take its answer; raise an exception entry.
+
+        A callable script runs after the lock is released, so it may read
+        ``remaining`` or call the client again.
+        """
+        entry: ScriptEntry
         with self._lock:
             self.requests.append(request)
-            entry = self._take(request)
+            if self._responder is None:
+                entry = self._take(request)
+        if self._responder is not None:
+            entry = self._responder(request)
         if isinstance(entry, Exception):
             raise entry
         return entry
 
     def _take(self, request: ChatRequest) -> ScriptEntry:
-        """The entry answering this request, by the kind of script."""
-        if self._responder is not None:
-            return self._responder(request)
+        """The next list entry, or the answer built from the request without a script."""
         if self._entries is None:
             return _unscripted(request, request.model or self._default_model)
         if not self._entries:

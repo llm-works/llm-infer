@@ -173,6 +173,20 @@ class TestCallableScript:
         assert _backend(client).remaining is None
         assert len(_backend(client).requests) == 1
 
+    def test_called_outside_the_lock(self, lg: Logger) -> None:
+        # Under the lock, a responder reading `remaining` or calling the client
+        # again would block forever; checking the lock fails instead of hanging.
+        held: list[bool] = []
+
+        def respond(request: ChatRequest) -> ChatResponse:
+            held.append(backend._lock.locked())
+            return ChatResponse(content="ok")
+
+        client = Factory(lg).scripted(respond)
+        backend = _backend(client)
+        client.chat(USER)
+        assert held == [False]
+
 
 class TestStreaming:
     """Streaming yields word chunks and publishes the response at the end."""
