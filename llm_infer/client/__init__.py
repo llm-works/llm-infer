@@ -63,7 +63,16 @@ llm-infer Extensions:
     - tools/tool_choice: Function calling support
 """
 
-from .backends import Backend, OpenAICompatibleBackend, RetryConfig
+from .backends import (
+    Backend,
+    FailAfter,
+    OpenAICompatibleBackend,
+    RetryConfig,
+    Script,
+    ScriptedBackend,
+    ScriptEntry,
+    ScriptExhaustedError,
+)
 from .backends.embedding import BatchEmbeddingResult, EmbeddingResult
 from .base import ChatClient
 from .bound import BoundChatClient
@@ -167,6 +176,12 @@ __all__ = [
     # Backend base class
     "Backend",
     "OpenAICompatibleBackend",
+    # Scripted backend (no network, no model)
+    "ScriptedBackend",
+    "Script",
+    "ScriptEntry",
+    "FailAfter",
+    "ScriptExhaustedError",
     # Exceptions
     "BackendError",
     "BackendRequestError",
