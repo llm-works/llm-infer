@@ -18,7 +18,9 @@ from .providers import (
     FailAfter,
     GeminiBackend,
     OpenAICompatibleBackend,
+    Script,
     ScriptedBackend,
+    ScriptEntry,
     ScriptExhaustedError,
 )
 from .vertex_native import NativeVertexBackend, NativeVertexFactory
@@ -37,6 +39,8 @@ __all__ = [
     "Provider",
     "ProviderDetector",
     "RetryConfig",
+    "Script",
+    "ScriptEntry",
     "ScriptExhaustedError",
     "ScriptedBackend",
     "embedding",

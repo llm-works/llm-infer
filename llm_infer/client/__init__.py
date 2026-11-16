@@ -68,7 +68,9 @@ from .backends import (
     FailAfter,
     OpenAICompatibleBackend,
     RetryConfig,
+    Script,
     ScriptedBackend,
+    ScriptEntry,
     ScriptExhaustedError,
 )
 from .backends.embedding import BatchEmbeddingResult, EmbeddingResult
@@ -176,6 +178,8 @@ __all__ = [
     "OpenAICompatibleBackend",
     # Scripted backend (no network, no model)
     "ScriptedBackend",
+    "Script",
+    "ScriptEntry",
     "FailAfter",
     "ScriptExhaustedError",
     # Exceptions
