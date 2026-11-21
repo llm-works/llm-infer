@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gc
 from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock
@@ -140,6 +141,32 @@ class TestAclose:
         closer.assert_not_awaited()
         assert len(holder) == 0
         assert holder._pending == {}
+
+    def test_cancelled_aclose_leaves_scheduled_close_running(self, lg: Logger) -> None:
+        async def run() -> list[_Client]:
+            release = asyncio.Event()
+            closed: list[_Client] = []
+
+            async def close(client: _Client) -> None:
+                await release.wait()
+                closed.append(client)
+
+            holder = LoopClients(lg, _Client, close)
+            client = _Client()
+            with holder._lock:  # as an aclose() on another loop schedules it
+                holder._schedule_close(asyncio.get_running_loop(), client)
+            waiter = asyncio.create_task(holder.aclose())
+            await asyncio.sleep(0)  # the waiter reaches its wait on the close
+            assert not waiter.done()
+            waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiter
+            release.set()
+            await holder.aclose()  # still finds the close and waits for it
+            return closed
+
+        closed = asyncio.run(run())
+        assert len(closed) == 1
 
     def test_failed_close_on_other_loop_is_logged(self) -> None:
         error = OSError("reset")

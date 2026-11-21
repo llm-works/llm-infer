@@ -111,11 +111,15 @@ class LoopClients(Generic[T]):
                 elif loop.is_running():
                     self._schedule_close(loop, client)
             self._clients.clear()
-            scheduled_here = self._pending.pop(current, set())
+            # Left recorded until each close finishes (_forget), for a later aclose()
+            scheduled_here = set(self._pending.get(current, ()))
         for client in own:
             await self._close(client)
         if scheduled_here:
-            await asyncio.gather(*(asyncio.wrap_future(f) for f in scheduled_here))
+            # Shielded: cancelling this wait must not cancel the closes themselves.
+            await asyncio.shield(
+                asyncio.gather(*(asyncio.wrap_future(f) for f in scheduled_here))
+            )
 
     def _schedule_close(self, loop: asyncio.AbstractEventLoop, client: T) -> None:
         """Close the client on its own loop. Call with the lock held.

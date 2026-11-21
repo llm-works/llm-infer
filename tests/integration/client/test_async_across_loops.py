@@ -246,11 +246,14 @@ def test_aclose_waits_for_own_client_closed_by_other_loop(
     # The main thread's aclose takes the worker's client and schedules its
     # close on the worker; the worker's own aclose must still wait for it.
     release = asyncio.Event()
+    close_waiting = threading.Event()
+    check_started = threading.Event()
 
     class Client:
         closed = False
 
     async def close(client: Client) -> None:
+        close_waiting.set()
         await release.wait()
         client.closed = True
 
@@ -260,12 +263,16 @@ def test_aclose_waits_for_own_client_closed_by_other_loop(
         return holder.get()
 
     async def close_then_check() -> bool:
+        check_started.set()
         await holder.aclose()
         return client.closed
 
     client = _on(worker_loop, get())
     asyncio.run(holder.aclose())
+    assert close_waiting.wait(WAIT_S)  # the close runs on the worker, held by release
     closing = asyncio.run_coroutine_threadsafe(close_then_check(), worker_loop)
+    assert check_started.wait(WAIT_S)
+    assert not closing.done()  # waits for the held close
     worker_loop.call_soon_threadsafe(release.set)
     assert closing.result(WAIT_S) is True
 
