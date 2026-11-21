@@ -238,41 +238,39 @@ class TestExecuteSyncErrors:
 
 
 class TestExecuteAsyncErrors:
-    def _setup_async(
-        self, mock_lg: Logger, side_effect: Any
-    ) -> OpenAICompatibleBackend:
+    @staticmethod
+    def _execute(mock_lg: Logger, side_effect: Exception) -> None:
+        """Run _execute_async with the loop's client posting side_effect."""
         backend = _backend(mock_lg)
-        async_client = backend._get_async_client()
 
         async def fake_post(*args: Any, **kwargs: Any) -> Any:
             raise side_effect
 
-        async_client.post = fake_post
-        return backend
+        async def run() -> None:
+            backend._get_async_client().post = fake_post  # this loop's client
+            await backend._execute_async("http://x", {})
+
+        asyncio.run(run())
 
     def test_connection_error(self, mock_lg: Logger) -> None:
-        backend = self._setup_async(mock_lg, httpx.ConnectError("boom"))
         with pytest.raises(BackendUnavailableError):
-            asyncio.run(backend._execute_async("http://x", {}))
+            self._execute(mock_lg, httpx.ConnectError("boom"))
 
     def test_timeout(self, mock_lg: Logger) -> None:
-        backend = self._setup_async(mock_lg, httpx.TimeoutException("boom"))
         with pytest.raises(BackendTimeoutError):
-            asyncio.run(backend._execute_async("http://x", {}))
+            self._execute(mock_lg, httpx.TimeoutException("boom"))
 
     def test_status_error(self, mock_lg: Logger) -> None:
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_resp.text = "boom"
         err = httpx.HTTPStatusError("boom", request=MagicMock(), response=mock_resp)
-        backend = self._setup_async(mock_lg, err)
         with pytest.raises(BackendRequestError):
-            asyncio.run(backend._execute_async("http://x", {}))
+            self._execute(mock_lg, err)
 
     def test_request_error(self, mock_lg: Logger) -> None:
-        backend = self._setup_async(mock_lg, httpx.RequestError("transport"))
         with pytest.raises(BackendRequestError):
-            asyncio.run(backend._execute_async("http://x", {}))
+            self._execute(mock_lg, httpx.RequestError("transport"))
 
 
 # ---------------------------------------------------------------------------
@@ -480,18 +478,18 @@ class _FakeStreamCM:
 
 def test_chat_stream_async(mock_lg: Logger) -> None:
     backend = _backend(mock_lg)
-    async_client = backend._get_async_client()
     lines = [
         'data: {"choices":[{"delta":{"content":"hi"}}]}',
         'data: {"choices":[{"delta":{"content":" there"}}]}',
         'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
         "data: [DONE]",
     ]
-    async_client.stream = MagicMock(return_value=_FakeStreamCM(lines))
-
     request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
 
     async def collect() -> list[str]:
+        backend._get_async_client().stream = MagicMock(
+            return_value=_FakeStreamCM(lines)
+        )
         return [t async for t in backend.chat_stream_async(request)]
 
     tokens = asyncio.run(collect())
@@ -500,14 +498,12 @@ def test_chat_stream_async(mock_lg: Logger) -> None:
 
 def test_chat_stream_async_connection_error(mock_lg: Logger) -> None:
     backend = _backend(mock_lg)
-    async_client = backend._get_async_client()
-    async_client.stream = MagicMock(
-        return_value=_FakeStreamCM(raise_exc=httpx.ConnectError("boom"))
-    )
-
     request = ChatRequest(messages=[{"role": "user", "content": "hi"}])
 
     async def collect() -> list[str]:
+        backend._get_async_client().stream = MagicMock(
+            return_value=_FakeStreamCM(raise_exc=httpx.ConnectError("boom"))
+        )
         return [t async for t in backend.chat_stream_async(request)]
 
     with pytest.raises(BackendUnavailableError):

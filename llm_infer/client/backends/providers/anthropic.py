@@ -40,11 +40,17 @@ from ...errors import (
 from ...types import ChatRequest, ChatResponse, ResponseHolder
 from ..base import Backend
 from ..context import BackendContext
+from ..loop_clients import LoopClients
 from ..mixins import AsyncRequestTrackingMixin
 from ..provider import Provider
 
 if TYPE_CHECKING:
     import anthropic
+
+
+async def _close_async(client: anthropic.AsyncAnthropic) -> None:
+    """Close an async client of one event loop."""
+    await client.close()
 
 
 class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
@@ -128,8 +134,7 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
             base_url=base_url,
             timeout=self._ctx.request_timeout,
         )
-        # Async client created lazily
-        self._async_client: anthropic.AsyncAnthropic | None = None
+        self._async_clients = LoopClients(lg, self._new_async_client, _close_async)
         self._init_async_tracking()
 
     @property
@@ -237,15 +242,16 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         return self._api_key.reveal() if self._api_key is not None else None
 
     def _get_async_client(self) -> anthropic.AsyncAnthropic:
-        """Get or create the async client (lazy initialization)."""
-        if self._async_client is None:
-            # Reveal only at the SDK ctor call.
-            self._async_client = self._anthropic.AsyncAnthropic(
-                api_key=self._revealed_api_key(),
-                base_url=self._base_url,
-                timeout=self._ctx.request_timeout,
-            )
-        return self._async_client
+        """The running event loop's async client, created on its first use."""
+        return self._async_clients.get()
+
+    def _new_async_client(self) -> anthropic.AsyncAnthropic:
+        """Build an async client. Reveal only at the SDK ctor call."""
+        return self._anthropic.AsyncAnthropic(
+            api_key=self._revealed_api_key(),
+            base_url=self._base_url,
+            timeout=self._ctx.request_timeout,
+        )
 
     def close(self) -> None:
         """Close sync client."""
@@ -255,13 +261,13 @@ class AnthropicBackend(AsyncRequestTrackingMixin, Backend):
         """Close all clients (sync and async).
 
         Waits for any in-flight async requests to complete before closing.
-        New requests will fail immediately once close is requested.
+        New requests will fail immediately once close is requested. Async
+        clients of other event loops are closed as ``LoopClients.aclose``
+        describes.
         """
         await self._drain_async_requests()
         self._client.close()
-        if self._async_client is not None:
-            await self._async_client.close()
-            self._async_client = None
+        await self._async_clients.aclose()
 
     @contextmanager
     def _handle_errors(self) -> Generator[None, None, None]:

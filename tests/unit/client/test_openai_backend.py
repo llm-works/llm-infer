@@ -565,19 +565,19 @@ class TestOpenAICompatibleBackendResourceManagement:
         """Test async context manager closes both clients."""
         async with OpenAICompatibleBackend(mock_lg, "test") as backend:
             _ = backend._get_async_client()
-            assert backend._async_client is not None
+            assert len(backend._async_clients) == 1
 
-        assert backend._async_client is None
+        assert len(backend._async_clients) == 0
 
     @pytest.mark.asyncio
     async def test_lazy_async_client_creation(self, mock_lg: Logger) -> None:
         """Test async client is created lazily."""
         backend = OpenAICompatibleBackend(mock_lg, "test")
-        assert backend._async_client is None
+        assert len(backend._async_clients) == 0
 
         client = backend._get_async_client()
         assert client is not None
-        assert backend._async_client is client
+        assert len(backend._async_clients) == 1
 
         client2 = backend._get_async_client()
         assert client2 is client
@@ -638,7 +638,7 @@ class TestOpenAICompatibleBackendConcurrentClose:
             await close_task
 
         assert response.content == "done"
-        assert backend._async_client is None
+        assert len(backend._async_clients) == 0
 
     @pytest.mark.asyncio
     async def test_new_requests_fail_during_close(self, mock_lg: Logger) -> None:
@@ -744,4 +744,4 @@ class TestOpenAICompatibleBackendConcurrentClose:
             await close_task
 
         assert len(responses) == 3
-        assert backend._async_client is None
+        assert len(backend._async_clients) == 0

@@ -10,6 +10,7 @@ backends/
 ├── embedding.py     # Abstract base class for embedding backends
 ├── context.py       # BackendContext, RetryConfig
 ├── factory.py       # BackendFactory (creates backends from config)
+├── loop_clients.py  # LoopClients (one async client per event loop)
 ├── mixins.py        # AsyncRequestTrackingMixin
 ├── provider.py      # Provider enum, ProviderDetector
 ├── vertex_native.py # NativeVertexBackend (sibling — cache lifecycle, not chat())

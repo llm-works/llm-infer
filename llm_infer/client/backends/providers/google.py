@@ -22,6 +22,7 @@ from ..auth import AuthProvider, GoogleAPIKeyHeaderAuth
 from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
 from ..embedding import BatchEmbeddingResult, EmbeddingResult
+from ..loop_clients import httpx_clients
 
 
 class GoogleEmbeddingTaskType(StrEnum):
@@ -92,7 +93,7 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         self._base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
 
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
-        self._async_client: httpx.AsyncClient | None = None
+        self._async_clients = httpx_clients(lg, timeout=self._ctx.request_timeout)
 
     @property
     def provider(self) -> str:
@@ -109,10 +110,8 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
         return self.MAX_BATCH_SIZE
 
     def _get_async_client(self) -> httpx.AsyncClient:
-        """Get or create the async HTTP client (lazy initialization)."""
-        if self._async_client is None:
-            self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
-        return self._async_client
+        """The running event loop's async HTTP client, created on its first use."""
+        return self._async_clients.get()
 
     def _build_headers(self) -> dict[str, str]:
         """Build request headers (sync)."""
@@ -495,6 +494,4 @@ class GoogleEmbeddingBackend(EmbeddingBackend):
 
     async def aclose(self) -> None:
         self._client.close()
-        if self._async_client is not None:
-            await self._async_client.aclose()
-            self._async_client = None
+        await self._async_clients.aclose()

@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import threading
 
 from ..errors import BackendUnavailableError
 
@@ -18,9 +20,9 @@ class AsyncRequestTrackingMixin:
     provides reference counting for active requests and graceful drain
     on close.
 
-    Note: This mixin assumes single-threaded asyncio. The counter and
-    close flag are not thread-safe. Do not share backend instances
-    across multiple event loops or OS threads.
+    Requests may run on several event loops in several threads: the counter and
+    close flag are guarded by a lock, and each waiting close is woken on its own
+    loop.
 
     Usage:
         class MyBackend(AsyncRequestTrackingMixin, Backend):
@@ -43,13 +45,15 @@ class AsyncRequestTrackingMixin:
 
     _active_async_requests: int
     _close_requested: bool
-    _drain_event: asyncio.Event | None
+    _drain_waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]]
+    _tracking_lock: threading.Lock
 
     def _init_async_tracking(self) -> None:
         """Initialize async request tracking state. Call from __init__."""
         self._active_async_requests = 0
         self._close_requested = False
-        self._drain_event = None
+        self._drain_waiters = []
+        self._tracking_lock = threading.Lock()
 
     def _acquire_async_request(self) -> None:
         """Acquire a request slot, raising if backend is closing.
@@ -60,22 +64,32 @@ class AsyncRequestTrackingMixin:
         Raises:
             BackendUnavailableError: If close has been requested.
         """
-        if self._close_requested:
-            raise BackendUnavailableError(
-                "Backend is closing, cannot accept new requests"
-            )
-        self._active_async_requests += 1
+        with self._tracking_lock:
+            if self._close_requested:
+                raise BackendUnavailableError(
+                    "Backend is closing, cannot accept new requests"
+                )
+            self._active_async_requests += 1
 
     def _release_async_request(self) -> None:
         """Track completion of an async request. Call in finally block."""
-        self._active_async_requests -= 1
-        if self._active_async_requests == 0 and self._drain_event is not None:
-            self._drain_event.set()
+        with self._tracking_lock:
+            self._active_async_requests -= 1
+            if self._active_async_requests > 0:
+                return
+            waiters, self._drain_waiters = self._drain_waiters, []
+        for loop, event in waiters:
+            # asyncio.Event is not thread-safe: set it on the loop that waits on it.
+            # A closed loop has no waiter left to wake.
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(event.set)
 
     async def _drain_async_requests(self) -> None:
         """Wait for all in-flight async requests to complete. Call from aclose()."""
-        self._close_requested = True
-        if self._active_async_requests > 0:
-            if self._drain_event is None:
-                self._drain_event = asyncio.Event()
-            await self._drain_event.wait()
+        event = asyncio.Event()
+        with self._tracking_lock:
+            self._close_requested = True
+            if self._active_async_requests == 0:
+                return
+            self._drain_waiters.append((asyncio.get_running_loop(), event))
+        await event.wait()

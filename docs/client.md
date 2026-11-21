@@ -105,6 +105,13 @@ async with factory.openai(base_url="http://localhost:8000/v1") as client:
     print(response.content)
 ```
 
+One client or router can serve several threads at once, each running its own event loop. Each
+event loop gets its own async connection pool, created on that loop's first call. `aclose()`
+closes the calling loop's pool and, by a task on that loop, the pool of every other loop still
+running; the pool of a loop that has already stopped is dropped without a close, and garbage
+collection releases its sockets. To release every connection cleanly, close the client before
+the other loops stop.
+
 ### Streaming
 
 ```python

@@ -194,7 +194,7 @@ class TestPersistentClient:
                 _resp(204),
             ]
         )
-        client_ref = backend._client
+        client_ref = backend._clients.get()
         assert isinstance(client_ref, httpx.AsyncClient)
         await backend.cache_create(model="m", system="s", user_text="u", ttl_seconds=60)
         await backend.generate_content(
@@ -203,7 +203,8 @@ class TestPersistentClient:
         await backend.cache_delete(
             "projects/p/locations/us-central1/cachedContents/abc"
         )
-        assert backend._client is client_ref
+        assert backend._clients.get() is client_ref
+        assert len(backend._clients) == 1
         assert len(recorder.requests) == 3
 
 
