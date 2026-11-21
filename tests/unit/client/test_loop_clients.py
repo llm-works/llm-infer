@@ -20,6 +20,13 @@ class _Client:
     """Stand-in for an async HTTP client."""
 
 
+class _LoopBoundClient(_Client):
+    """Holds its loop, as an httpx client does through its pooled connections."""
+
+    def __init__(self) -> None:
+        self.loop = asyncio.get_running_loop()
+
+
 @pytest.fixture
 def closer() -> AsyncMock:
     return AsyncMock()
@@ -76,6 +83,24 @@ class TestGet:
         gc.collect()
         assert len(holder) == 0
 
+    def test_client_of_closed_loop_evicted_on_next_get(
+        self, lg: Logger, closer: AsyncMock
+    ) -> None:
+        # The client keeps its loop alive, so only eviction by is_closed() frees it.
+        holder: LoopClients[_Client] = LoopClients(lg, _LoopBoundClient, closer)
+        loop = asyncio.new_event_loop()
+        _get_on(loop, holder)
+        loop.close()
+        del loop
+        gc.collect()
+
+        async def get_then_count() -> int:
+            holder.get()
+            return len(holder)
+
+        assert asyncio.run(get_then_count()) == 1
+        closer.assert_not_awaited()
+
 
 class TestAclose:
     def test_closes_running_loops_client(
@@ -114,6 +139,7 @@ class TestAclose:
         loop.call_soon_threadsafe.assert_called_once()
         closer.assert_not_awaited()
         assert len(holder) == 0
+        assert holder._pending == {}
 
     def test_failed_close_on_other_loop_is_logged(self) -> None:
         error = OSError("reset")

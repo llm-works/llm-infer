@@ -78,6 +78,11 @@ class NativeVertexBackend:
     :class:`~..errors.BackendUnavailableError` on non-2xx responses /
     network failures; the retry helper transparently retries transient
     ones (429, 5xx, unavailability) per ``ctx.retry``.
+
+    ``transport`` (a test seam) is shared by the client of every event loop,
+    so it must not pool connections: ``httpx.MockTransport`` is fine, while a
+    pooled transport such as ``httpx.AsyncHTTPTransport`` would hand one loop's
+    connections to another.
     """
 
     def __init__(

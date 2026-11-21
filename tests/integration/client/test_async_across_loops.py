@@ -19,6 +19,7 @@ from appinfra.log import Logger
 
 from llm_infer.client import ChatRequest, Factory, LLMClient
 from llm_infer.client.backends import OpenAICompatibleBackend
+from llm_infer.client.backends.loop_clients import LoopClients
 
 T = TypeVar("T")
 
@@ -229,8 +230,8 @@ def test_aclose_closes_client_of_running_loop_in_other_thread(
         return backend._get_async_client()
 
     async def closed_on_worker() -> bool:
-        # Queued after aclose's close task is started on this loop.
-        await asyncio.gather(*backend._async_clients._closing)
+        # Waits for the close the main thread's aclose scheduled on this loop.
+        await backend._async_clients.aclose()
         return bool(other.is_closed)
 
     other = _on(worker_loop, worker_client())
@@ -239,13 +240,42 @@ def test_aclose_closes_client_of_running_loop_in_other_thread(
     assert len(backend._async_clients) == 0
 
 
+def test_aclose_waits_for_own_client_closed_by_other_loop(
+    worker_loop: asyncio.AbstractEventLoop,
+) -> None:
+    # The main thread's aclose takes the worker's client and schedules its
+    # close on the worker; the worker's own aclose must still wait for it.
+    release = asyncio.Event()
+
+    class Client:
+        closed = False
+
+    async def close(client: Client) -> None:
+        await release.wait()
+        client.closed = True
+
+    holder = LoopClients(MagicMock(spec=Logger), Client, close)
+
+    async def get() -> Client:
+        return holder.get()
+
+    async def close_then_check() -> bool:
+        await holder.aclose()
+        return client.closed
+
+    client = _on(worker_loop, get())
+    asyncio.run(holder.aclose())
+    closing = asyncio.run_coroutine_threadsafe(close_then_check(), worker_loop)
+    worker_loop.call_soon_threadsafe(release.set)
+    assert closing.result(WAIT_S) is True
+
+
 def test_aclose_waits_for_request_on_other_thread(
     server: _Server,
     backend: OpenAICompatibleBackend,
     worker_loop: asyncio.AbstractEventLoop,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    order: list[str] = []
     draining = threading.Event()
     drain = backend._drain_async_requests
 
@@ -260,18 +290,16 @@ def test_aclose_waits_for_request_on_other_thread(
     future = asyncio.run_coroutine_threadsafe(
         backend.chat_async(ChatRequest(messages=USER)), worker_loop
     )
-    future.add_done_callback(lambda _: order.append("answered"))
     assert server.arrived.wait(WAIT_S)
 
-    def close() -> None:
-        asyncio.run(backend.aclose())
-        order.append("closed")
-
-    closer = threading.Thread(target=close, daemon=True)  # a hung close fails below
+    # Daemon thread: a close that is never woken fails below instead of hanging.
+    closer = threading.Thread(target=lambda: asyncio.run(backend.aclose()), daemon=True)
     closer.start()
     assert draining.wait(WAIT_S)
+    # The gate holds the request, so the drain cannot be done yet.
+    assert not future.done()
+    assert closer.is_alive()
     server.gate.set()
     assert future.result(WAIT_S).content == "ok"
     closer.join(WAIT_S)
     assert not closer.is_alive()
-    assert order == ["answered", "closed"]
