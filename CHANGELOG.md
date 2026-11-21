@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exceptions, mid-stream failures, or a callable) or, with no script, from the request,
   without a network or model. See the client README.
 
+### Fixed
+
+- Client: one client or router used for async calls from several threads, each with its own
+  event loop, no longer fails with `RuntimeError: Event loop is closed`; each loop gets its own
+  connection pool.
+
 ## [0.9.0] - 2026-11-11
 
 ### Changed

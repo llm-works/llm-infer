@@ -115,7 +115,8 @@ class TestAnthropicBackendMocked:
             finally:
                 backend.close()
 
-    def test_envelope_revealed_at_async_sdk_ctor(
+    @pytest.mark.asyncio
+    async def test_envelope_revealed_at_async_sdk_ctor(
         self, mock_lg: Logger, mock_anthropic: Any
     ) -> None:
         """Envelope api_key is revealed inside the async anthropic SDK call."""
@@ -735,7 +736,7 @@ class TestAnthropicBackendConcurrentClose:
             await close_task
 
             assert response.content == "done"
-            assert backend._async_client is None
+            assert len(backend._async_clients) == 0
 
     @pytest.mark.asyncio
     async def test_new_requests_fail_during_close(

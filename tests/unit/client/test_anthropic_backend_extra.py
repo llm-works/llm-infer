@@ -684,22 +684,28 @@ def test_aclose_no_async_client(mock_anthropic: Any, mock_lg: Logger) -> None:
 
 def test_aclose_with_async_client(mock_anthropic: Any, mock_lg: Logger) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    # Trigger async client creation
-    async_client = backend._get_async_client()
 
     async def fake_close() -> None:
         return None
 
-    async_client.close = fake_close
-    asyncio.run(backend.aclose())
+    async def run() -> None:
+        # Trigger async client creation on this loop
+        backend._get_async_client().close = fake_close
+        await backend.aclose()
+
+    asyncio.run(run())
     backend._client.close.assert_called_once()
-    assert backend._async_client is None  # Reset after close
+    assert len(backend._async_clients) == 0  # Reset after close
 
 
 def test_get_async_client_lazy_init(mock_anthropic: Any, mock_lg: Logger) -> None:
     backend = _make_backend(mock_anthropic, mock_lg)
-    assert backend._async_client is None
-    client = backend._get_async_client()
-    assert client is not None
-    # Subsequent call returns same instance
-    assert backend._get_async_client() is client
+    assert len(backend._async_clients) == 0
+
+    async def run() -> None:
+        client = backend._get_async_client()
+        assert client is not None
+        # Subsequent call returns same instance
+        assert backend._get_async_client() is client
+
+    asyncio.run(run())

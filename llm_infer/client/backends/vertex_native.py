@@ -51,6 +51,7 @@ from ..retry import RetryHelper
 from ..types import ChatRequest, LLMCallbacks
 from .auth import AuthProvider, auth_from_config
 from .context import BackendContext, context_from_config
+from .loop_clients import httpx_clients
 from .vertex_common import (
     SERVED_TIER_HEADER,
     VERTEX_PRIORITY_HEADER,
@@ -77,6 +78,11 @@ class NativeVertexBackend:
     :class:`~..errors.BackendUnavailableError` on non-2xx responses /
     network failures; the retry helper transparently retries transient
     ones (429, 5xx, unavailability) per ``ctx.retry``.
+
+    ``transport`` (a test seam) is shared by the client of every event loop,
+    so it must not pool connections: ``httpx.MockTransport`` is fine, while a
+    pooled transport such as ``httpx.AsyncHTTPTransport`` would hand one loop's
+    connections to another.
     """
 
     def __init__(
@@ -101,20 +107,21 @@ class NativeVertexBackend:
         self._project = project
         self._region = region
         self._service_tier = validate_service_tier(service_tier)
-        # Tests inject ``httpx.MockTransport`` via ``transport=`` to intercept
-        # without hitting the network. Persistent client amortizes TCP+TLS.
-        self._client = httpx.AsyncClient(
-            timeout=ctx.request_timeout, transport=transport
+        # A persistent client per event loop amortizes TCP+TLS. Tests inject
+        # ``httpx.MockTransport`` via ``transport=`` to skip the network.
+        self._clients = httpx_clients(
+            lg, timeout=ctx.request_timeout, transport=transport
         )
         self._retry = RetryHelper(lg, ctx, provider=_PROVIDER)
         # Callbacks (on_retry / on_error) plumb through to the retry helper.
         self._callbacks = callbacks
 
     async def aclose(self) -> None:
-        """Close the underlying httpx client. Optional — httpx's finalizer
+        """Close the underlying httpx clients. Optional — httpx's finalizer
         cleans up sockets on drop; call this to release connections early
-        (tests, backend swap)."""
-        await self._client.aclose()
+        (tests, backend swap). Clients of other event loops are closed as
+        ``LoopClients.aclose`` describes."""
+        await self._clients.aclose()
 
     async def cache_create(
         self,
@@ -228,7 +235,7 @@ class NativeVertexBackend:
             await self._acquire_slot()
             headers = await self._build_headers()
             try:
-                resp = await self._client.post(url, json=body, headers=headers)
+                resp = await self._clients.get().post(url, json=body, headers=headers)
             except httpx.TimeoutException as e:
                 raise BackendUnavailableError(f"POST {url} timed out: {e}") from e
             except httpx.HTTPError as e:
@@ -248,7 +255,7 @@ class NativeVertexBackend:
             await self._acquire_slot()
             headers = await self._build_headers()
             try:
-                resp = await self._client.delete(url, headers=headers)
+                resp = await self._clients.get().delete(url, headers=headers)
             except httpx.TimeoutException as e:
                 raise BackendUnavailableError(f"DELETE {url} timed out: {e}") from e
             except httpx.HTTPError as e:

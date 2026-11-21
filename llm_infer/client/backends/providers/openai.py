@@ -48,6 +48,7 @@ from ..base import Backend
 from ..context import BackendContext
 from ..embedding import Backend as EmbeddingBackend
 from ..embedding import BatchEmbeddingResult, EmbeddingResult
+from ..loop_clients import httpx_clients
 from ..mixins import AsyncRequestTrackingMixin
 from ..provider import Provider, ProviderDetector
 
@@ -96,7 +97,7 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
             self._provider = ProviderDetector.detect(base_url, detect_key)
         self._last_response: ChatResponse | None = None
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
-        self._async_client: httpx.AsyncClient | None = None
+        self._async_clients = httpx_clients(lg, timeout=self._ctx.request_timeout)
         self._init_async_tracking()
 
     @property
@@ -325,16 +326,14 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
     # =========================================================================
 
     def _get_async_client(self) -> httpx.AsyncClient:
-        """Get or create the async HTTP client (lazy initialization)."""
-        if self._async_client is None:
-            self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
-        return self._async_client
+        """The running event loop's async HTTP client, created on its first use."""
+        return self._async_clients.get()
 
     def close(self) -> None:
         """Close sync HTTP client.
 
         Note: If async operations were used, call aclose() instead to also
-        close the async client.
+        close the async clients.
         """
         self._client.close()
 
@@ -342,13 +341,13 @@ class OpenAICompatibleBackend(AsyncRequestTrackingMixin, Backend):
         """Close all HTTP clients (sync and async).
 
         Waits for any in-flight async requests to complete before closing.
-        New requests will fail immediately once close is requested.
+        New requests will fail immediately once close is requested. Async
+        clients of other event loops are closed as ``LoopClients.aclose``
+        describes.
         """
         await self._drain_async_requests()
         self._client.close()
-        if self._async_client is not None:
-            await self._async_client.aclose()
-            self._async_client = None
+        await self._async_clients.aclose()
 
     # =========================================================================
     # Request preparation
@@ -773,7 +772,7 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
             StaticAPIKeyAuth(api_key) if api_key is not None else None
         )
         self._client = httpx.Client(timeout=self._ctx.request_timeout)
-        self._async_client: httpx.AsyncClient | None = None
+        self._async_clients = httpx_clients(lg, timeout=self._ctx.request_timeout)
 
     @property
     def provider(self) -> str:
@@ -792,10 +791,8 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
         return await self._auth.headers_async() if self._auth is not None else {}
 
     def _get_async_client(self) -> httpx.AsyncClient:
-        """Get or create the async HTTP client (lazy initialization)."""
-        if self._async_client is None:
-            self._async_client = httpx.AsyncClient(timeout=self._ctx.request_timeout)
-        return self._async_client
+        """The running event loop's async HTTP client, created on its first use."""
+        return self._async_clients.get()
 
     # =========================================================================
     # HTTP execution
@@ -1054,6 +1051,4 @@ class OpenAIEmbeddingBackend(EmbeddingBackend):
 
     async def aclose(self) -> None:
         self._client.close()
-        if self._async_client is not None:
-            await self._async_client.aclose()
-            self._async_client = None
+        await self._async_clients.aclose()
